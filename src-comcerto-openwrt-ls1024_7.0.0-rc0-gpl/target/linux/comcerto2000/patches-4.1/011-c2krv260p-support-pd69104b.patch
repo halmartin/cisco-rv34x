@@ -1,0 +1,667 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add pd69104b support.
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-01-18 09:11:08.145331808 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-01-18 09:16:20.417128270 +0800
+@@ -537,6 +537,9 @@
+ 	{
+ 		I2C_BOARD_INFO("pca9555", 0x21),
+ 	},
++	{
++		I2C_BOARD_INFO("pd69104b", 0x20),
++	},
+ };
+ #endif
+ 
+--- linux-4.1.8/drivers/i2c/chips/Makefile.org	2017-01-18 09:10:49.168378134 +0800
++++ linux-4.1.8/drivers/i2c/chips/Makefile	2017-01-18 09:15:44.328377952 +0800
+@@ -12,6 +12,7 @@
+ 
+ obj-$(CONFIG_EEPROM_AT)	+= eeprom.o
+ obj-$(CONFIG_PCA9555)   += i2c-pca9555.o
++obj-$(CONFIG_PD69104B)  += i2c-pd69104b.o
+ 
+ ifeq ($(CONFIG_I2C_DEBUG_CHIP),y)
+ EXTRA_CFLAGS += -DDEBUG
+--- linux-4.1.8/drivers/i2c/chips/Kconfig.org	2017-01-18 09:10:31.107095785 +0800
++++ linux-4.1.8/drivers/i2c/chips/Kconfig	2017-01-18 09:16:20.417128270 +0800
+@@ -18,4 +18,10 @@
+ 	help
+ 	  This provides to read and write pca9555 chip.
+ 
++config PD69104B
++	tristate "I2c-pd69104b"
++	depends on I2C
++	help
++	  This provides to read and write pd69104b chip.
++
+ endmenu
+--- linux-4.1.8/drivers/i2c/chips/i2c-pd69104b.c.org	1970-01-01 07:00:00.000000000 +0700
++++ linux-4.1.8/drivers/i2c/chips/i2c-pd69104b.c	2017-02-04 15:56:14.878377972 +0800
+@@ -0,0 +1,627 @@
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/delay.h>
++#include <linux/errno.h>
++#include <linux/i2c.h>
++#include <asm/uaccess.h>
++#include <linux/proc_fs.h>
++#include <linux/seq_file.h>
++
++/* ---------- pd69104b reg ---------- */
++#define STATP1                  0x0C  
++#define STATP2                  0x0D  
++#define STATP3                  0x0E  
++#define STATP4                  0x0F  
++#define STATPWR                 0x10  
++#define STATPIN                 0x11  
++#define OPMD                    0x12  
++#define DISENA                  0x13  
++#define DETENA                  0x14  
++#define MIDSPAN                 0x15  
++#define MCONF                   0x17 
++#define DETPB                   0x18  
++#define PWRPB                   0x19 
++#define RSTPB                   0x1A  
++#define ID                      0x1B  
++#define TLIM12                  0x1E  
++#define TLIM34                  0x1F  
++
++#define IP1LSB                  0x30
++#define IP1MSB                  0x31
++#define VP1LSB                  0x32
++#define VP1MSB                  0x33
++#define IP2LSB                  0x34
++#define IP2MSB                  0x35
++#define VP2LSB                  0x36
++#define VP2MSB                  0x37
++#define IP3LSB                  0x38
++#define IP3MSB                  0x39
++#define VP3LSB                  0x3A
++#define VP3MSB                  0x3B
++#define IP4LSB                  0x3C
++#define IP4MSB                  0x3D
++#define VP4LSB                  0x3E
++#define VP4MSB                  0x3F
++
++#define HPEN                    0x44
++#define HPMD1                   0x46
++#define CUT1                    0x47
++#define LIM1                    0x48
++#define HPSTAT1                 0x49
++#define HPMD2                   0x4B
++#define CUT2                    0x4C
++#define LIM2                    0x4D
++#define HPSTAT2                 0x4E
++#define HPMD3                   0x50
++#define CUT3                    0x51
++#define LIM3                    0x52
++#define HPSTAT3                 0x53
++#define HPMD4                   0x55
++#define CUT4                    0x56
++#define LIM4                    0x57
++#define HPSTAT4                 0x58
++
++#define VTEMP                   0x70
++#define VMAIN_LSB               0x71
++#define VMAIN_MSB               0x72
++#define PORT_SR12               0x73
++#define PORT_SR34               0x74
++#define INTR_EN                 0x7D
++#define SYS_CFG                 0x7E
++#define SW_CFG                  0x7F
++
++#define PWRGD                   0x91
++#define PORT1_CONS              0x92
++#define PORT2_CONS              0x93
++#define PORT3_CONS              0x94
++#define PORT4_CONS              0x95
++#define TOTAL_PWR_CONS          0x96
++#define TOTAL_PWR_CALC          0x97
++#define CHIP_PWR_REQ            0x98
++#define ICUT_AT_MAX_LSB         0x99
++#define ICUT_AT_MAX_MSB         0x9A
++#define POE_MAX_LED_GB          0x9F
++#define VMIAN_LOW_TH_LSB        0xCB
++#define VMIAN_LOW_TH_MSB        0xCC
++/* ---------- pd69104b reg ---------- */
++#define I2C_READ       0
++#define I2C_WRITE      1
++
++static struct i2c_client *g_client = NULL;
++static struct proc_dir_entry *proc_dir = NULL;
++static struct proc_dir_entry *poe_type_file = NULL;
++static struct proc_dir_entry *poe_class_file = NULL;
++static struct proc_dir_entry *poe_power_file = NULL;
++static struct proc_dir_entry *poe_current_file = NULL;
++static struct proc_dir_entry *poe_voltage_file = NULL;
++static struct proc_dir_entry *poe_reg_file = NULL;
++
++static int pd69104b_read(u8 reg)
++{
++	int ret, retry = 0;
++
++	if(g_client == NULL){
++		printk(KERN_ERR "pd69104b i2c g_client don't exist\n");
++		return -1;
++	}
++	ret = i2c_smbus_read_byte_data(g_client,reg);
++
++	while((ret < 0) && (retry < 50))
++	{
++		retry++;
++		printk("retry=%d\n", retry);
++		ret = i2c_smbus_read_byte_data(g_client,reg);
++	}
++
++	if(ret < 0){
++		printk(KERN_ERR "pd69104b i2c read fail! reg=0x%x\n",reg);
++	}
++	return ret;
++}
++
++static int pd69104b_write(u8 reg, u8 val)
++{
++	int ret, retry = 0;
++
++	if(g_client == NULL){
++		printk(KERN_ERR "pd69104b i2c g_client don't exist(write)\n");
++		return -1;
++	}
++	ret = i2c_smbus_write_byte_data(g_client,reg,val);
++
++	while((ret < 0) && (retry < 50))
++	{
++		retry++;
++		printk("retry=%d\n", retry);
++		ret = i2c_smbus_write_byte_data(g_client,reg,val);
++	}
++
++	if(ret < 0){
++		printk(KERN_ERR "pd69104b i2c write fail! reg =0x%x\n",reg);
++	}
++	return ret;
++}
++
++/**************************************************************/
++int pd69104b_config(u8 ctrl, u8 reg, u8 val)
++{
++	u8 output_val=0;
++	switch(ctrl)
++	{
++		case I2C_READ:
++			output_val = pd69104b_read(reg);
++			printk("read reg: 0x%x\n",reg);
++			printk("read value: 0x%x\n",output_val);
++		break;
++		case I2C_WRITE:
++			output_val = pd69104b_read(reg);
++			printk("write reg: 0x%x\n",reg);
++			printk("Before write value: 0x%x\n",output_val);
++			output_val = val;    
++			pd69104b_write(reg,output_val);
++			printk("ready to write value: 0x%x\n",output_val);
++		break;
++	}
++	return 0;
++}
++EXPORT_SYMBOL_GPL(pd69104b_config);
++
++/**************************************************************/
++static int poe_type_show(struct seq_file *seq, void *v)
++{
++	int val;
++
++	val =  pd69104b_read(SYS_CFG);
++	seq_printf(seq, "SYS_CFG = 0x%x\n", val);
++	val =  (val & 0x80) >> 7;
++	seq_printf(seq, "poe type = %s\n", (val == 0) ? "AF" : "AT");
++
++	return 0;
++}
++
++static int poe_type_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, poe_type_show, PDE_DATA(inode));
++}
++
++static int poe_type_write(struct file *file, const char __user * user_buffer, size_t count, loff_t * ppos)
++{
++	int val;
++
++	if(sscanf(user_buffer, "%d", &val) != 1)
++		return -EINVAL;
++
++	if(val == 1)
++	{
++		pd69104b_write(SYS_CFG, pd69104b_read(SYS_CFG) | (1 << 7));
++		printk("pd69104b poe type set to be AT\n");
++	}
++	else if(val == 0)
++	{
++		pd69104b_write(SYS_CFG, pd69104b_read(SYS_CFG) & ~(1 << 7));
++		printk("pd69104b poe type set to be AF\n");
++	}
++
++	return count;
++}
++
++static int poe_class_show(struct seq_file *seq, void *v)
++{
++	int val;
++
++	val =  pd69104b_read(STATP1);
++	seq_printf(seq, "STATP1 = 0x%x\n", val);
++	val =  (val & 0x70) >> 4;
++	seq_printf(seq, "port1 poe class = %s\n",
++	        (val == 0) ? "Unknown" : ((val == 1) ? "Class 1" : ((val == 2) ? "Class 2" : ((val == 3) ? "Class 3" : ((val == 4) ? "Class 4" : ((val == 5) ? "Reserved" : ((val == 6) ? "Class 0" : "Over-current")))))));
++
++	val =  pd69104b_read(STATP2);
++	seq_printf(seq, "STATP2 = 0x%x\n", val);
++	val =  (val & 0x70) >> 4;
++	seq_printf(seq, "port2 poe class = %s\n",
++	        (val == 0) ? "Unknown" : ((val == 1) ? "Class 1" : ((val == 2) ? "Class 2" : ((val == 3) ? "Class 3" : ((val == 4) ? "Class 4" : ((val == 5) ? "Reserved" : ((val == 6) ? "Class 0" : "Over-current")))))));
++
++	val =  pd69104b_read(STATP3);
++	seq_printf(seq, "STATP3 = 0x%x\n", val);
++	val =  (val & 0x70) >> 4;
++	seq_printf(seq, "port3 poe class = %s\n",
++	        (val == 0) ? "Unknown" : ((val == 1) ? "Class 1" : ((val == 2) ? "Class 2" : ((val == 3) ? "Class 3" : ((val == 4) ? "Class 4" : ((val == 5) ? "Reserved" : ((val == 6) ? "Class 0" : "Over-current")))))));
++
++	val =  pd69104b_read(STATP4);
++	seq_printf(seq, "STATP4 = 0x%x\n", val);
++	val =  (val & 0x70) >> 4;
++	seq_printf(seq, "port4 poe class = %s\n",
++	        (val == 0) ? "Unknown" : ((val == 1) ? "Class 1" : ((val == 2) ? "Class 2" : ((val == 3) ? "Class 3" : ((val == 4) ? "Class 4" : ((val == 5) ? "Reserved" : ((val == 6) ? "Class 0" : "Over-current")))))));
++
++	return 0;
++}
++
++static int poe_class_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, poe_class_show, PDE_DATA(inode));
++}
++
++static int poe_class_write(struct file *file, const char __user * user_buffer, size_t count, loff_t * ppos)
++{
++	return count;
++}
++
++static int poe_power_show(struct seq_file *seq, void *v)
++{
++	int val;
++
++	val =  pd69104b_read(PORT1_CONS);
++	seq_printf(seq, "PORT1_CONS = 0x%x\n", val);
++	val =  val & 0x3F;
++	seq_printf(seq, "port1 power = %dW\n", val);
++
++	val =  pd69104b_read(PORT2_CONS);
++	seq_printf(seq, "PORT2_CONS = 0x%x\n", val);
++	val =  val & 0x3F;
++	seq_printf(seq, "port2 power = %dW\n", val);
++
++	val =  pd69104b_read(PORT3_CONS);
++	seq_printf(seq, "PORT3_CONS = 0x%x\n", val);
++	val =  val & 0x3F;
++	seq_printf(seq, "port3 power = %dW\n", val);
++
++	val =  pd69104b_read(PORT4_CONS);
++	seq_printf(seq, "PORT4_CONS = 0x%x\n", val);
++	val =  val & 0x3F;
++	seq_printf(seq, "port4 power = %dW\n", val);
++
++	return 0;
++}
++
++static int poe_power_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, poe_power_show, PDE_DATA(inode));
++}
++
++static int poe_power_write(struct file *file, const char __user * user_buffer, size_t count, loff_t * ppos)
++{
++	return count;
++}
++
++static int poe_current_show(struct seq_file *seq, void *v)
++{
++	int val_low = 0, val_high = 0, val = 0;
++	int cur_base = 12207;     //122.07uA
++
++	val_low  = pd69104b_read(IP1LSB);
++	seq_printf(seq, "IP1LSB = 0x%x\n", val_low);
++	val_high = pd69104b_read(IP1MSB);
++	seq_printf(seq, "IP1MSB = 0x%x\n", val_high);
++	val = (val_low & 0xFF) + ((val_high << 8) & 0xFF00);
++	val = val * cur_base;
++	seq_printf(seq, "port1 current = %d.%dmA\n", val/100000, val%100000);
++
++	val_low  = pd69104b_read(IP2LSB);
++	seq_printf(seq, "IP2LSB = 0x%x\n", val_low);
++	val_high = pd69104b_read(IP2MSB);
++	seq_printf(seq, "IP2MSB = 0x%x\n", val_high);
++	val = (val_low & 0xFF) + ((val_high << 8) & 0xFF00);
++	val = val * cur_base;
++	seq_printf(seq, "port2 current = %d.%dmA\n", val/100000, val%100000);
++
++	val_low  = pd69104b_read(IP3LSB);
++	seq_printf(seq, "IP3LSB = 0x%x\n", val_low);
++	val_high = pd69104b_read(IP3MSB);
++	seq_printf(seq, "IP3MSB = 0x%x\n", val_high);
++	val = (val_low & 0xFF) + ((val_high << 8) & 0xFF00);
++	val = val * cur_base;
++	seq_printf(seq, "port3 current = %d.%dmA\n", val/100000, val%100000);
++
++	val_low  = pd69104b_read(IP4LSB);
++	seq_printf(seq, "IP4LSB = 0x%x\n", val_low);
++	val_high = pd69104b_read(IP4MSB);
++	seq_printf(seq, "IP4MSB = 0x%x\n", val_high);
++	val = (val_low & 0xFF) + ((val_high << 8) & 0xFF00);
++	val = val * cur_base;
++	seq_printf(seq, "port4 current = %d.%dmA\n", val/100000, val%100000);
++
++	return 0;
++}
++
++static int poe_current_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, poe_current_show, PDE_DATA(inode));
++}
++
++static int poe_current_write(struct file *file, const char __user * user_buffer, size_t count, loff_t * ppos)
++{
++	return count;
++}
++
++static int poe_voltage_show(struct seq_file *seq, void *v)
++{
++	int val_low = 0, val_high = 0, val = 0;
++	int vol_base = 5835;    //5.835mV
++
++	val_low  = pd69104b_read(VP1LSB);
++	seq_printf(seq, "VP1LSB = 0x%x\n", val_low);
++	val_high = pd69104b_read(VP1MSB);
++	seq_printf(seq, "VP1MSB = 0x%x\n", val_high);
++	val = (val_low & 0xFF) + ((val_high << 8) & 0xFF00);
++	val = val * vol_base;
++	seq_printf(seq, "port1 voltage = %d.%dV\n", val/1000000,val%1000000);
++
++	val_low  = pd69104b_read(VP2LSB);
++	seq_printf(seq, "VP2LSB = 0x%x\n", val_low);
++	val_high = pd69104b_read(VP2MSB);
++	seq_printf(seq, "VP2MSB = 0x%x\n", val_high);
++	val = (val_low & 0xFF) + ((val_high << 8) & 0xFF00);
++	val = val * vol_base;
++	seq_printf(seq, "port2 voltage = %d.%dV\n", val/1000000,val%1000000);
++
++	val_low  = pd69104b_read(VP3LSB);
++	seq_printf(seq, "VP3LSB = 0x%x\n", val_low);
++	val_high = pd69104b_read(VP3MSB);
++	seq_printf(seq, "VP3MSB = 0x%x\n", val_high);
++	val = (val_low & 0xFF) + ((val_high << 8) & 0xFF00);
++	val = val * vol_base;
++	seq_printf(seq, "port3 voltage = %d.%dV\n", val/1000000,val%1000000);
++
++	val_low  = pd69104b_read(VP4LSB);
++	seq_printf(seq, "VP4LSB = 0x%x\n", val_low);
++	val_high = pd69104b_read(VP4MSB);
++	seq_printf(seq, "VP4MSB = 0x%x\n", val_high);
++	val = (val_low & 0xFF) + ((val_high << 8) & 0xFF00);
++	val = val * vol_base;
++	seq_printf(seq, "port4 voltage = %d.%dV\n", val/1000000,val%1000000);
++
++	return 0;
++}
++
++static int poe_voltage_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, poe_voltage_show, PDE_DATA(inode));
++}
++
++static int poe_voltage_write(struct file *file, const char __user * user_buffer, size_t count, loff_t * ppos)
++{
++	return count;
++}
++
++static int poe_reg_show(struct seq_file *seq, void *v)
++{
++	seq_printf(seq,
++	        "Usage:\n"
++	        "poe read:  echo r reg > /proc/pd69104b/poe_reg\n"
++	        "poe write: echo w reg val > /proc/pd69104b/poe_reg\n");
++
++	return 0;
++}
++
++static int poe_reg_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, poe_reg_show, PDE_DATA(inode));
++}
++
++static int poe_reg_write(struct file *file, const char __user * user_buffer, size_t count, loff_t * ppos)
++{
++	char line[64];
++	char *e = ' ';
++	char *p1, *p2;
++	u8 reg, write_val, read_val;
++	int ret;
++
++	ret = copy_from_user(line, user_buffer, count);
++	if(ret)
++		return -EFAULT;
++
++	if(!strncmp(line, "w", 1))
++	{
++		p1 = strchr(line, ' ');
++		if(p1 != NULL)
++		{
++			p1++;
++			reg = simple_strtoul(p1, &e, 0);
++			p2 = strchr(p1, ' ');
++			if(p2 != NULL)
++			{
++				p2++;
++				write_val = simple_strtoul(p2, &e, 0);
++				printk("poe write: reg=0x%x\n", reg);
++				pd69104b_write(reg, write_val);
++				printk("do write: write_val=0x%x\n", write_val);
++			}
++		}
++	}
++	else if(!strncmp(line, "r", 1))
++	{
++		p1 = strchr(line, ' ');
++		if(p1 != NULL)
++		{
++			p1++;
++			reg = simple_strtoul(p1, &e, 0);
++			printk("poe read: reg=0x%x\n", reg);
++			read_val = pd69104b_read(reg);
++			printk("read value=0x%x\n", read_val);
++		}
++	}
++
++	return count;
++}
++
++static struct file_operations pd69104b_proc_poe_type_fops =
++{
++	.owner = THIS_MODULE,
++	.open = poe_type_open,
++	.read = seq_read,
++	.write = poe_type_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static struct file_operations pd69104b_proc_poe_class_fops =
++{
++	.owner = THIS_MODULE,
++	.open = poe_class_open,
++	.read = seq_read,
++	.write = poe_class_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static struct file_operations pd69104b_proc_poe_power_fops =
++{
++	.owner = THIS_MODULE,
++	.open = poe_power_open,
++	.read = seq_read,
++	.write = poe_power_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static struct file_operations pd69104b_proc_poe_current_fops =
++{
++	.owner = THIS_MODULE,
++	.open = poe_current_open,
++	.read = seq_read,
++	.write = poe_current_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static struct file_operations pd69104b_proc_poe_voltage_fops =
++{
++	.owner = THIS_MODULE,
++	.open = poe_voltage_open,
++	.read = seq_read,
++	.write = poe_voltage_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static struct file_operations pd69104b_proc_poe_reg_fops =
++{
++	.owner = THIS_MODULE,
++	.open = poe_reg_open,
++	.read = seq_read,
++	.write = poe_reg_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static int pd69104b_proc_fs_create(void)
++{
++	proc_dir = proc_mkdir("pd69104b", NULL);
++	if(!proc_dir)
++		return -ENOMEM;
++
++	poe_type_file = proc_create("poe_type", 0644, proc_dir, &pd69104b_proc_poe_type_fops);
++	if(!poe_type_file)
++		return -ENOMEM;
++
++	poe_class_file = proc_create("poe_class", 0644, proc_dir, &pd69104b_proc_poe_class_fops);
++	if(!poe_class_file)
++		return -ENOMEM;
++
++	poe_power_file = proc_create("poe_power", 0644, proc_dir, &pd69104b_proc_poe_power_fops);
++	if(!poe_power_file)
++		return -ENOMEM;
++
++	poe_current_file = proc_create("poe_current", 0644, proc_dir, &pd69104b_proc_poe_current_fops);
++	if(!poe_current_file)
++		return -ENOMEM;
++
++	poe_voltage_file = proc_create("poe_voltage", 0644, proc_dir, &pd69104b_proc_poe_voltage_fops);
++	if(!poe_voltage_file)
++		return -ENOMEM;
++
++	poe_reg_file = proc_create("poe_reg", 0644, proc_dir, &pd69104b_proc_poe_reg_fops);
++	if(!poe_reg_file)
++		return -ENOMEM;
++
++	return 0;
++}
++
++static int pd69104b_proc_fs_destroy(void)
++{
++	remove_proc_entry("pd69104b/poe_type", NULL);
++	remove_proc_entry("pd69104b/poe_class", NULL);
++	remove_proc_entry("pd69104b/poe_power", NULL);
++	remove_proc_entry("pd69104b/poe_current", NULL);
++	remove_proc_entry("pd69104b/poe_voltage", NULL);
++	remove_proc_entry("pd69104b/poe_reg", NULL);
++	remove_proc_entry("pd69104b", NULL);
++
++	return 0;
++}
++
++/**************************************************************/
++static int pd69104b_suspend(struct i2c_client *client, pm_message_t state)
++{
++	printk("pd69104b suspend\n");
++	return 0;
++}
++
++static int pd69104b_resume(struct i2c_client *client)
++{
++	printk("pd69104b resume\n");
++	return 0;
++}
++
++static int pd69104b_shutdown(struct i2c_client *client)
++{
++	printk("pd69104b shutdown\n");
++	return 0;
++}
++
++static int pd69104b_probe(struct i2c_client *client, const struct i2c_device_id *id)
++{
++	printk("pd69104b probe\n");
++	g_client = client;
++	pd69104b_proc_fs_create();
++	return 0;
++}
++
++static int pd69104b_remove(struct i2c_client *client)
++{
++	printk("pd69104b_remove\n!");
++	pd69104b_proc_fs_destroy();
++	return 0;
++}
++
++static const struct i2c_device_id pd69104b_id[] = {
++	{"pd69104b", 0x20},
++	{}
++};
++
++static struct i2c_driver pd69104b_driver = {
++	.driver = {
++	 	.name = "pd69104b",
++		.owner=THIS_MODULE,
++		.suspend = pd69104b_suspend,
++		.resume = pd69104b_resume,
++	},
++	.probe = pd69104b_probe,
++	.remove = pd69104b_remove,
++	.id_table = pd69104b_id,
++	.shutdown = pd69104b_shutdown,
++};
++
++static int __init pd69104b_init(void)
++{
++	int ret;
++
++	printk("pd69104b init!\n");
++	ret = i2c_add_driver(&pd69104b_driver);
++	if(ret < 0)
++		return ret;
++	return 0;
++
++}
++
++static void __exit pd69104b_exit(void)
++{
++	i2c_del_driver(&pd69104b_driver);
++}
++
++module_init(pd69104b_init);
++module_exit(pd69104b_exit);
++
++MODULE_DESCRIPTION("pd69104b driver");
++MODULE_LICENSE("GPL");

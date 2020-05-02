@@ -1,0 +1,4 @@
+Changes:
+
+1)Makefile:Added configure args for successfull
+compilation of Glib2 package

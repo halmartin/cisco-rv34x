@@ -1,0 +1,203 @@
+#!/bin/sh /etc/rc.common
+START=99
+. /lib/functions.sh
+. /lib/functions/network.sh
+DMZINTERFACE=`uci get network.vlan1.ifname | cut -f 1 -d .`.4094
+WAN1INTERFACE=`uci get network.wan1.ifname`
+#WAN2INTERFACE=`uci get network.wan2.ifname 2>/dev/null` #For PP WAN2 may not exists.
+DMZIPADDR=1.1.1.1
+DMZPREFIX=32
+DMZNETMASK=255.255.255.255
+DMZVLANID=4094
+DMZROUTETABLE=120
+EXTRA_COMMANDS="hotplug_reload"
+
+IPTABLES="iptables -w"
+
+if [ "$_this_board" = "RV160" -o "$_this_board" = "RV160W" -o "$_this_board" = "RV260" -o "$_this_board" = "RV260W" -o "$_this_board" = "RV260P" ];then
+	platform_led_script="rv16x_26x_led.sh"
+else
+	platform_led_script="rv340_led.sh"
+fi
+
+hardwaredmz_subnet()
+{
+ dmztype=$1
+ local subnet
+ 	if [ $dmztype = "RANGE" ];then
+ 	 	startip=`uci get dmz.hardwaredmz.startip`
+	 	network_active_wan_interfaces allWANiface
+		endip=`uci get dmz.hardwaredmz.endip`
+
+	 	for iface in $allWANiface
+	 	do
+			network_get_subnet subnet $iface                     
+			nw=`ipcalc.sh $subnet | grep NETWORK | cut -d = -f 2`   
+			prefix=`ipcalc.sh $subnet | grep PREFIX | cut -d = -f 2`                           
+			dmznw=`ipcalc.sh $baseaddr.$startip/$prefix | grep NETWORK | cut -d = -f 2`	   
+			if [ "$nw" = "$dmznw" ];then                         
+		    		subnet=$dmznw/$prefix
+		    		local ipaddr=""
+		    		network_get_wanip ipaddr $iface
+		    		$IPTABLES -t nat -A snat_dmz --out-interface $DMZINTERFACE -j SNAT --to-source $ipaddr
+			fi
+	  	done
+	  else
+	  	network_get_subnet subnet "vlan4094"
+	  	#This rule is for nating the traffic from lan to dmz side traffic                                               
+	          `$IPTABLES -t nat -A snat_dmz --out-interface $DMZINTERFACE -j MASQUERADE`
+	  fi
+	  network_active_wan_interfaces allWANiface
+	  allWANiface=`echo $allWANiface |sed s/wan1p/wan1/ |sed s/wan2p/wan2/ |grep -o -E '\w+' |sort -u`
+	  for iface in $allWANiface                
+	  do
+	  	network_get_waniface realDev $iface
+        `echo 1 > /proc/sys/net/ipv4/conf/$realDev/proxy_arp`                                                
+	  	#This rule is for skipping the nat from dmz to wan side
+	  	$IPTABLES -I hardwaredmz_mark -j MARK --in-interface $DMZINTERFACE --out-interface $realDev --set-mark 0x4904
+	  	#This rule is to skip nating traffic from dmz to wan based on mark set in forward rule
+	  	$IPTABLES -t nat -I snat_dmz --out-interface $realDev -j ACCEPT -m mark --mark 0x4904
+	  	#This rule is for accepting the traffic from dmz to wan
+		if [ $dmztype = "RANGE" ];then
+			iptables -w -A hardware_dmz --in-interface $DMZINTERFACE --out-interface $realDev -m iprange --src-range $startip-$endip -j ACCEPT
+		else
+	  		iptables -w -A hardware_dmz --in-interface $DMZINTERFACE --out-interface $realDev -j ACCEPT
+		fi
+	  	#This rule is for marking the packet if input interface is wan and output interface is dmz
+		iptables -w -I hardwaredmz_mark -j MARK --in-interface $realDev --out-interface $DMZINTERFACE --set-mark 0x4094
+	  done
+	  #This rule is to skip nating traffic from wan to dmz based on mark set in forward rule
+	  $IPTABLES -t nat -I snat_dmz -m mark --mark 0x4094 --out-interface $DMZINTERFACE -j ACCEPT
+	  #This rule is for nating the traffic from lan to dmz side traffic
+	  #`$IPTABLES -t nat -A snat_dmz --out-interface $DMZINTERFACE -j MASQUERADE
+	  #This rule is for accepting the traffic from lan to dmz and wan to dmz.
+	if [ $dmztype = "RANGE" ];then
+		iptables -w -A hardware_dmz --out-interface $DMZINTERFACE -j  ACCEPT -m iprange --dst-range $startip-$endip
+	else
+		iptables -w -A hardware_dmz --out-interface $DMZINTERFACE -j  ACCEPT
+	fi
+}
+start() {
+
+      local status
+      status=`uci get dmz.hardwaredmz.enabled`
+      pid=$(uci get systeminfo.sysinfo.pid)	      
+
+	if [ $status -eq 1 ]
+	then     
+        $platform_led_script dmz on &
+	    ipaddr=`uci get dmz.hardwaredmz.ipaddr`
+	    if [ "$ipaddr" = "" ];then
+		case $pid in
+	        *260*)
+			/usr/sbin/bcmssdk -V 1 -v $DMZVLANID -c 1 -u 7 
+        	;;
+	        *345*)
+			rtkssdk_diag -V -v $DMZVLANID -u 14 
+        	;;
+        	*340*)
+	        	rtkssdk vlan -v $DMZVLANID -u 1
+        	;;
+        	esac
+
+            `echo 1 > /proc/sys/net/ipv4/conf/$WAN1INTERFACE/proxy_arp`
+	   #`echo 1 > /proc/sys/net/ipv4/conf/$WAN2INTERFACE/proxy_arp 2>/dev/null`
+
+	    	startip=`uci get dmz.hardwaredmz.startip`
+	    	endip=`uci get dmz.hardwaredmz.endip`
+	    	
+	    	`uci set network.vlan4094=interface`
+	    	`uci set network.vlan4094.proto=static`
+	    	`uci set network.vlan4094.ifname=$DMZINTERFACE`
+	    	`uci set network.vlan4094.ipaddr=$DMZIPADDR`
+	    	`uci set network.vlan4094.netmask=$DMZNETMASK`
+	    	`uci commit network`
+	    ubus call network reload
+            `echo 1 > /proc/sys/net/ipv4/conf/$DMZINTERFACE/proxy_arp_pvlan`
+            `echo 1 > /proc/sys/net/ipv4/conf/$DMZINTERFACE/proxy_arp`
+            `echo 0 > /proc/sys/net/ipv4/conf/all/arp_ignore`
+            `echo 0 > /proc/sys/net/ipv4/conf/$DMZINTERFACE/arp_ignore`
+            `ip -4 rule add pref $DMZROUTETABLE lookup $DMZROUTETABLE`
+            `ip route add $DMZIPADDR/$DMZPREFIX dev $DMZINTERFACE table $DMZROUTETABLE`
+                
+                baseaddr="$(echo $startip | cut -d. -f1-3)"
+                lastdigit_firstip="$(echo $startip | cut -d. -f4)"
+                lastdigit_endip="$(echo $endip | cut -d. -f4)"
+                count=$(( $lastdigit_endip - $lastdigit_firstip ))
+                while [ $count -ge 0 ]
+                do
+                   `ip route add $baseaddr.$lastdigit_firstip/32 dev $DMZINTERFACE table $DMZROUTETABLE`
+                   lastdigit_firstip=$(( $lastdigit_firstip + 1 ))
+                   count=$(( $count - 1 ))
+                done
+                hardwaredmz_subnet RANGE 
+            		    
+	    else
+	    	netmask=`uci get dmz.hardwaredmz.netmask`
+		case $pid in
+	        *260*)
+			`/usr/sbin/bcmssdk -V 1 -v $DMZVLANID -c 1 -u 7`
+        	;;
+	        *345*)
+			`rtkssdk_diag -V -v $DMZVLANID -u 14`
+        	;;
+        	*340*)
+	        	`rtkssdk vlan -v $DMZVLANID -u 1`
+        	;;
+        	esac
+	    	`uci set network.vlan4094=interface`
+	    	`uci set network.vlan4094.ifname=$DMZINTERFACE`
+	    	`uci set network.vlan4094.proto=static`
+	    	`uci set network.vlan4094.ipaddr=$ipaddr`
+	    	`uci set network.vlan4094.netmask=$netmask`
+	    	`uci commit network`
+		ubus call network reload
+	         
+	    	hardwaredmz_subnet SUBNET                                                                                               
+	    	                                                                                                                        
+	    fi
+	fi
+}
+
+stop() {
+
+    network_get_subnet subnet "vlan4094"   
+    $IPTABLES -F hardware_dmz
+    $IPTABLES -t nat -F snat_dmz
+    $IPTABLES -F hardwaredmz_mark
+    `ip -4 rule del pref $DMZROUTETABLE`
+    `uci delete network.vlan4094`
+    local old_status
+    local new_status
+    old_status=`uci get /tmp/etc/config/dmz.hardwaredmz.enabled`
+    `uci commit dmz`
+    new_status=`uci get dmz.hardwaredmz.enabled`
+
+    if [ "$new_status" = "" -o "$new_status" = "0" -a "$old_status" = "1" ]
+    then
+	`uci commit network`
+	ubus call network reload
+    fi
+    #`uci commit network`
+    #`/etc/init.d/network reload`
+    `echo 0 > /proc/sys/net/ipv4/conf/$WAN1INTERFACE/proxy_arp`
+   #`echo 0 > /proc/sys/net/ipv4/conf/$WAN2INTERFACE/proxy_arp  2>/dev/null`
+    $platform_led_script dmz off &
+}
+hotplug_reload() {
+	local ipaddr=""
+	$IPTABLES -t nat -F snat_dmz
+	$IPTABLES -F hardware_dmz
+	$IPTABLES -F hardwaredmz_mark
+	ipaddr=`uci get dmz.hardwaredmz.ipaddr`                                                                            
+	if [ "$ipaddr" = "" ];then
+		hardwaredmz_subnet RANGE
+	else
+		hardwaredmz_subnet SUBNET
+	fi			  
+}
+
+reload() {
+	stop
+	start
+}

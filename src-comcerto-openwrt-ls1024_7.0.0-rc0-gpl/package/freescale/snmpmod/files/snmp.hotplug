@@ -1,0 +1,28 @@
+#!/bin/sh
+# This script is executed as part of the hotplug event with
+# HOTPLUG_TYPE=iface, triggered by various scripts when an interface
+# is configured (ACTION=ifup) or deconfigured (ACTION=ifdown).  The
+# interface is available as INTERFACE, the real device as DEVICE.
+[ "$DEVICE" == "lo" ] && exit 0
+[ "$ACTION" == "rtupd" ] && exit 0
+
+. /lib/functions.sh
+
+#local lan_status=`echo $INTERFACE |grep lan`
+#local usb_status=`echo $INTERFACE |grep usb `
+local isboot=$(uci_get_state system.core.booted)
+[ "$isboot" != "1" ] && {
+	#When system is in boot phase, firewall doesn't need to handle hotplug for vlan interface.
+	case "$INTERFACE" in *vlan*) exit 0 ;; esac
+}
+
+case "$ACTION" in
+	ifup|ifupdate)
+
+	case "$INTERFACE" in *vlan*) exit 0 ;; esac
+
+	/etc/init.d/snmpinit reload 
+	#echo "snmp hot $INTERFACE" >> /tmp/snmpdebug
+
+	;;
+esac

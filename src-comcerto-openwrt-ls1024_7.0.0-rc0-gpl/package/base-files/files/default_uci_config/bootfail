@@ -1,0 +1,4 @@
+
+config bootfail 'status'
+	option log '0'
+

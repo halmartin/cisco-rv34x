@@ -1,0 +1,142 @@
+#!/bin/sh
+# This script is executed as part of the hotplug event with
+# HOTPLUG_TYPE=iface, triggered by various scripts when an interface
+# is configured (ACTION=ifup) or deconfigured (ACTION=ifdown).  The
+# interface is available as INTERFACE, the real devicie as DEVICE.
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+ru_check=`uci get systeminfo.sysinfo.region 2> /dev/null`
+if [ "$ru_check" = "RU" ]; then
+	exit 0
+fi
+
+[ "$ACTION" == "rtupd" ] && exit 0
+[ "$DEVICE" == "lo" ] && exit 0
+
+#logger -t button-hotplug-strongswan Device: $DEVICE   $INTERFACE/ Action: $ACTION
+#Below check also serves when the IPSec is disabled globally.
+[ `pgrep charon` ] || {
+	#echo "Not handling this hotplug since Charon daemon is not UP/running/Disabled"
+	exit 0
+}
+
+INTERFACENAME=`echo $INTERFACE | sed 's/p//g'`
+
+case "$ACTION" in
+        ifup)
+		#TODO: If a WAN interface comes UP.
+		#	task1: Update the config sections of site2site's wan_interface, local_identifier (if local_identifier_type 
+		#		is ip. What about local_endpoint?), local_backup (if tunnel_backup is enabled and local_backup_iface is the hotplug iface).
+		#	task2: Update /etc/ipsec.conf or XFRM commands and reload the tunnel if it is enabled.
+		#	task3: update the config section of client2site's wan_interface, local_identifier, local_endpoint.
+		local isRecordEnable=$(uci show strongswan | grep -e "strongswan\.tvpnc_.*\.enable=1")
+
+		if [ -n "$isRecordEnable" ]
+		then
+			local client_name=${isRecordEnable#*.}
+			client_name=${client_name%.*}
+
+			local mode=`uci_get strongswan "$client_name" mode`
+			[ "$mode" = 'nem' ] && {
+				local vlanID=`uci_get strongswan "$client_name" vlan`
+				[ "vlan$vlanID" = "$INTERFACENAME" ] && {
+					local uciRec=`uci show strongswan.$client_name | grep -v backup_server_auto`
+					uci del strongswan.$client_name
+					for line in $uciRec; do
+						uci set $line
+					done
+					uci set strongswan.$client_name.enable=1
+					/etc/init.d/strongswan reload "rpc"
+				}
+			}
+		fi
+
+		local isLan=`echo $INTERFACE |grep lan`
+		[ -n "$isLan" ] && exit 0
+
+		#No Handling is needed for GRE.
+		local isGRE=`echo $INTERFACENAME | grep gre`
+		[ -n "$isGRE" ] && exit 0
+
+		#For updating site2site, client2site, GRE over IPSec records.
+		/etc/init.d/strongswan hotplug $INTERFACENAME &
+        ;;
+        ifdown)
+		local isLan=`echo $INTERFACE |grep lan`
+		[ -n "$isLan" ] && exit 0
+
+		#No Handling is needed for GRE.
+		local isGRE=`echo $INTERFACENAME | grep gre`
+		[ -n "$isGRE" ] && exit 0
+
+		local site2siteCount=$(uci show strongswan | grep -e "=site2site" | cut -f 2 -d . | cut -f 1 -d = | wc -l)
+		local client2siteCount=$(uci show strongswan | grep -e "=client2site" | cut -f 2 -d . | cut -f 1 -d = | wc -l)
+		local greOipsecCount=$(uci show strongswan | grep -e "=greoipsec" | cut -f 2 -d . | cut -f 1 -d = | wc -l)
+
+		#echo "Total $site2siteCount site2site records...!"
+		#echo "Total $client2siteCount client2site records...!"
+		if [ $site2siteCount -gt 0 ]
+		then
+			local allSite2Site=$(uci show strongswan | grep -e "=site2site" | cut -f 2 -d . | cut -f 1 -d =)
+			local tunnel_name
+			for tunnel_name in $allSite2Site; do
+				local wan_interface=`uci_get strongswan "$tunnel_name" wan_interface`
+				local tunnel_backup=`uci_get strongswan "$tunnel_name" tunnel_backup`
+				[ "$wan_interface" = "$INTERFACENAME" ] && {
+					logger -t VPN-hotplug "Bringing down tunnel $tunnel_name (if exists!) because $INTERFACENAME is down..."
+					ipsec down $tunnel_name &
+				}
+				[ "$tunnel_backup" -eq 1 ] && {
+					local local_backup_iface=`uci_get strongswan "$tunnel_name" local_backup_iface`
+					[ "$wan_interface" = "$INTERFACENAME" ] && {
+						logger -t VPN-hotplug "Bringing down tunnel "$tunnel_name"_bkp (if exists!) because $INTERFACENAME is down..."
+						ipsec down ""$tunnel_name"_bkp" &
+					}
+				}
+			done
+		fi
+		if [ $client2siteCount -gt 0 ]
+		then
+			local allclient2site=$(uci show strongswan | grep -e "=client2site" | cut -f 2 -d . | cut -f 1 -d =)
+			local group_name
+			for group_name in $allclient2site; do
+				local wan_interface=`uci_get strongswan "$group_name" wan_interface`
+				local client_type=`uci_get strongswan "$group_name" client_type`
+				[ "$wan_interface" = "$INTERFACENAME" ] && {
+					logger -t VPN-hotplug "Bringing down tunnel "$group_name" (if exists!) because $INTERFACENAME is down..."
+					ipsec down $group_name &
+				}
+			done
+		fi
+		if [ $greOipsecCount -gt 0 ]
+		then
+			local allgreoipsec=$(uci show strongswan | grep -e "=greoipsec" | cut -f 2 -d . | cut -f 1 -d =)
+			local gre_tunnel_name
+			for gre_tunnel_name in $allgreoipsec; do
+				local tunnel_source=`uci_get strongswan "$gre_tunnel_name" tunnel_source`
+				[ "$tunnel_source" = "$INTERFACENAME" ] && {
+					logger -t VPN-hotplug "Bringing down tunnel $gre_tunnel_name (if exists!) because $INTERFACENAME is down..."
+					ipsec down $gre_tunnel_name &
+				}
+			done
+		fi
+		local isL2TPoverIPSecEnable=`uci get l2tpd.global.ipsec_enable`
+		if [ "$isL2TPoverIPSecEnable" -eq 1 ]
+		then
+			logger -t VPN-hotplug "Bringing down tunnel l2tp_l2tpOverIpsec_$INTERFACENAME (if exists!) because $INTERFACENAME is down..."
+			ipsec down "l2tp_l2tpOverIpsec_$INTERFACENAME" &
+		fi
+
+		#NOTE: It is observed that for WAN interface mode change from PPTP/L2TP to static/dynamic, ifup event is not generated.
+		#	So handling that case of where resulting wan interface mode is dynamic/static.
+		[ "$INTERFACENAME" != "$INTERFACE" ] && {
+			local wanProto=`uci get network.$INTERFACENAME.proto`
+			[ "$wanProto" == 'static' -o "$wanProto" == 'dhcp' ] && {
+				#For updating site2site, client2site, GRE over IPSec records.
+				/etc/init.d/strongswan hotplug $INTERFACENAME &
+			}
+		}
+        ;;
+esac

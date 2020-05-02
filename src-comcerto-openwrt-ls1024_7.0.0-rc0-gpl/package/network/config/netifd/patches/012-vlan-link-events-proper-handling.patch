@@ -1,0 +1,72 @@
+Reference from original patch (Few changes were excluded for our porposes):
+
+From 4902ba2999dec02e82066d70ab6096b852a33007 Mon Sep 17 00:00:00 2001
+From: Hans Dedecker <dedeckeh@gmail.com>
+Date: Mon, 2 Nov 2015 11:16:12 +0100
+Subject: [PATCH] device: Don't process link events anymore in device user
+ specific callback handlers
+
+Set link_state for all device types via the device_set_link API as all devices are registered
+in the device tree list making it possible to always get the device via device_get.
+The decice link state parameter will now actually reflect the corresponding kernel device
+carrier state in all cases.
+Before this change a vlan/macvlan device could still have link_state enabled if an interface
+was brought down; this was the case when the parent vlan/macvlan device was still enabled as
+the netlink link_state event would be dropped for vlan/macvlan devices due to keep_link_state
+in the function cb_rtnl_event.
+
+Signed-off-by: Hans Dedecker <dedeckeh@gmail.com>
+---
+diff --git a/macvlan.c b/macvlan.c
+index 051fe05..a0f11ae 100644
+--- a/macvlan.c
++++ b/macvlan.c
+@@ -72,12 +72,6 @@ macvlan_base_cb(struct device_user *dev, enum device_event ev)
+ 	case DEV_EVENT_REMOVE:
+ 		device_set_present(&mvdev->dev, false);
+ 		break;
+-	case DEV_EVENT_LINK_UP:
+-		device_set_link(&mvdev->dev, true);
+-		break;
+-	case DEV_EVENT_LINK_DOWN:
+-		device_set_link(&mvdev->dev, false);
+-		break;
+ 	default:
+ 		return;
+ 	}
+diff --git a/vlan.c b/vlan.c
+index 3d0a4cf..8e7141f 100644
+--- a/vlan.c
++++ b/vlan.c
+@@ -79,11 +79,6 @@ static void vlan_dev_cb(struct device_user *dep, enum device_event ev)
+ 	case DEV_EVENT_REMOVE:
+ 		device_set_present(&vldev->dev, new_state);
+ 		break;
+-	case DEV_EVENT_LINK_UP:
+-		new_state = true;
+-	case DEV_EVENT_LINK_DOWN:
+-		device_set_link(&vldev->dev, new_state);
+-		break;
+ 	case DEV_EVENT_UPDATE_IFNAME:
+ 		vlan_dev_set_name(vldev, dep->dev);
+ 		device_broadcast_event(&vldev->dev, ev);
+diff --git a/vlandev.c b/vlandev.c
+index 884e6ef..b93527c 100644
+--- a/vlandev.c
++++ b/vlandev.c
+@@ -63,12 +63,6 @@ vlandev_base_cb(struct device_user *dev, enum device_event ev)
+ 	case DEV_EVENT_REMOVE:
+ 		device_set_present(&mvdev->dev, false);
+ 		break;
+-	case DEV_EVENT_LINK_UP:
+-		device_set_link(&mvdev->dev, true);
+-		break;
+-	case DEV_EVENT_LINK_DOWN:
+-		device_set_link(&mvdev->dev, false);
+-		break;
+ 	default:
+ 		return;
+ 	}
+-- 
+2.17.0
+

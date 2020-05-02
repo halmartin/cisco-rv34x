@@ -1,0 +1,13 @@
+# 2017-07-01: Rajeshkumar K <rajeshkumar.k@nxp.com>
+# Changes to hold the PoE reset pin to active low,untill the PoE application starts.
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c
+@@ -247,8 +247,6 @@
+ 
+ 	/* POE RESET */
+ 	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~(POE_RESET_GPIO_PIN), COMCERTO_GPIO_OUTPUT_REG);
+-	mdelay(1000);
+-	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | (POE_RESET_GPIO_PIN), COMCERTO_GPIO_OUTPUT_REG);
+ }
+ 
+ /* --------------------------------------------------------------------

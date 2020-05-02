@@ -1,0 +1,131 @@
+From df89c1e9ab2e566642a960f3690392d8dee62c8b Mon Sep 17 00:00:00 2001
+From: Manish Tiwari <manish.tiwari@nxp.com>
+Date: Wed, 31 Jan 2018 15:32:23 +0530
+Subject: [PATCH] PPSBR-1507 and PPSBR-1538 vlan support added in RV16x/RV26x
+ Signed-off-by: Manish Tiwari <manish.tiwari@nxp.com>
+
+---
+ src/source/ieee802_1x.c |   59 ++++++++++++++++++++++++++++++++++++++++-------
+ src/source/rtdot1x.c    |    2 +-
+ 2 files changed, 52 insertions(+), 9 deletions(-)
+
+diff --git a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+index b088c6b..1a41dd9 100644
+--- a/src/source/ieee802_1x.c
++++ b/src/source/ieee802_1x.c
+@@ -1,4 +1,6 @@
+-
++/* 31/01/2018   Manish <manish.tiwari@nxp.com>
++   vlan support added for RV16x/RV26x
++*/
+ #include <stdlib.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+@@ -242,10 +244,16 @@ static void ieee802_1x_send_with_bcm_cputag(rtapd *rtapd, struct sta_info *sta,
+ 	struct ieee802_1x_hdr *xhdr;
+ 	size_t len;
+ 	u8 *pos;
++    struct dot1x_vlan_hdr *vlan_hdr;
+    
+-	len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen;
++    if (sta->vlan_id)
++    	len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen + 4;
++	else
++		len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen;
++	
+ 	if (len < 64)
+ 		len = 64;
++
+ 	buf = (char *) malloc(len);
+ 	if (buf == NULL)
+ 	{
+@@ -258,15 +266,36 @@ static void ieee802_1x_send_with_bcm_cputag(rtapd *rtapd, struct sta_info *sta,
+ 	memcpy(hdr3->dAddr, sta->addr, ETH_ALEN);
+ 	memcpy(hdr3->sAddr, rtapd->own_addr[0], ETH_ALEN);
+ 
+-	ieee802_1x_insertBCM_CPUTag(hdr3->tx_cpu_tag, sta->aid);
+ 
+ //	memcpy(hdr3->sAddr, rtapd->own_addr[sta->ApIdx], ETH_ALEN);
+-	if (sta->ethertype == ETH_P_PRE_AUTH)
+-		(hdr3->eth_type) = htons(ETH_P_PRE_AUTH);
+-	else
+-		(hdr3->eth_type) = htons(ETH_P_PAE);
+ 
+-	pos = (u8 *) (hdr3 + 1);
++	ieee802_1x_insertBCM_CPUTag(hdr3->tx_cpu_tag, sta->aid);
++   	/* Insert VLAN Header */
++        if (sta->vlan_id)
++        {
++                hdr3->eth_type = htons(ETH_P_VLAN);
++                pos = (u8 *) (hdr3 + 1);
++
++                vlan_hdr = (struct dot1x_vlan_hdr *)pos;
++                vlan_hdr->vlan_id = htons(sta->vlan_id);
++
++                if (sta->ethertype == ETH_P_PRE_AUTH)
++                        vlan_hdr->eth_type = htons(ETH_P_PRE_AUTH);
++                else
++                        vlan_hdr->eth_type = htons(ETH_P_PAE);
++
++                pos = (u8 *) (pos + 4);
++        }
++        else
++        {
++			if (sta->ethertype == ETH_P_PRE_AUTH)
++				(hdr3->eth_type) = htons(ETH_P_PRE_AUTH);
++			else
++				(hdr3->eth_type) = htons(ETH_P_PAE);
++
++				pos = (u8 *) (hdr3 + 1);
++        }
++
+ 	xhdr = (struct ieee802_1x_hdr *) pos;
+ 	if (sta->ethertype == ETH_P_PRE_AUTH)
+ 		xhdr->version = EAPOL_VERSION_2;
+@@ -285,9 +314,22 @@ static void ieee802_1x_send_with_bcm_cputag(rtapd *rtapd, struct sta_info *sta,
+ 	}
+ 	else
+ 	{
++/* Uncomment the below section to dump the packet */ 
++#if 0
++		DBGPRINT(RT_DEBUG_INFO,"### buf start ###\n");
++		int i;
++		for(i=0; i<len;i++)
++		{
++			DBGPRINT(RT_DEBUG_INFO,"%x:", buf[i]);
++			if(i==12 || i==24 || i==36 || i==48)
++				DBGPRINT(RT_DEBUG_INFO,"\n");
++		}
++		DBGPRINT(RT_DEBUG_INFO,"\n### buf end ###\n");
++#endif
+ 		if (send(sta->SockNum/*rtapd->eth_sock*/, buf, len, 0) < 0)
+ 			perror("send[WPA2 eap]");
+ 		DBGPRINT(RT_DEBUG_INFO,"ieee802_1x_send_with_bcm_cputag::WPA2, eap, len=%d Ether-Type %x\n", len,hdr3->eth_type);
++		
+ 	}
+ 	free(buf);
+ 	return;
+@@ -1211,6 +1253,7 @@ void ieee802_1x_receive(
+ 			DBGPRINT(RT_DEBUG_TRACE,"Handle EAPOL_START from %s%d\n", rtapd->prefix_wlan_name, sta->ApIdx);
+ 			sta->eapol_sm->auth_pae.eapStart = TRUE;
+ 			sta->vlan_id = vlan_id;
++			DBGPRINT(RT_DEBUG_TRACE,"####  VLAN ID received is sta->vlan = %d,vlan : %d ####\n", sta->vlan_id, vlan_id);
+ 			eapol_sm_step(sta->eapol_sm);
+ 			break;
+ 
+diff --git a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+index 58b14b3..efe57d9 100644
+--- a/src/source/rtdot1x.c
++++ b/src/source/rtdot1x.c
+@@ -392,7 +392,7 @@ static void Handle_read(int sock, void *eloop_ctx, void *sock_ctx)
+ 
+     pos = rec->xframe;
+     
+-    //strip 4 bytes for valn tag
++    //strip 4 bytes for VLAN tag
+ 	if(isVlanTag)
+ 	{
+ 		vlan_id = (*pos) << 8;
+-- 
+1.7.9.5
+

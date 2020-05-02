@@ -1,0 +1,59 @@
+diff -ruaN c/src/source/ieee802_1x.c d/src/source/ieee802_1x.c
+--- c/src/source/ieee802_1x.c	2017-09-26 20:22:24.527628375 +0530
++++ d/src/source/ieee802_1x.c	2017-09-27 11:20:34.711621944 +0530
+@@ -428,8 +428,14 @@
+ 	}
+ 	else if (rv_prod_type_g  == PROD_TYPE_RV_160 || rv_prod_type_g  == PROD_TYPE_RV_260)
+         {
+-                /* Enable the traffic on port using bcm_auth_egress_set(0,port,0) as per BRCM */
+-                sprintf(str, "/usr/sbin/bcmssdk -D -p %d -e %d\n",sta->aid,0);
++		if(authorized == 0)
++		{
++                	sprintf(str, "/usr/sbin/bcmssdk -D 1 -p %d -a %d\n",sta->aid,0); //Un-authorized
++		}
++		else if(authorized == 1)
++		{
++                	sprintf(str, "/usr/sbin/bcmssdk -D 1 -p %d -a %d\n",sta->aid,1);//Authorized
++		}
+         }
+ 	else
+ 	{
+diff -ruaN c/src/source/rtdot1x.c d/src/source/rtdot1x.c
+--- c/src/source/rtdot1x.c	2017-09-26 14:05:51.751631071 +0530
++++ d/src/source/rtdot1x.c	2017-09-27 11:18:28.895621959 +0530
+@@ -975,7 +975,7 @@
+ 			{
+ 				if ((s->aid == portid) && (s->eapol_sm) && (s->eapol_sm->portControl != portControl))
+ 				{
+-					DBGPRINT(RT_DEBUG_TRACE,"Handle_usr2: sm->portControl %d, portControl %d\n",s->eapol_sm->portControl ,portControl);
++					DBGPRINT(RT_DEBUG_TRACE,"Handle_usr2: [LAN%d : sm->portControl %d => portControl %d]\n",(s->aid+1), s->eapol_sm->portControl ,portControl);
+ 					s->eapol_sm->portControl = portControl;
+ 				}
+ 				s = s->next;
+@@ -1101,7 +1101,7 @@
+ 	if (!apd)
+ 		return;
+ 
+-	DBGPRINT(RT_DEBUG_TRACE, "%s : Initialization of 802.1x\n", __func__);
++	DBGPRINT(RT_DEBUG_TRACE, "%s : Initialization PID(%d) of 802.1x\n", __func__, rv_prod_type_g);
+ 
+         if (rv_prod_type_g  == PROD_TYPE_RV_340) {
+                 num_lan = 4;
+@@ -1145,7 +1145,7 @@
+                                 nk_Ap_add_sta(apd, NULL, i);
+                         pclose(fp);
+                         if (rv_get_portControl(i) == ForceAuthorized)
+-                        sprintf(str, "/usr/sbin/bcmssdk -D 1 -p %d -a 1",i);
++                        sprintf(str, "/usr/sbin/bcmssdk -D 1 -p %d -f 1",i);
+                         if(NULL != (fp = popen(str,"r")))
+                         pclose(fp);
+                 }
+@@ -1161,7 +1161,7 @@
+                                 nk_Ap_add_sta(apd, NULL, i);
+                         pclose(fp);
+                         if (rv_get_portControl(i) == ForceAuthorized)
+-                        sprintf(str, "/usr/sbin/bcmssdk -D 1 -p %d -a 1",i);
++                        sprintf(str, "/usr/sbin/bcmssdk -D 1 -p %d -f 1",i);
+                         if(NULL != (fp = popen(str,"r")))
+                         pclose(fp);
+                 }

@@ -1,0 +1,523 @@
+From 85acf5963f8e471785c0291af50d6c7fc501b9a9 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy <ganesh.reddy@nxp.com>
+Date: Mon, 26 Mar 2018 19:12:02 +0530
+Subject: [PATCH] RV34X LLDP support changes
+
+- Made the rv34x specific changes under compile time macro support.
+- All the below tunings as under RV34X_SUPPORT, can be controlled alone for both BB2,PP easily, instead of whole patch control
+- LAN, WAN interface name usage tuned to work for BB2 and PP
+- Few LLDP processing made generic and based on PID basis
+- Also, CPU tag related were specific to PID basis only.
+- Few BB2 specific packet processing kept under RV34X_SUPPORT, Kept PP version as is.
+- RV340W specific tuned under its PID alone generically.
+- Also tests snmp, edp made interface specific under the same macro.
+- Right now in this version, RV34X_SUPPORT is enabled by default in src/lldpd.h
+
+Signed-off-by: Ganesh Reddy <ganesh.reddy@nxp.com>
+---
+ src/interfaces.c   |  48 ++++++++++++-
+ src/lldp.c         | 201 ++++++++++++++++++++++++++++++++++++++++++++++++++---
+ src/lldpd.c        |  31 +++++++--
+ src/lldpd.h        |   3 +
+ tests/check_edp.c  |   8 +++
+ tests/check_snmp.c |  14 ++++
+ 6 files changed, 287 insertions(+), 18 deletions(-)
+
+diff --git a/src/interfaces.c b/src/interfaces.c
+index 1e5e7df..ad4598b 100644
+--- a/src/interfaces.c
++++ b/src/interfaces.c
+@@ -59,6 +59,36 @@
+                 (ether dst 00:e0:2b:00:00:00)"
+ */
+ 
++#ifdef RV34X_SUPPORT
++#define LLDPD_FILTER_F      \
++{ 0x30, 0, 0, 0x00000000 }, \
++{ 0x54, 0, 0, 0x00000001 }, \
++{ 0x15, 0, 12, 0x00000001 },\
++{ 0x28, 0, 0, 0x0000000c },\
++{ 0x15, 0, 2, 0x000088cc },\
++{ 0x20, 0, 0, 0x00000002 },\
++{ 0x15, 16, 0, 0xc200000e },\
++{ 0x20, 0, 0, 0x00000002 },\
++{ 0x15, 0, 2, 0x52cccccc },\
++{ 0x28, 0, 0, 0x00000000 },\
++{ 0x15, 14, 8, 0x000001e0 },\
++{ 0x15, 1, 0, 0x0ccccccc },\
++{ 0x15, 0, 2, 0x81000100 },\
++{ 0x28, 0, 0, 0x00000000 },\
++{ 0x15, 10, 4, 0x00000100 },\
++{ 0x20, 0, 0, 0x00000002 },\
++{ 0x15, 0, 2, 0x2b000000 },\
++{ 0x28, 0, 0, 0x00000000 },\
++{ 0x15, 6, 0, 0x000000e0 },\
++{ 0x28, 0, 0, 0x0000000c },\
++{ 0x15, 0, 5, 0x00008899 },\
++{ 0x20, 0, 0, 0x00000002 },\
++{ 0x15, 0, 3, 0xc200000e },\
++{ 0x28, 0, 0, 0x00000000 },\
++{ 0x15, 0, 1, 0x00000180 },\
++{ 0x6, 0, 0, 0x0000ffff },\
++{ 0x6, 0, 0, 0x00000000 },
++#else
+ #define LLDPD_FILTER_F      \
+ { 0x30, 0, 0, 0x00000000 }, \
+ { 0x54, 0, 0, 0x00000001 }, \
+@@ -88,6 +118,7 @@
+ { 0x6, 0, 0, 0x0000ffff },\
+ { 0x6, 0, 0, 0x00000000 },
+ 
++#endif
+ 
+ #if 0
+ #define LLDPD_FILTER_F      \
+@@ -568,12 +599,25 @@ iface_port_name_desc(struct lldpd_hardware *hardware)
+ 	if ((port->p_id =
+ 		calloc(1, port->p_id_len)) == NULL)
+ 		fatal(NULL);
+-	if (strcmp(hardware->h_ifname,"eth2")==0 ) {
++
++#ifdef RV34X_SUPPORT
++	if (strcmp(hardware->h_ifname,"eth3")==0 ) {
+ 	memcpy(port->p_id, "LAN", port->p_id_len);
+ 	}
+-	else if (strcmp(hardware->h_ifname,"eth0")==0 ) {
++	else if (strcmp(hardware->h_ifname,"eth2")==0 ) {
+ 	memcpy(port->p_id, "WAN1", port->p_id_len);
+ 	}
++	else if (strcmp(hardware->h_ifname,"eth0")==0 ) {
++	memcpy(port->p_id, "WAN2", port->p_id_len);
++	}
++#else
++	if (strcmp(hardware->h_ifname,"eth2")==0 ) {
++        memcpy(port->p_id, "LAN", port->p_id_len);
++        }
++	else if (strcmp(hardware->h_ifname,"eth0")==0 ) {
++        memcpy(port->p_id, "WAN1", port->p_id_len);
++        }
++#endif
+ 	else {
+ 	memcpy(port->p_id, hardware->h_ifname, port->p_id_len);
+ 	}
+diff --git a/src/lldp.c b/src/lldp.c
+index 45baa02..09e3f26 100644
+--- a/src/lldp.c
++++ b/src/lldp.c
+@@ -31,16 +31,22 @@
+ #include <string.h>
+ #include <stdlib.h>
+ 
+-#define LAN_INTERFACE "eth2"
++#ifdef RV34X_SUPPORT
++/* RV34X support */
++#define LAN_INTERFACE "eth3"
++#define RV345_CPUTAGLEN 12
++#define RV345_PORTOFFSET 15
++#define CPUTAGPROTOCOL 0x8899
+ #define PORTOFFSET 19
+ #define CPUTAGLEN 8
++#else
++/* RV16X_26X support */
++#define LAN_INTERFACE "eth2"
++#endif
+ 
+ #define BCM_CPUTAGLEN 4
+ #define BCM_PORTOFFSET 15
+ 
+-#define CPUTAGPROTOCOL 0x8899
+-
+-
+ #define NOTRECEIVED "Not received"
+ #define NOTRECEIVED_LEN 12
+ 
+@@ -82,7 +88,7 @@ lldp_send(struct lldpd *global,
+ 	int length;
+ 	u_int8_t *packet, *pos, *tlv;
+ 	struct lldpd_mgmt *mgmt;
+-    u_int8_t cputag[4]={'\0'};
++    u_int8_t cputag[12]={'\0'};
+     u_int8_t j=1;
+     int proto;
+     char cmd[64]={'\0'};
+@@ -109,7 +115,133 @@ lldp_send(struct lldpd *global,
+ //	LLOG_INFO("PP LLDP packet sending port->p_descr = %s \n", port->p_descr);
+     if(strcmp(port->p_descr,LAN_INTERFACE)==0)
+     {
+-        if (strncmp(PID_RV34X,"RV260",5) == 0) {
++        if (strncmp(PID_RV34X,"RV340",5) == 0) {
++            cputag[0]=0x88;
++            cputag[1]=0x99;
++            cputag[2]=0x04;
++            cputag[3]=0x00;
++            cputag[4]=0x00;
++            cputag[5]=0x00;
++            cputag[6]=0x00;
++            cputag[7]=0x00;
++
++            for(j=1;j<=4;j++)
++            {
++                sprintf(cmd,"uci get lldpd.config.lan%d",j);
++                fp=popen(cmd,"r");
++                if(fgets(var, sizeof(var), fp) == NULL)
++                {
++                    printf("fgets failed\n");
++                    pclose(fp);
++                    return -1;
++                }
++                pclose(fp);
++                if((strcmp(var,"1") == 0) && (j==4))
++                    cputag[7]=cputag[7] | 0x10;
++                else if((strcmp(var,"1") == 0) && (j==3))
++                    cputag[7]=cputag[7] | 0x08;
++                else if((strcmp(var,"1") == 0) && (j==2))
++                    cputag[7]=cputag[7] | 0x04;
++                else if((strcmp(var,"1") == 0) && (j==1))
++                    cputag[7]=cputag[7] | 0x02;
++            }
++        }
++        else if (strncmp(PID_RV34X,"RV345",5) == 0) {
++                cputag[0]=0x88;
++                cputag[1]=0x99;
++                cputag[2]=0x04;
++                cputag[3]=0x10;
++                cputag[4]=0x02;
++                cputag[5]=0x00;
++                cputag[6]=0x00;
++                cputag[7]=0x00;
++                cputag[8]=0x00;
++                cputag[9]=0x00;
++                cputag[10]=0x00; 
++                cputag[11]=0x00;
++	
++                for(j=0;j<=15;j++)
++                {
++                    sprintf(cmd,"uci get lldpd.config.lan%d",j);
++                    fp=popen(cmd,"r");
++                    if(fgets(var, sizeof(var), fp) == NULL)
++                    {
++                        printf("fgets failed\n");
++                        pclose(fp);
++                        return -1;
++                    }
++                    pclose(fp);
++                    switch(j)
++                    {
++                        case 0 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j ));
++                        break;
++                        case 1 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j ));
++                        break;
++                        case 2 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j));
++                        break;
++                        case 3 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j ));
++                        break;
++                        case 4 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j));
++                        break;
++                        case 5 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j));
++                        break;
++                        case 6 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j));
++                        break;
++                        case 7 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j));
++                        break;
++                        case 8 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 9 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 10 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 11 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 12 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 13 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 14:
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 15:
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                    }
++            }
++            
++        }
++        else if (strncmp(PID_RV34X,"RV260",5) == 0) {
+             cputag[0]=0x20;
+             cputag[1]=0x0;
+             cputag[2]=0x0;
+@@ -224,6 +356,30 @@ lldp_send(struct lldpd *global,
+ 		      POKE_UINT16(ETHERTYPE_LLDP)))
+ 			goto toobig;
+ 	}
++#ifdef RV34X_SUPPORT
++	else if (strncmp(PID_RV34X,"RV340",5) == 0)
++	{
++		if (!(
++		      /* LLDP multicast address */
++		      POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
++		      /* Source MAC address */
++		      POKE_BYTES(&hardware->h_lladdr, sizeof(hardware->h_lladdr)) && POKE_BYTES(cputag, CPUTAGLEN) && 
++		      /* LLDP frame */
++		      POKE_UINT16(ETHERTYPE_LLDP)))
++			goto toobig;
++    	}
++	else if (strncmp(PID_RV34X,"RV345",5) == 0)
++	{ 
++		if (!(
++		      /* LLDP multicast address */
++		      POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
++		      /* Source MAC address */
++		      POKE_BYTES(&hardware->h_lladdr, sizeof(hardware->h_lladdr)) && POKE_BYTES(cputag, RV345_CPUTAGLEN) && 
++		      /* LLDP frame */
++		      POKE_UINT16(ETHERTYPE_LLDP)))
++			goto toobig;
++	}
++#endif
+ 	else
+ 	{
+         	LLOG_INFO("---- Invalid PID ---- ");
+@@ -668,10 +824,12 @@ lldp_decode(struct lldpd *cfg, char *frame, int s,
+ #endif
+     //LLOG_INFO(" -- Decapsulating the VLAN frames -- %s hardware->h_ifname =%s\n", port->p_descr, hardware->h_ifname);
+     /* Decapsulate VLAN frames */
+-//    if (((struct ethhdr*)frame)->h_proto == htons(CPUTAGPROTOCOL)) {
+-      	if (strcmp(hardware->h_ifname, LAN_INTERFACE)==0) 
++#ifdef RV34X_SUPPORT
++	if (((struct ethhdr*)frame)->h_proto == htons(CPUTAGPROTOCOL))
++#else
++  	if (strcmp(hardware->h_ifname, LAN_INTERFACE)==0)
++#endif
+ 	{
+-
+         	if ((strncmp(PID_RV34X,"RV260",5) == 0) || (strncmp(PID_RV34X,"RV160",5) == 0))
+         	{
+ 			portno=(frame[BCM_PORTOFFSET] & 0x000F);
+@@ -679,13 +837,34 @@ lldp_decode(struct lldpd *cfg, char *frame, int s,
+ 			memmove(frame+BCM_CPUTAGLEN,frame,2*ETH_ALEN);
+ 			frame=frame+BCM_CPUTAGLEN;
+ 			s=s-BCM_CPUTAGLEN;
+-        	}	
++        	}
++#ifdef RV34X_SUPPORT
++	     	else if ((strncmp(PID_RV34X,"RV340",5) == 0) || (strncmp(PID_RV34X,"RV340W",6) == 0))
++        	{
++			portno=frame[PORTOFFSET];
++			memmove(frame+CPUTAGLEN,frame,2*ETH_ALEN);
++			frame=frame+CPUTAGLEN;
++			s=s-CPUTAGLEN;
++	        }
++	        else if ((strncmp(PID_RV34X,"RV345",5) == 0) || (strncmp(PID_RV34X,"RV345P",6) == 0))
++	        {
++			portno=frame[RV345_PORTOFFSET];
++			//LLOG_INFO("LLDP packet received on LAN port [%d] on interface %s", (portno), hardware->h_ifname);
++			memmove(frame+RV345_CPUTAGLEN,frame,2*ETH_ALEN);
++			frame=frame+RV345_CPUTAGLEN;
++			s=s-RV345_CPUTAGLEN;
++	        }
++#endif
+         	else
+         	{
+                 	LLOG_INFO(" ---- Invalid PID -----");
+         	}
+ 		
+-		sprintf(cmd,"uci get lldpd.config.lan%d",(portno+1)); //Due to uci value starts from 1
++#ifdef RV34X_SUPPORT
++		sprintf(cmd,"uci get lldpd.config.lan%d",portno);
++#else
++		sprintf(cmd,"uci get lldpd.config.lan%d",(portno+1));
++#endif
+ 		fp=popen(cmd,"r");
+ 		if(fgets(var, sizeof(var), fp) == NULL)
+ 		  {
+diff --git a/src/lldpd.c b/src/lldpd.c
+index 44463bd..31817dc 100644
+--- a/src/lldpd.c
++++ b/src/lldpd.c
+@@ -161,9 +161,9 @@ int get_PID_RV34X(char* PID)
+   }
+   pclose(fp);
+ 
+-  if (strncmp(cmd,"RV340",5) == 0)
++  if (strncmp(cmd,"RV345P",6) == 0)
+   {
+-        strcpy(PID,"RV340");
++        strcpy(PID,"RV345P");
+         return 0;
+   }
+   else if (strncmp(cmd,"RV345",5) == 0)
+@@ -171,6 +171,16 @@ int get_PID_RV34X(char* PID)
+         strcpy(PID,"RV345");
+         return 0;
+   }
++  else if (strncmp(cmd,"RV340W",6) == 0)
++  {
++        strcpy(PID,"RV340W");
++        return 0;
++  }
++  else if (strncmp(cmd,"RV340",5) == 0)
++  {
++        strcpy(PID,"RV340");
++        return 0;
++  }
+   else if (strncmp(cmd,"RV160W",6) == 0)
+   {
+         strcpy(PID,"RV160W");
+@@ -965,8 +975,11 @@ lldpd_update_localchassis(struct lldpd *cfg)
+        	/* check wireless */
+        	if ((strncmp(PID_RV34X,"RV260W",6) == 0) || (strncmp(PID_RV34X,"RV160W",6) == 0))
+ 	{
+-
++		if (strncmp(PID_RV34X,"RV340W",6) == 0)
++		fp = fopen("/sys/class/gpio/gpio14/value", "r");
++		else
+ 		fp = fopen("/sys/class/gpio/gpio6/value", "r");
++		
+ 		if(fp != NULL)
+ 		{
+ 			ch = fgetc(fp);
+@@ -1139,9 +1152,12 @@ lldpd_main(int argc, char *argv[])
+ 
+ 	/** Fetch the Product ID **/
+         get_PID_RV34X(PID_RV34X);
+-        LLOG_INFO("PID of board is %s \n",PID_RV34X);
+-	
++        LLOG_INFO("PID of board is: %s \n",PID_RV34X);
++#ifdef RV34X_SUPPORT
++	get_Chassis_id("eth3");
++#else
+ 	get_Chassis_id("eth2");
++#endif
+ 	saved_argv = argv;
+ 
+ 	/*
+@@ -1310,6 +1326,11 @@ lldpd_main(int argc, char *argv[])
+ 	{
+ 		lchassis->c_cap_available = LLDP_CAP_BRIDGE | LLDP_CAP_WLAN | LLDP_CAP_ROUTER;
+ 	}
++	else if (strncmp(PID_RV34X,"RV340W",6) == 0)
++	{
++		lchassis->c_cap_available = LLDP_CAP_BRIDGE | LLDP_CAP_WLAN |
++	    					LLDP_CAP_ROUTER;
++	}
+ 	else
+ 	{
+ 		lchassis->c_cap_available = LLDP_CAP_BRIDGE | LLDP_CAP_ROUTER;
+diff --git a/src/lldpd.h b/src/lldpd.h
+index db16ed6..22285c1 100644
+--- a/src/lldpd.h
++++ b/src/lldpd.h
+@@ -79,6 +79,9 @@ struct event_base;
+ 
+ #define USING_AGENTX_SUBAGENT_MODULE 1
+ 
++/* BB2 enablement changes */
++#define RV34X_SUPPORT
++
+ #ifdef ENABLE_DOT1
+ #define LLDPD_PPVID_CAP_SUPPORTED		(1 << 1)
+ #define LLDPD_PPVID_CAP_ENABLED			(1 << 2)
+diff --git a/tests/check_edp.c b/tests/check_edp.c
+index 63bed98..c205bb9 100644
+--- a/tests/check_edp.c
++++ b/tests/check_edp.c
+@@ -73,7 +73,11 @@ Extreme Discovery Protocol
+ 	hardware.h_lport.p_id = "Not used";
+ 	hardware.h_lport.p_id_len = strlen(hardware.h_lport.p_id);
+ 	hardware.h_lport.p_descr = "Not used";
++#ifdef RV34X_SUPPORT
++	strcpy(hardware.h_ifname, "eth3");
++#else
+ 	strcpy(hardware.h_ifname, "eth2");
++#endif
+ 	hardware.h_ifindex = 4;
+ 	chassis.c_id_subtype = LLDP_CHASSISID_SUBTYPE_LLADDR;
+ 	chassis.c_id = macaddress;
+@@ -237,7 +241,11 @@ Extreme Discovery Protocol
+ 	hardware.h_lport.p_id = "Not used";
+ 	hardware.h_lport.p_id_len = strlen(hardware.h_lport.p_id);
+ 	hardware.h_lport.p_descr = "Not used";
++#ifdef RV34X_SUPPORT
++	strcpy(hardware.h_ifname, "eth3");
++#else
+ 	strcpy(hardware.h_ifname, "eth2");
++#endif
+ 	hardware.h_ifindex = 4;
+ 	chassis.c_id_subtype = LLDP_CHASSISID_SUBTYPE_LLADDR;
+ 	chassis.c_id = macaddress;
+diff --git a/tests/check_snmp.c b/tests/check_snmp.c
+index 8d26d10..ddb8e2c 100644
+--- a/tests/check_snmp.c
++++ b/tests/check_snmp.c
+@@ -105,7 +105,11 @@ struct lldpd_hardware hardware1 = {
+ 		.p_id_subtype = LLDP_PORTID_SUBTYPE_LLADDR,
+ 		.p_id         = "AAA012",
+ 		.p_id_len     = 6,
++#ifdef RV34X_SUPPORT
++		.p_descr      = "eth3",
++#else
+ 		.p_descr      = "eth2",
++#endif
+ 		.p_mfs        = 1600,
+ #ifdef ENABLE_DOT3
+ 		.p_aggregid   = 0,
+@@ -400,8 +404,13 @@ struct tree_node snmp_tree[] = {
+ 	{ {1, 3, 7, 1, 3, 4}, 6, ASN_OCTET_STR, { .string = { .octet = "eth4",
+ 							      .len = 4 } }},
+ 	/* lldpLocPortDesc.3 */
++#ifdef RV34X_SUPPORT
++	{ {1, 3, 7, 1, 4, 3}, 6, ASN_OCTET_STR, { .string = { .octet = "eth3",
++							      .len = 4 } }},
++#else
+ 	{ {1, 3, 7, 1, 4, 3}, 6, ASN_OCTET_STR, { .string = { .octet = "eth2",
+ 							      .len = 4 } }},
++#endif
+ 	/* lldpLocPortDesc.4 */
+ 	{ {1, 3, 7, 1, 4, 4}, 6, ASN_OCTET_STR, { .string = { .octet = "Intel 1000 GE",
+ 							      .len = 13 } }},
+@@ -438,8 +447,13 @@ struct tree_node snmp_tree[] = {
+ 	  { .string = { .octet = "Intel 1000 GE", .len = 13 }} },
+ 	{ {1, 4, 1, 1, 8, 8000, 3, 4}, 8, ASN_OCTET_STR,
+ 	  { .string = { .octet = "Gigabit Ethernet 1/7", .len = 20 }} },
++#ifdef RV34X_SUPPORT
++	{ {1, 4, 1, 1, 8, 10000, 4, 1}, 8, ASN_OCTET_STR,
++	  { .string = { .octet = "eth3", .len = 4 }} },
++#else
+ 	{ {1, 4, 1, 1, 8, 10000, 4, 1}, 8, ASN_OCTET_STR,
+ 	  { .string = { .octet = "eth2", .len = 4 }} },
++#endif
+ 	/* lldpRemSysName */
+ 	{ {1, 4, 1, 1, 9, 0, 3, 1 }, 8, ASN_OCTET_STR,
+ 	  { .string = { .octet = "chassis1.example.com", .len = 20 }} },
+-- 
+1.9.1
+

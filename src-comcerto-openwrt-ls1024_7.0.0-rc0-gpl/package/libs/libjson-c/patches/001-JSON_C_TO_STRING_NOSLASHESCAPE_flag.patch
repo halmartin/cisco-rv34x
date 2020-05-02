@@ -1,0 +1,143 @@
+ json_object.c | 98 +++++++++++++++++++++++++++++++++--------------------------
+ json_object.h |  5 ++-
+ 2 files changed, 59 insertions(+), 44 deletions(-)
+
+diff --git a/json_object.c b/json_object.c
+index f2b5ce0..e69dedd 100644
+--- a/json_object.c
++++ b/json_object.c
+@@ -87,47 +87,59 @@ static void json_object_fini(void) {
+ 
+ /* string escaping */
+ 
+-static int json_escape_str(struct printbuf *pb, char *str, int len)
+-{
+-  int pos = 0, start_offset = 0;
+-  unsigned char c;
+-  while (len--) {
+-    c = str[pos];
+-    switch(c) {
+-    case '\b':
+-    case '\n':
+-    case '\r':
+-    case '\t':
+-    case '\f':
+-    case '"':
+-    case '\\':
+-    case '/':
+-      if(pos - start_offset > 0)
+-	printbuf_memappend(pb, str + start_offset, pos - start_offset);
+-      if(c == '\b') printbuf_memappend(pb, "\\b", 2);
+-      else if(c == '\n') printbuf_memappend(pb, "\\n", 2);
+-      else if(c == '\r') printbuf_memappend(pb, "\\r", 2);
+-      else if(c == '\t') printbuf_memappend(pb, "\\t", 2);
+-      else if(c == '\f') printbuf_memappend(pb, "\\f", 2);
+-      else if(c == '"') printbuf_memappend(pb, "\\\"", 2);
+-      else if(c == '\\') printbuf_memappend(pb, "\\\\", 2);
+-      else if(c == '/') printbuf_memappend(pb, "\\/", 2);
+-      start_offset = ++pos;
+-      break;
+-    default:
+-      if(c < ' ') {
+-	if(pos - start_offset > 0)
+-	  printbuf_memappend(pb, str + start_offset, pos - start_offset);
+-	sprintbuf(pb, "\\u00%c%c",
+-		  json_hex_chars[c >> 4],
+-		  json_hex_chars[c & 0xf]);
+-	start_offset = ++pos;
+-      } else pos++;
+-    }
+-  }
+-  if(pos - start_offset > 0)
+-    printbuf_memappend(pb, str + start_offset, pos - start_offset);
+-  return 0;
++static int json_escape_str(struct printbuf *pb, const char *str, int len, int flags)
++{
++	int pos = 0, start_offset = 0;
++	unsigned char c;
++	while (len--)
++	{
++		c = str[pos];
++		switch(c)
++		{
++		case '\b':
++		case '\n':
++		case '\r':
++		case '\t':
++		case '\f':
++		case '"':
++		case '\\':
++		case '/':
++			if((flags & JSON_C_TO_STRING_NOSLASHESCAPE) && c == '/')
++			{
++				pos++;
++				break;
++			}
++
++			if(pos - start_offset > 0)
++				printbuf_memappend(pb, str + start_offset, pos - start_offset);
++
++			if(c == '\b') printbuf_memappend(pb, "\\b", 2);
++			else if(c == '\n') printbuf_memappend(pb, "\\n", 2);
++			else if(c == '\r') printbuf_memappend(pb, "\\r", 2);
++			else if(c == '\t') printbuf_memappend(pb, "\\t", 2);
++			else if(c == '\f') printbuf_memappend(pb, "\\f", 2);
++			else if(c == '"') printbuf_memappend(pb, "\\\"", 2);
++			else if(c == '\\') printbuf_memappend(pb, "\\\\", 2);
++			else if(c == '/') printbuf_memappend(pb, "\\/", 2);
++
++			start_offset = ++pos;
++			break;
++		default:
++			if(c < ' ')
++			{
++				if(pos - start_offset > 0)
++				printbuf_memappend(pb, str + start_offset, pos - start_offset);
++				sprintbuf(pb, "\\u00%c%c",
++				json_hex_chars[c >> 4],
++				json_hex_chars[c & 0xf]);
++				start_offset = ++pos;
++			} else
++				pos++;
++		}
++	}
++	if (pos - start_offset > 0)
++		printbuf_memappend(pb, str + start_offset, pos - start_offset);
++	return 0;
+ }
+ 
+ 
+@@ -314,7 +326,7 @@ static int json_object_object_to_json_string(struct json_object* jso,
+ 			sprintbuf(pb, " ");
+ 		indent(pb, level+1, flags);
+ 		sprintbuf(pb, "\"");
+-		json_escape_str(pb, iter.key, strlen(iter.key));
++		json_escape_str(pb, iter.key, strlen(iter.key), flags);
+ 		if (flags & JSON_C_TO_STRING_SPACED)
+ 			sprintbuf(pb, "\": ");
+ 		else
+@@ -620,7 +632,7 @@ static int json_object_string_to_json_string(struct json_object* jso,
+ 						 int flags)
+ {
+   sprintbuf(pb, "\"");
+-  json_escape_str(pb, jso->o.c_string.str, jso->o.c_string.len);
++  json_escape_str(pb, jso->o.c_string.str, jso->o.c_string.len, flags);
+   sprintbuf(pb, "\"");
+   return 0;
+ }
+diff --git a/json_object.h b/json_object.h
+index 6270309..322f0a8 100644
+--- a/json_object.h
++++ b/json_object.h
+@@ -46,7 +46,10 @@ extern "C" {
+  * A flag to drop trailing zero for float values
+  */
+ #define JSON_C_TO_STRING_NOZERO     (1<<2)
+-
++/**
++ * A flag to don't escape forward slashes.
++ */
++#define JSON_C_TO_STRING_NOSLASHESCAPE (1<<4)
+ #undef FALSE
+ #define FALSE ((json_bool)0)
+ 

@@ -1,0 +1,29 @@
+
+config dnsmasq
+	option domainneeded '1'
+	option boguspriv '1'
+	option filterwin2k '0'
+	option localise_queries '1'
+	option rebind_protection '0'
+	option rebind_localhost '0'
+	option expandhosts '1'
+	option nonegcache '0'
+	option authoritative '1'
+	option readethers '1'
+	option leasefile '/tmp/dhcp.leases'
+	option resolvfile '/tmp/resolv.conf.auto'
+
+config dhcp 'dhcp_0'
+	option interface 'vlan1'
+	option leasetime '1440m'
+	option enabled '1'
+	option start_ip '192.168.10.100'
+	option end_ip '192.168.10.149'
+	list dhcp_option '6,192.168.10.1'
+	option dns_type 'proxy'
+
+config dhcp6 'dhcp6_0'
+	option interface 'vlan1'
+	option leasetime '1440m'
+	option enabled '0'
+

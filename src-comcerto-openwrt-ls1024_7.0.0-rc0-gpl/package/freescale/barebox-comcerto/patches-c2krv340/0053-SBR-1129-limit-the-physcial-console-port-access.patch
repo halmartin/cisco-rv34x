@@ -1,0 +1,208 @@
+From 0b2779238e973c11d8815a7e041a2ec5224dd4e9 Mon Sep 17 00:00:00 2001
+From: Abdul Moiz <abdul.moiz@nxp.com>
+Date: Thu, 24 Nov 2016 21:06:36 +0530
+Subject: [PATCH 53/60] SBR-1129 limit the physcial console port access Added
+ Key Pattern input instead of Reset Button press
+
+Signed-off-by: Abdul Moiz <abdul.moiz@nxp.com>
+---
+ arch/arm/boards/comcerto-rv340/env/bin/boot | 26 +++++++++++++++++
+ arch/arm/boards/comcerto-rv340/env/bin/init | 34 ++++++++++++++++------
+ commands/timeout.c                          | 44 ++++++++++++++++++++++++++++-
+ common/startup.c                            |  8 ++++--
+ 4 files changed, 101 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/boot b/arch/arm/boards/comcerto-rv340/env/bin/boot
+index adf19bb..cfb132b 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/boot
++++ b/arch/arm/boards/comcerto-rv340/env/bin/boot
+@@ -269,6 +269,32 @@ if [ x$kernelimage_type = xuimage ]; then
+       echo "bootm Failed to boot $kdev Too!"
+       echo "Please execute Recovery Procedure!"
+       erase /dev/nand0.env
++      timeout -ps 5
++      if [ $? != 0 ]; then
++	timeout -1s 5
++        if [ $? != 0 ]; then
++                timeout -2s 5
++                if [ $? != 0 ]; then
++                        timeout -3s 5
++                        if [ $? != 0 ]; then
++                                timeout -4s 5
++                                if [ $? != 0 ]; then
++                                        timeout -5s 5
++                                        if [ $? != 0 ]; then
++                                                timeout -6s 5
++                                                if [ $? != 0 ]; then
++                                                        gpio_direction_output $GPIO_LED_DIAG $ON
++                                                        gpio_set_value $GPIO_LED_DIAG $ON
++                                                        login
++                                                        . /env/bin/_update_help
++                                                        exit 0
++                                                fi
++                                        fi
++                                fi
++                        fi
++                fi
++        fi
++      fi
+       exit 1
+     fi
+   fi
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/init b/arch/arm/boards/comcerto-rv340/env/bin/init
+index 7c25251..8b9dd57 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/init
++++ b/arch/arm/boards/comcerto-rv340/env/bin/init
+@@ -40,14 +40,32 @@ fi
+ gpio_direction_output $GPIO_LED_POWER $ON
+ gpio_set_value $GPIO_LED_POWER $OFF
+ 
+-# Parse Reset Key Press
+-chkreset
+-if [ $? -ge 100 ]; then
+-	gpio_direction_output $GPIO_LED_DIAG $ON
+-	gpio_set_value $GPIO_LED_DIAG $ON
+-	login
+-        . /env/bin/_update_help
+-        exit
++# Parse Key Press
++timeout -ps 0
++if [ $? != 0 ]; then
++	timeout -1s 5
++	if [ $? != 0 ]; then
++		timeout -2s 5
++		if [ $? != 0 ]; then
++			timeout -3s 5
++			if [ $? != 0 ]; then
++				timeout -4s 5
++				if [ $? != 0 ]; then
++					timeout -5s 5
++					if [ $? != 0 ]; then
++						timeout -6s 5
++						if [ $? != 0 ]; then
++							gpio_direction_output $GPIO_LED_DIAG $ON
++							gpio_set_value $GPIO_LED_DIAG $ON
++							login
++							. /env/bin/_update_help
++							exit 0
++						fi
++					fi
++				fi
++			fi
++		fi
++	fi
+ fi
+ 
+ boot
+diff --git a/commands/timeout.c b/commands/timeout.c
+index 5f2ab9a..403d0b3 100644
+--- a/commands/timeout.c
++++ b/commands/timeout.c
+@@ -30,6 +30,13 @@
+ #define TIMEOUT_CTRLC	(1 << 1)
+ #define TIMEOUT_ANYKEY	(1 << 2)
+ #define TIMEOUT_SILENT	(1 << 3)
++#define TIMEOUT_PAT  	(1 << 4)
++#define TIMEOUT_PAT1  	(1 << 5)
++#define TIMEOUT_PAT2  	(1 << 6)
++#define TIMEOUT_PAT3  	(1 << 7)
++#define TIMEOUT_PAT4  	(1 << 8)
++#define TIMEOUT_PAT5  	(1 << 9)
++#define TIMEOUT_PAT6  	(1 << 10)
+ 
+ static int do_timeout(struct command *cmdtp, int argc, char *argv[])
+ {
+@@ -37,7 +44,7 @@ static int do_timeout(struct command *cmdtp, int argc, char *argv[])
+ 	int flags = 0, opt, countdown;
+ 	uint64_t start, second;
+ 
+-	while((opt = getopt(argc, argv, "t:crsa")) > 0) {
++	while((opt = getopt(argc, argv, "t:crsap123456")) > 0) {
+ 		switch(opt) {
+ 		case 'r':
+ 			flags |= TIMEOUT_RETURN;
+@@ -48,6 +55,27 @@ static int do_timeout(struct command *cmdtp, int argc, char *argv[])
+ 		case 'a':
+ 			flags |= TIMEOUT_ANYKEY;
+ 			break;
++		case 'p':
++                        flags |= TIMEOUT_PAT;
++                        break;
++		case '1':
++                        flags |= TIMEOUT_PAT1;
++                        break;
++		case '2':
++                        flags |= TIMEOUT_PAT2;
++                        break;
++		case '3':
++                        flags |= TIMEOUT_PAT3;
++                        break;
++		case '4':
++                        flags |= TIMEOUT_PAT4;
++                        break;
++		case '5':
++                        flags |= TIMEOUT_PAT5;
++                        break;
++		case '6':
++                        flags |= TIMEOUT_PAT6;
++                        break;
+ 		case 's':
+ 			flags |= TIMEOUT_SILENT;
+ 			break;
+@@ -78,6 +106,20 @@ static int do_timeout(struct command *cmdtp, int argc, char *argv[])
+ 				goto out;
+ 			if (flags & TIMEOUT_RETURN && key == '\n')
+ 				goto out;
++			if (flags & TIMEOUT_PAT && key == 0)
++                                goto out;
++			if (flags & TIMEOUT_PAT1 && key == 0x43)
++                                goto out;
++			if (flags & TIMEOUT_PAT2 && key == 0x52)
++                                goto out;
++			if (flags & TIMEOUT_PAT3 && key == 0x56)
++                                goto out;
++			if (flags & TIMEOUT_PAT4 && key == 0x44)
++                                goto out;
++			if (flags & TIMEOUT_PAT5 && key == 0x42)
++                                goto out;
++			if (flags & TIMEOUT_PAT6 && key == 0x47)
++                                goto out;
+ 		}
+ 		if (!(flags & TIMEOUT_SILENT) && is_timeout(second, SECOND)) {
+ 			printf("\b\b%2d", countdown--);
+diff --git a/common/startup.c b/common/startup.c
+index 01b40cc..5d493ef 100644
+--- a/common/startup.c
++++ b/common/startup.c
+@@ -118,6 +118,7 @@ void start_barebox (void)
+ {
+ 	initcall_t *initcall;
+ 	int result;
++	int ret=0;
+ #ifdef CONFIG_COMMAND_SUPPORT
+ 	struct stat s;
+ #endif
+@@ -160,7 +161,7 @@ void start_barebox (void)
+ 	printf("running /env/bin/init...\n");
+ 
+ 	if (!stat("/env/bin/init", &s)) {
+-		run_command("source /env/bin/init", 0);
++		ret=run_command("source /env/bin/init", 0);
+ 	} else {
+ 		printf("not found\n");
+ 	}
+@@ -168,7 +169,10 @@ void start_barebox (void)
+ 	/* main_loop() can return to retry autoboot, if so just run it again. */
+ 	for (;;)
+ #ifndef CONFIG_HAVE_NOSHELL
+-		run_shell();
++		if(ret==0)
++			run_shell();
++		else
++			;
+ #else
+ 	;	
+ #endif
+-- 
+2.7.4
+

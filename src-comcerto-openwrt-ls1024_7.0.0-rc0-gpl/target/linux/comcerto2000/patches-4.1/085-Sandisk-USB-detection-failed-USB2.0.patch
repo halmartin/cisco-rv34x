@@ -1,0 +1,159 @@
+From: Makarand Pawagi <makarand.pawagi@nxp.com>
+Date: Fri, 02 Feb 2018 18:17:39 +0530
+Subject: [PATCH ] 085-Patch-to-solve-Sandisk-USB-detection-failed-USB2.0
+
+Signed-off-by: Makarand Pawagi <makarand.pawagi@nxp.com>
+diff -Naur linux-4.1.8-old/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c linux-4.1.8/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c
+--- linux-4.1.8-old/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c	2018-03-06 15:27:32.443576120 +0530
++++ linux-4.1.8/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c	2018-03-06 15:33:43.627576076 +0530
+@@ -122,8 +122,11 @@
+ 	.hcd_priv_size = sizeof(struct wrapper_priv_data),
+ 
+ 	.irq = dwc_otg_hcd_irq,
+-
++#if LINUX_VERSION_CODE <= KERNEL_VERSION(3,12,0)
+ 	.flags = HCD_MEMORY | HCD_USB2,
++#else
++	.flags = HCD_MEMORY | HCD_USB2 | HCD_BH,
++#endif
+ 
+ 	//.reset =
+ 	.start = hcd_start,
+@@ -320,16 +323,25 @@
+ 					   urb);
+ 		}
+ 	}
++#if LINUX_VERSION_CODE > KERNEL_VERSION(3,7,7)
++	usb_hcd_unlink_urb_from_ep(dwc_otg_hcd_to_hcd(hcd), urb);
++#endif
+ 
++	urb->hcpriv = NULL;
+ 	DWC_FREE(dwc_otg_urb);
+ 
+-	DWC_SPINUNLOCK(hcd->lock);
++	
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
++	DWC_SPINUNLOCK(hcd->lock);
+ 	usb_hcd_giveback_urb(dwc_otg_hcd_to_hcd(hcd), urb);
++	DWC_SPINLOCK(hcd->lock);
++#elseif LINUX_VERSION_CODE <= KERNEL_VERSION(3,7,7)
++	DWC_SPINUNLOCK(hcd->lock);
++	usb_hcd_giveback_urb(dwc_otg_hcd_to_hcd(hcd), urb, status);
++	DWC_SPINLOCK(hcd->lock);
+ #else
+ 	usb_hcd_giveback_urb(dwc_otg_hcd_to_hcd(hcd), urb, status);
+ #endif
+-	DWC_SPINLOCK(hcd->lock);
+ 
+ 	return 0;
+ }
+@@ -656,6 +668,9 @@
+ 	int alloc_bandwidth = 0;
+ 	uint8_t ep_type = 0;
+ 	uint32_t flags = 0;
++#if LINUX_VERSION_CODE > KERNEL_VERSION(3,7,7)
++	dwc_irqflags_t irqflags;
++#endif
+ 	void *buf;
+ 
+ #ifdef DEBUG
+@@ -730,19 +745,39 @@
+ 	}
+ 
+ 	urb->hcpriv = dwc_otg_urb;
++#if LINUX_VERSION_CODE > KERNEL_VERSION(3,7,7)	
++	DWC_SPINLOCK_IRQSAVE(dwc_otg_hcd->lock, &irqflags);
++	retval = usb_hcd_link_urb_to_ep(hcd, urb);
++	DWC_SPINUNLOCK_IRQRESTORE(dwc_otg_hcd->lock, irqflags);
++	if (retval){
++		goto fail1;
++	}
++#endif
++	
+ 	retval = dwc_otg_hcd_urb_enqueue(dwc_otg_hcd, dwc_otg_urb, &ep->hcpriv,
+ 					 mem_flags == GFP_ATOMIC ? 1 : 0);
+-	if (!retval) {
++	if (retval){
++		goto fail2;
++	}
++	
+ 		if (alloc_bandwidth) {
+ 			allocate_bus_bandwidth(hcd,
+ 					       dwc_otg_hcd_get_ep_bandwidth
+ 					       (dwc_otg_hcd, ep->hcpriv), urb);
+ 		}
+-	} else {
+-		if (retval == -DWC_E_NO_DEVICE) {
+-			retval = -ENODEV;
+-		}
+-	}
++	
++	return 0;
++	
++fail2:
++#if LINUX_VERSION_CODE > KERNEL_VERSION(3,7,7)
++    DWC_SPINLOCK_IRQSAVE(dwc_otg_hcd->lock, &irqflags);
++    dwc_otg_urb->priv = NULL;
++    usb_hcd_unlink_urb_from_ep(hcd, urb);
++    DWC_SPINUNLOCK_IRQRESTORE(dwc_otg_hcd->lock, irqflags);
++#endif
++fail1:
++    urb->hcpriv = NULL;
++    DWC_FREE(dwc_otg_urb);
+ 
+ 	return retval;
+ }
+@@ -757,6 +792,7 @@
+ {
+ 	dwc_irqflags_t flags;
+ 	dwc_otg_hcd_t *dwc_otg_hcd;
++	int rc;
+ 	DWC_DEBUGPL(DBG_HCD, "DWC OTG HCD URB Dequeue\n");
+ 
+ 	dwc_otg_hcd = hcd_to_dwc_otg_hcd(hcd);
+@@ -769,24 +805,42 @@
+ 
+ 	DWC_SPINLOCK_IRQSAVE(dwc_otg_hcd->lock, &flags);
+ 
+-	dwc_otg_hcd_urb_dequeue(dwc_otg_hcd, urb->hcpriv);
++#if LINUX_VERSION_CODE > KERNEL_VERSION(3,7,7)
++	rc = usb_hcd_check_unlink_urb(hcd, urb, status);
++	if (rc)
++		goto out;
++#endif
++
++	if (!urb->hcpriv) {
++		DWC_DEBUGPL(DBG_HCD, "urb->hcpriv is NULL\n");
++		goto out;
++	}
++
++	rc = dwc_otg_hcd_urb_dequeue(dwc_otg_hcd, urb->hcpriv);
++
++#if LINUX_VERSION_CODE > KERNEL_VERSION(3,7,7)
++	usb_hcd_unlink_urb_from_ep(hcd, urb);
++#endif
+ 
+ 	DWC_FREE(urb->hcpriv);
+ 	urb->hcpriv = NULL;
+-	DWC_SPINUNLOCK_IRQRESTORE(dwc_otg_hcd->lock, flags);
+ 
+ 	/* Higher layer software sets URB status. */
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28)
+ 	usb_hcd_giveback_urb(hcd, urb);
+ #else
++	DWC_SPINUNLOCK_IRQRESTORE(dwc_otg_hcd->lock, flags); //mvardan
+ 	usb_hcd_giveback_urb(hcd, urb, status);
++	DWC_SPINLOCK_IRQSAVE(dwc_otg_hcd->lock, &flags); //mvardan
+ #endif
+ 	if (CHK_DEBUG_LEVEL(DBG_HCDV | DBG_HCD_URB)) {
+ 		DWC_PRINTF("Called usb_hcd_giveback_urb()\n");
+ 		DWC_PRINTF("  urb->status = %d\n", urb->status);
+ 	}
++out:
++	DWC_SPINUNLOCK_IRQRESTORE(dwc_otg_hcd->lock, flags);
+ 
+-	return 0;
++	return rc;
+ }
+ 
+ /* Frees resources in the DWC_otg controller related to a given endpoint. Also

@@ -1,0 +1,43 @@
+From e515602c4d87db001164a36b44764dccd12b6b91 Mon Sep 17 00:00:00 2001
+From: user <abdul.moiz@nxp.com>
+Date: Wed, 25 May 2016 12:27:36 +0530
+Subject: [PATCH 45/60] Fix for Linux Dual Boot support Signed-off-by: user
+ <abdul.moiz@nxp.com>
+
+---
+ commands/imageenv.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/commands/imageenv.c b/commands/imageenv.c
+index 9db5617..7805d59 100644
+--- a/commands/imageenv.c
++++ b/commands/imageenv.c
+@@ -37,7 +37,6 @@
+ #include <environment.h>
+ 
+ #define ENV_BUFSIZE 2
+-#define BOOTTARGS_BUFSIZE 512
+ 
+ char *file_env = "/dev/nand0.env";
+ /**
+@@ -92,7 +91,7 @@ static int command_imageenv_set(int argc, char *argv[])
+   int fd;
+   char *pch = NULL;
+   char buf[ENV_BUFSIZE] = {0xFF};
+-  char buf_boorargs[BOOTTARGS_BUFSIZE] = {0};
++  char *buf_boorargs;
+   char mtd_str[9] = {0};
+ 
+   if (argc < 3)
+@@ -137,7 +136,7 @@ static int command_imageenv_set(int argc, char *argv[])
+   }
+   close(fd);
+ 
+-  sprintf(buf_boorargs,"%s", getenv ("bootargs"));
++  buf_boorargs = getenv("bootargs");
+   pch = strstr (buf_boorargs,"ubi.mtd=");
+   sprintf(mtd_str, "ubi.mtd=%s", argv[2]);
+   strncpy (pch, mtd_str, sizeof(mtd_str));
+-- 
+2.7.4
+

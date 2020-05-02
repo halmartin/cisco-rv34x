@@ -1,0 +1,4 @@
+#!/bin/sh
+echo -e "addent -password -p $1@$3 -k 1 -e rc4-hmac\n$2\nwkt /etc/krb5.keytab\nquit\n"|./usr/bin/ktutil
+exit 0
+

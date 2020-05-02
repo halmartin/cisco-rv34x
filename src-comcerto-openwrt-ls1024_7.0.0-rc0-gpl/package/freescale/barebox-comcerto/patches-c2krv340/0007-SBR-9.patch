@@ -1,0 +1,332 @@
+From 2c828f1573f831b2579dbe44f15c051a201c4300 Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Mon, 20 Jul 2015 15:25:19 +0530
+Subject: [PATCH 07/60] SBR-9
+
+Added Fix for required boardinfo update/show functionality
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ commands/boardinfo.c | 242 +++++++++++++++++++++++++++++++++++++--------------
+ 1 file changed, 176 insertions(+), 66 deletions(-)
+
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+index 1fa6786..e810b9f 100644
+--- a/commands/boardinfo.c
++++ b/commands/boardinfo.c
+@@ -1,5 +1,6 @@
+ /*
+- * Copyright (c) 2015 Vinaykumar Masne <vinaykumar.masane@freescale>, Freescale Semicondunctors Pvt. Ltd. 
++ * Copyright (c) 2015 Vinaykumar Masane <vinaykumar.masane@freescale>, 
++ * Freescale Semicondunctors Pvt. Ltd. 
+  *
+  * See file CREDITS for list of people who contributed to this
+  * project.
+@@ -31,113 +32,222 @@
+ #include <string.h>
+ #include <command.h>
+ #include <common.h>
++#include <malloc.h>
+ #include <errno.h>
+ #include <environment.h>
+ 
+-struct c2krv340_board_info {
++typedef struct c2krv340_board_info {
+   char pid[12];             /* Product ID */
+   char vid[4];              /* H/W Version */
+   char s_n[12];             /* Board Serial Number */
+   unsigned char mac[3][6];  /* MAC Information */
+-} __attribute__ ((packed));
++} c2krv340;
+ 
+ 
++char *help_string = "Check Usage: boardinfo <Enter>\n";
+ char *filename = "/dev/spi1.board-info" ;
++
+ static int command_boardinfo_update(int argc, char *argv[])
+ {
+-  int ret = 0, fd = -1, n_written = 0  ;
+-  int i,j,k, len = 0;
+-  char mac_str[18] = {'\0'}, prompt_str[18] = {'\0'};
+-  char *pChar = mac_str;
+-  long long unsigned int mac_val = 0;
+-  struct c2krv340_board_info board_data;
+-
+-  memset(&board_data, 0x00, sizeof(board_data));
+-  readline("Enter PID : ", board_data.pid, sizeof(board_data.pid));
+-  readline("Enter VID : ", board_data.pid, sizeof(board_data.vid));
+-  readline("Enter S/N : ", board_data.pid, sizeof(board_data.s_n));
+-  printf("\n PID = %s", board_data.pid);
+-  printf("\n VID = %s", board_data.vid);
+-  printf("\n S/N = %s", board_data.s_n);
+-	for (j=0; j<3; j++)
+-	{
+-		sprintf(prompt_str,"Enter %s MAC : ",  j == 0 ? "LAN" : (j == 1 ? "WAN-1" : "WAN-2")); 
+-    readline(prompt_str, mac_str, sizeof(mac_str));
+-    len=strlen(mac_str);
++  int ret = 0, fd = -1, n_written = 0;
++	int i, len = 0, isOctetFull = 0, n_mac_octet = 0, n_colons = 0;
++  char c = '\0';
++ 
++  c2krv340 board_data;
+ 
+-    for(i=0; i<len; i++){
+-      mac_val = mac_val * 10 + ( mac_str[i] - '0' );
++  flush(stdin); 
++  
++	memset(&board_data, 0x00, sizeof(board_data));
++  printf("\nEnter PID : ");
++  while (len < sizeof(board_data.pid))
++  {
++		c = getc();
++		if ( isalnum(c) || c == 0x0A || c == 0x0D || c == 0x2D )
++			putchar(c);
++		else
++		{
++			printf("\n c = 0x%X Input Error! %s", c, help_string);
++			return COMMAND_ERROR;
++		}
++    if ( c == 0x0D)
++    {
++      break;
+     }
+-    printf("\n %llu %llX %s\n", mac_val, mac_val, mac_str);
+-		for (i=0, k=5; i<6; i++, k--)
++    board_data.pid[len++] = c;
++  }
++  
++  len = 0;
++  printf("\nEnter VID : ");
++  while (len < sizeof(board_data.vid))
++  {
++		c = getc();
++		if ( isalnum(c) || c == 0x0A || c == 0x0D || c == 0x2D )
++			putchar(c);
++		else
+ 		{
+-			board_data.mac[j][i] = *(((unsigned char *)&mac_val)+k);
++			printf("\n c = 0x%X Input Error! %s", c, help_string);
++			return COMMAND_ERROR;
+ 		}
+-	}
++    if ( c == 0x0D)
++    {
++      break;
++    }
++		board_data.vid[len++] = c;
++  }
++
++  len = 0;
++  printf("\nEnter S/N : ");
++  while (len < sizeof(board_data.s_n))
++  {
++		c = getc();
++		if ( isalnum(c) || c == 0x0A || c == 0x0D || c == 0x2D )
++			putchar(c);
++		else
++		{
++			printf("\n c = 0x%X Input Error! %s", c, help_string);
++			return COMMAND_ERROR;
++		}
++    if ( c == 0x0D)
++    {
++      break;
++    }
++		board_data.s_n[len++] = c;
++  }
++
++	for (i=0; i<3; i++)
++	{
++		isOctetFull = 0;
++    n_colons = 0;
++    n_mac_octet = 0;
++    printf("\nEnter %-5s MAC : ",  i == 0 ? "LAN" : (i == 1 ? "WAN-1" : "WAN-2"));
++    while ((n_mac_octet < 6) && (n_colons < 6)) 
++    {
++		  c = getc();
++		  putchar(c);
++			if ((isxdigit(c)) && ( isOctetFull < 2 ))
++		  {
++        unsigned char offset = 0;
++				offset = islower(c) ? 0x57 : isupper(c) ? 0x37 : isdigit(c) ? 0x30 : 0;
++				if ( isOctetFull == 0 )
++				{
++				  board_data.mac[i][n_mac_octet] = ((unsigned int)c - offset) << 4;
++				  isOctetFull = 1;
++				}
++				else if ( isOctetFull == 1 )
++				{
++				  board_data.mac[i][n_mac_octet] |= (((unsigned int)c - offset) & 0xFF);
++          ++n_mac_octet;
++					isOctetFull = 2;
++				}
++		  }
++		  else if ((  c == ':' ) && ( isOctetFull == 2 ))
++			{
++			  ++n_colons;
++				isOctetFull = 0;
++				continue;
++      }
++      else
++      {
++				printf("\n c = 0x%X Input Error! %s", c, help_string);
++        return COMMAND_ERROR;
++      }
++		}
++  }
+   fd = open(filename, O_RDWR, 0);
+ 	if (fd < 0) {
+ 		printf("could not open %s!\n", filename);
+-		return ret = -1;
++    return COMMAND_ERROR;
+ 	}
+ 
+   /* ENOSYS is no error here, many devices do not need it */
+   if (ret && errno != -ENOSYS) {
+     printf("could not unprotect %s: %s\n", filename, errno_str());
+     close(fd);
+-    return 1;
++		printf("\n");
++    return COMMAND_ERROR;
+   }
+   
++	/* Erase Board Info Partition */
+   ret = erase(fd, ~0, 0);
+ 
+   /* ENOSYS is no error here, many devices do not need it */
+   if (ret && errno != -ENOSYS) {
+     printf("could not erase %s: %s\n", filename, errno_str());
+     close(fd);
+-    return 1;
++		printf("\n");
++    return COMMAND_ERROR;
+   }    
+-  printf("\nOpened file boade-info.bin for WRITTING...\n");
++  printf("\nOpened file %s for WRITTING...\n", filename);
+   n_written = write(fd, (char *)&board_data, sizeof(board_data));
+-  printf("\n Wrote %d bytes out of %d bytes\n", n_written, (int)sizeof(board_data));
++  printf("\n Wrote %d bytes out of %d input bytes\n", n_written, (int)sizeof(board_data));
+   close(fd);
++	printf("\n");
+ 	return COMMAND_SUCCESS;
+ }
++
+ static int command_boardinfo_show(int argc, char *argv[])
+ {
+-  int ret = 0, fd = -1, n_read = 0;
+-  int j;
+-  char mac_str[18] = {0};
+-  struct c2krv340_board_info board_data;
+-
+-  memset(&board_data, 0x00, sizeof(board_data));
++  int fd = -1, n_read = 0;
++  int i = 0;
++  char out_str[18] = {0};
++  c2krv340 *board_data = NULL;
++    
+   fd = open(filename, O_RDONLY, 0);
+   if (fd < 0) {
+-    printf("could not open %s!\n", "board-info.bin");
+-    return ret = -1;
++    printf("could not open %s!\n", filename);
++    return COMMAND_ERROR;
+   }
+-
+-  printf("\nOpened file boade-info.bin for READING...\n");
+-  n_read = read(fd, (char *)&board_data, (int)sizeof(board_data));
+-  printf("\n Read %d bytes out of %d bytes\n", n_read, (int)sizeof(board_data));
++  printf("\nOpened file %s for READING...", filename);
++  board_data = (c2krv340 *)xmalloc(sizeof(c2krv340));
++  memset((char *)board_data, 0x00, sizeof(c2krv340));
++  n_read = read(fd, (char *)board_data, sizeof(c2krv340));
++  printf("Read %d bytes out of %d bytes\n", n_read, sizeof(c2krv340));
+   close(fd);
++  flush(stdout);
+ 
+-  printf("\n\n********Board Info********\n");
+-  printf("PID     : %s\n", board_data.pid);
+-  printf("VID     : %s\n", board_data.vid);
+-  printf("Sr. NO. : %s\n", board_data.s_n);
+-  for (j=0; j<3; j++)
++  printf("\nPID  : ");
++  for(i = 0; i < 12; i++)
++  {
++    if (isprint(*((char *)board_data->pid + i)))
++      putchar(*((char *)board_data->pid + i));
++    else
++      putchar(' ');
++  }
++  printf("\nVID  : ");
++  for(i = 0; i < 4; i++)
++  {
++    if (isprint(*((char *)board_data->vid + i)))
++      putchar(*((char *)board_data->vid + i));
++    else
++      putchar(' ');
++  }
++  printf("\nS/N  : ");
++  for(i = 0; i < 12; i++)
++  {
++    if (isprint(*((char *)board_data->s_n + i)))
++      putchar(*((char *)board_data->s_n + i));
++    else
++      putchar(' ');
++  }
++  flush(stdout);
++  
++  for (i=0; i<3; i++)
+ 	{
+-		memset(mac_str, 0x00, sizeof(mac_str));
+-		sprintf(mac_str,"%02X:%02X:%02X:%02X:%02X:%02X",\
+-											board_data.mac[j][0],\
+-											board_data.mac[j][1],\
+-											board_data.mac[j][2],\
+-											board_data.mac[j][3],\
+-											board_data.mac[j][4],\
+-											board_data.mac[j][5]);
+-		printf("\n%s MAC : %s\n", j == 0 ? "LAN" : j == 1 ? "WAN-1" : "WAN-2", mac_str);
++		memset(out_str, 0x00, sizeof(out_str));
++		sprintf(out_str,"%02X:%02X:%02X:%02X:%02X:%02X",\
++											(unsigned char)board_data->mac[i][0],\
++											(unsigned char)board_data->mac[i][1],\
++											(unsigned char)board_data->mac[i][2],\
++											(unsigned char)board_data->mac[i][3],\
++											(unsigned char)board_data->mac[i][4],\
++											(unsigned char)board_data->mac[i][5]);
++		printf("\n%-5s MAC : %s", i == 0 ? "LAN" : i == 1 ? "WAN-1" : "WAN-2", out_str);
+ 	}
++  free(board_data);
++	printf("\n");
+ 	return COMMAND_SUCCESS;
+ }
++
+ static int do_boardinfo(struct command *cmdtp, int argc, char *argv[])
+ {
+ 	if (strcmp(argv[1], "-u") == 0)
+@@ -159,16 +269,16 @@ static const __maybe_unused char cmd_boardinfo_help[] =
+ "Usage: boardinfo [OPTIONS]\n"
+ "\n"
+ "options:\n"
+-"  -r  		(default option) lists boardinfo contents from /dev/spi1.board-info\n"
+-"  -u     update board-info (default updates info to /dev/spi1.board-info)\n"
+-"  e.g.     boardinfo -u\n"
++" -u      update board-info (default updates info to /dev/spi1.board-info)\n"
++" -s      lists boardinfo contents from /dev/spi1.board-info\n"
++" e.g.    boardinfo -u\n"
+ "Enter PID : <MAX 12 char>\n"
+ "Enter VID : <MAX 4 char>\n"
+ "Enter S/N : <MAX 11 char>\n"
+-"Enter LAN MAC : <6 bytes MAC address without any separator e.g. :>\n"
+-"Enter WAN-1 MAC : <6 bytes MAC address without any separator e.g. :>\n"
+-"Enter WAN-2 MAC : <6 bytes MAC address without any separator e.g. :>\n"
+-"\n";
++"Enter LAN MAC   : <6 octects of MAC address with : separator e.g. aa:bb:cc:dd:ee:f0 >\n"
++"Enter WAN-1 MAC : <6 octects of MAC address with : separator e.g. aa:bb:cc:dd:ee:f1 >\n"
++"Enter WAN-2 MAC : <6 octects of MAC address with : separator e.g. aa:bb:cc:dd:ee:f2 >\n"
++;
+ 
+ BAREBOX_CMD_START(boardinfo)
+ 	.cmd		= do_boardinfo,
+-- 
+2.7.4
+

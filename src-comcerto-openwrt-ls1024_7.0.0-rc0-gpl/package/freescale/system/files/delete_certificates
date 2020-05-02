@@ -1,0 +1,105 @@
+#!/bin/sh
+. /lib/functions.sh
+. /lib/functions/network.sh
+. /etc/boardInfo
+
+DEFAULT_CERT="Default.pem"
+DEFAULT_CERT_NAME="Default"
+CA_CERT_DIR=/etc/ssl/cacerts/
+CERT_DIR=/etc/ssl/certs/
+KEY_DIR=/etc/ssl/private/
+SWUPDATE_FILE="/mnt/configcert/config/swupdateinfo"
+LICENCE_PATH="/mnt/license/"
+CERTS_STATS_COMMAND="/usr/bin/certscript"
+PEM_EXT="pem"
+
+delete_cert () {
+        local cfg="$1"
+        local cert_name
+        config_get cert_name "$cfg" cert_name "-"
+	rm -rf $CERT_DIR/$cert_name.$PEM_EXT
+	rm -rf $KEY_DIR/$cert_name.$PEM_EXT
+}
+
+delete_all_certs () {
+        config_load certificate
+        config_foreach delete_cert generated_certificate
+        config_foreach delete_cert imported_certificate
+	echo "" > $MNT_CERT_FILE
+	echo "" > $TMP_CERT_FILE
+}
+
+delete_all_except_default () {
+	rm -rf $CA_CERT_DIR/*
+	find $CERT_DIR -type f | grep -v $DEFAULT_CERT | xargs rm -rf
+	find $KEY_DIR -type f | grep -v $DEFAULT_CERT | xargs rm -rf
+
+	tmp=`uci show certificate | grep cert_name | cut -d . -f 2` >/dev/null 2>&1
+
+	for word in $tmp;do
+		if [ "$word" != "Default" ];then
+			`uci del certificate.$word` >/dev/null 2>&1
+		fi
+	done
+	uci commit certificate
+	cp -f $TMP_CERT_FILE $MNT_CERT_FILE
+}
+
+delete_only_default_certificate () {
+	rm -rf $CERT_DIR/$DEFAULT_CERT
+	rm -rf $KEY_DIR/$DEFAULT_CERT
+	`uci del certificate.$DEFAULT_CERT_NAME` >/dev/null 2>&1
+	uci commit certificate
+	cp -f $TMP_CERT_FILE $MNT_CERT_FILE
+}
+
+setDefaultCronJobs () {
+	# set only default cronjobs
+	cp -f $RootfsCronConfig $CronConfigFile 	
+}
+
+setDefaultTime () {
+	# set the timezone to default & remove the Flash Time.
+	rm -f $TimeFile
+	echo "GMT-0:00" > $TZFile
+}
+
+deleteLicenseInfo () {
+	# Delete licence info
+	rm -rf ${LICENCE_PATH}/sapiidsync.info
+	rm -rf ${LICENCE_PATH}/satimeflagsync.info
+	rm -rf ${LICENCE_PATH}/sanosync.info
+}
+
+setDefaultswinfo () {
+	# Update swinfo to empty
+	sed -i "/^frm_available_version=/c\frm_available_version=\"\"" $SWUPDATE_FILE
+	sed -i "/^frm_last_check_time=/c\frm_last_check_time=\"\"" $SWUPDATE_FILE
+	sed -i "/^usb_available_version=/c\usb_available_version=\"\"" $SWUPDATE_FILE
+	sed -i "/^usb_last_check_time=/c\usb_last_check_time=\"\"" $SWUPDATE_FILE
+	sed -i "/^sig_available_version=/c\sig_available_version=\"\"" $SWUPDATE_FILE
+	sed -i "/^sig_last_check_time=/c\sig_last_check_time=\"\"" $SWUPDATE_FILE
+	sed -i "/^sec_available_version=/c\sec_available_version=\"\"" $SWUPDATE_FILE
+	sed -i "/^sec_last_check_time=/c\sec_last_check_time=\"\"" $SWUPDATE_FILE
+}
+
+if [ "$1" != "factory_default" ] && [ "$1" != "factory_default_with_cert" ] && [ "$1" != "delete_only_default_certificate" ];then
+	echo "Usage: /usr/bin/delete_certificates factory_default|factory_default_with_cert|delete_only_default_certificate"
+fi
+
+if [ "$1" = "factory_default" ];then
+	delete_all_except_default
+	$CERTS_STATS_COMMAND	
+elif [ "$1" = "factory_default_with_cert" ];then
+	delete_all_certs
+	$CERTS_STATS_COMMAND	
+elif [ "$1" = "delete_only_default_certificate" ];then
+	delete_only_default_certificate
+	exit 0
+fi
+
+setDefaultCronJobs
+setDefaultTime
+#deleteLicenseInfo # comment out as per cisco
+setDefaultswinfo
+

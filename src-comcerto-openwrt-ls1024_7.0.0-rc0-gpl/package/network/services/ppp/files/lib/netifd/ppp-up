@@ -1,0 +1,39 @@
+#!/bin/sh
+PPP_IPPARAM="$6"
+
+. /lib/netifd/netifd-proto.sh
+proto_init_update "$IFNAME" 1 1
+proto_set_keep 1
+[ -n "$PPP_IPPARAM" ] && {
+	[ -n "$IPLOCAL" ] && proto_add_ipv4_address "$IPLOCAL" 32
+	[ -n "$IPREMOTE" ] && proto_add_ipv4_route 0.0.0.0 0 "$IPREMOTE"
+
+	WANNAME=$(echo $IFNAME | awk -F '-' '{print $1}')
+	if [ "$WANNAME" != "ppoe" ]; then
+		WANNAME=$(echo $IFNAME | awk -F '-' '{print $2}')
+		serverip=$(uci get network.$WANNAME.server)
+		serverip=$(resolveip -4 -t 5 $serverip)
+		if [ "$serverip" == "$IPREMOTE" ]; then
+			route add -net $serverip/32 dev $IFNAME metric 50
+			route del -net $serverip/32 dev $IFNAME metric 0
+		fi
+	fi 
+
+	[ -n "$LLLOCAL" ] && proto_add_ipv6_address "$LLLOCAL" 128
+	[ -n "$DNS1" ] && proto_add_dns_server "$DNS1"
+	[ -n "$DNS2" -a "$DNS1" != "$DNS2" ] && proto_add_dns_server "$DNS2"
+}
+proto_send_update "$PPP_IPPARAM"
+
+[ -d /etc/ppp/ip-up.d ] && {
+	for SCRIPT in /etc/ppp/ip-up.d/*
+	do
+		[ -x "$SCRIPT" ] && "$SCRIPT" "$@"
+	done
+}
+
+ipv6_pppoe=`echo $IFNAME | grep -E "ppoe-wan26.*|ppoe-wan16.*"`
+[ -n "$ipv6_pppoe" ] && {
+	ip -6 route del default dev $IFNAME
+	echo 2 >/proc/sys/net/ipv6/conf/$IFNAME/accept_ra
+}

@@ -1,0 +1,15 @@
+
+config port 'wan1'
+	option name 'wan1'
+	option status '1'
+	option flow_control 'on'
+	option mode 'auto'
+	option eee 'on'
+
+config port 'wan2'
+	option name 'wan2'
+	option status '1'
+	option flow_control 'on'
+	option mode 'auto'
+	option eee 'on'
+

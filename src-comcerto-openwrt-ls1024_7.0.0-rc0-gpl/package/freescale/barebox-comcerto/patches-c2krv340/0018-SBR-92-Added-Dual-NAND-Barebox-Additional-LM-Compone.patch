@@ -1,0 +1,755 @@
+From 2420c021c050084d2c2bdfa2aba942a783c2ba9e Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Thu, 1 Oct 2015 20:45:22 +0530
+Subject: [PATCH 18/60] SBR-92 Added Dual NAND Barebox, Additional LM
+ Components to Boardinfo
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/env/bin/boot        |  14 +-
+ arch/arm/boards/comcerto-rv340/env/config          |  12 +-
+ arch/arm/configs/comcerto-2k_rv340_defconfig       |   1 +
+ arch/arm/configs/comcerto-2k_rv340_diags_defconfig |   1 +
+ .../comcerto-2k_rv340_nand_uloader_defconfig       |  94 +-----------
+ .../configs/comcerto-2k_rv340_uloader_defconfig    |   1 +
+ arch/arm/lib/bootb.c                               |  16 +-
+ commands/Kconfig                                   |   7 +
+ commands/Makefile                                  |   3 +-
+ commands/boardinfo.c                               | 169 ++++++++++++++++-----
+ commands/imageenv.c                                |  97 ++++++++++++
+ 11 files changed, 277 insertions(+), 138 deletions(-)
+ create mode 100644 commands/imageenv.c
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/boot b/arch/arm/boards/comcerto-rv340/env/bin/boot
+index 379be11..4cc7914 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/boot
++++ b/arch/arm/boards/comcerto-rv340/env/bin/boot
+@@ -28,6 +28,14 @@ elif [ x$1 = xtftp ]; then
+ 	kernel_loc=tftp
+ fi
+ 
++echo "Setting active/inactive env..."
++imageenv
++echo "done"
++echo "Exporting env..."
++echo "active = $active inactive = $inactive"
++export active="$active" inactive="$inactive"
++echo "done"
++
+ if [ x$1 = xactive ]; then
+   echo "Booting active $active ..."
+   if [ x$active = ximage1 ]; then
+@@ -61,9 +69,9 @@ else
+ fi
+ 
+ if [ x$rootfs = xrootfs1 ]; then
+-  rootfs_mtdblock_nand=2
+-elif [ x$rootfs = xrootfs2 ]; then
+   rootfs_mtdblock_nand=5
++elif [ x$rootfs = xrootfs2 ]; then
++  rootfs_mtdblock_nand=8
+ fi
+ 
+ echo "Setting env LAN, WAN1, WAN2..."
+@@ -90,7 +98,7 @@ if [ x$ip = xdhcp ]; then
+ elif [ x$ip = xnone ]; then
+ 	bootargs="$bootargs ip=none"
+ else
+-	bootargs="$bootargs ip=$eth0.ipaddr::$eth0.gateway:$eth0.netmask:::"
++	bootargs="$bootargs ip=$eth0_ipaddr::$eth0_gateway:$eth0_netmask:::"
+ fi
+ 
+ if [ x$rootfs_loc = xnet ]; then
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index ad364b5..701af7c 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -5,10 +5,10 @@
+ ip=none
+ 
+ # or set your networking parameters here
+-#eth0.ipaddr=192.168.1.1
+-#eth0.netmask=255.255.255.0
+-#eth0.serverip=192.168.1.101
+-#eth0.gateway=192.168.1.254
++eth0_ipaddr=192.168.1.1
++eth0_netmask=255.255.255.0
++eth0_serverip=192.168.1.101
++eth0_gateway=192.168.1.254
+ eth0_ethaddr="00:0A:0B:0C:0D:0E"
+ eth1_ethaddr="00:1A:1B:1C:1D:1E"
+ eth2_ethaddr="00:2A:2B:2C:2D:2E"
+@@ -35,10 +35,10 @@ active=image1
+ inactive=image2
+ 
+ fast_spi_device="spi1.0"
+-fast_spi_parts="128k(uloader)ro,512k(barebox)ro,128k(env),128k(board-info)"
++fast_spi_parts="128k(uloader)ro,512k(barebox),128k(env),128k(board-info)ro"
+ 
+ nand_device="comcertonand"
+-nand_parts="512k(barebox)ro,8M(kernel1),64M(rootfs1),512k(reserved-dtb1)ro,8M(kernel2),64M(rootfs2),512k(reserved-dtb2)ro,2M(config-cert),8M(avc-sign),32M(webrootdb)"
++nand_parts="512k(barebox),512k(bareboxfact)ro,512k(env),512k(boardinfo)ro,8M(kernel1),72M(rootfs1),512k(reserved_dtb1)ro,8M(kernel2),72M(rootfs2),512k(reserved_dtb2)ro,2M(configcert),12M(avcsign),32M(webrootdb),1M(license)"
+ 
+ autoboot_timeout=3
+ 
+diff --git a/arch/arm/configs/comcerto-2k_rv340_defconfig b/arch/arm/configs/comcerto-2k_rv340_defconfig
+index 847571f..c3641e7 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_defconfig
+@@ -206,6 +206,7 @@ CONFIG_CMD_UPDATE_SPI=y
+ CONFIG_CMD_UPDATE_FAST_SPI=y
+ CONFIG_CMD_COPY=y
+ CONFIG_CMD_BOARDINFO=y
++CONFIG_CMD_IMAGEENV=y
+ 
+ #
+ # console                       
+diff --git a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+index db5cfaf..23b7498 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+@@ -246,6 +246,7 @@ CONFIG_CMD_UPDATE_SPI=y
+ CONFIG_CMD_UPDATE_FAST_SPI=y
+ CONFIG_CMD_COPY=y
+ CONFIG_CMD_BOARDINFO=y
++CONFIG_CMD_IMAGEENV=y
+ 
+ #
+ # console                       
+diff --git a/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig b/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig
+index 2cfd152..bf2c824 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux/arm 2011.06.0 Barebox Configuration
+-# Tue Feb 17 19:10:45 2015
++# Thu Oct  1 19:21:55 2015
+ #
+ # CONFIG_BOARD_LINKER_SCRIPT is not set
+ CONFIG_GENERIC_LINKER_SCRIPT=y
+@@ -99,7 +99,6 @@ CONFIG_CPU_32v7=y
+ CONFIG_DEFCONFIG_LIST="$ARCH_DEFCONFIG"
+ CONFIG_HAS_KALLSYMS=y
+ CONFIG_HAS_MODULES=y
+-# CONFIG_CMD_MEMORY is not set
+ CONFIG_HAVE_NOSHELL=y
+ 
+ #
+@@ -123,6 +122,7 @@ CONFIG_MALLOC_SIZE=0x3000
+ # CONFIG_BROKEN is not set
+ # CONFIG_EXPERIMENTAL is not set
+ CONFIG_MALLOC_DLMALLOC=y
++# CONFIG_MALLOC_DUMMY is not set
+ # CONFIG_KALLSYMS is not set
+ CONFIG_PROMPT="uLoader >"
+ CONFIG_BAUDRATE=115200
+@@ -131,8 +131,8 @@ CONFIG_SIMPLE_READLINE=y
+ CONFIG_CBSIZE=1024
+ CONFIG_MAXARGS=16
+ # CONFIG_SHELL_HUSH is not set
+-CONFIG_SHELL_SIMPLE=y
+-# CONFIG_SHELL_NONE is not set
++# CONFIG_SHELL_SIMPLE is not set
++CONFIG_SHELL_NONE=y
+ # CONFIG_CMDLINE_EDITING is not set
+ # CONFIG_MEM_SIZE is not set
+ # CONFIG_MENU is not set
+@@ -154,90 +154,6 @@ CONFIG_CONSOLE_ACTIVATE_FIRST=y
+ # CONFIG_ENABLE_FLASH_NOISE is not set
+ # CONFIG_ENABLE_PARTITION_NOISE is not set
+ # CONFIG_ENABLE_DEVICE_NOISE is not set
+-CONFIG_COMMAND_SUPPORT=y
+-
+-#
+-# commands                      
+-#
+-
+-#
+-# scripting                     
+-#
+-# CONFIG_CMD_EDIT is not set
+-# CONFIG_CMD_EXEC is not set
+-# CONFIG_CMD_SLEEP is not set
+-# CONFIG_CMD_SAVEENV is not set
+-# CONFIG_CMD_LOADENV is not set
+-# CONFIG_CMD_EXPORT is not set
+-# CONFIG_CMD_PRINTENV is not set
+-# CONFIG_CMD_READLINE is not set
+-# CONFIG_CMD_TRUE is not set
+-# CONFIG_CMD_FALSE is not set
+-# CONFIG_CMD_LOGIN is not set
+-# CONFIG_CMD_PASSWD is not set
+-
+-#
+-# file commands                 
+-#
+-# CONFIG_CMD_LS is not set
+-# CONFIG_CMD_RM is not set
+-# CONFIG_CMD_CAT is not set
+-# CONFIG_CMD_MKDIR is not set
+-# CONFIG_CMD_RMDIR is not set
+-# CONFIG_CMD_CP is not set
+-# CONFIG_CMD_PWD is not set
+-# CONFIG_CMD_CD is not set
+-# CONFIG_CMD_MOUNT is not set
+-# CONFIG_CMD_UMOUNT is not set
+-CONFIG_CMD_NAND=y
+-# CONFIG_CMD_NOR is not set
+-# CONFIG_CMD_UPDATE_SPI is not set
+-# CONFIG_CMD_UPDATE_FAST_SPI is not set
+-# CONFIG_CMD_COPY is not set
+-
+-#
+-# console                       
+-#
+-# CONFIG_CMD_CLEAR is not set
+-# CONFIG_CMD_ECHO is not set
+-
+-#
+-# memory                        
+-#
+-# CONFIG_CMD_LOADB is not set
+-# CONFIG_CMD_MEMINFO is not set
+-# CONFIG_CMD_CRC is not set
+-# CONFIG_CMD_MTEST is not set
+-
+-#
+-# flash                         
+-#
+-CONFIG_CMD_FLASH=y
+-# CONFIG_CMD_UBI is not set
+-
+-#
+-# booting                       
+-#
+-# CONFIG_CMD_BOOTM is not set
+-# CONFIG_CMD_BOOTZ is not set
+-# CONFIG_CMD_BOOTU is not set
+-# CONFIG_CMD_RESET is not set
+-CONFIG_CMD_GO=y
+-CONFIG_CMD_BOOTB=y
+-# CONFIG_CMD_TIMEOUT is not set
+-CONFIG_CMD_PARTITION=y
+-# CONFIG_CMD_VERSION is not set
+-# CONFIG_CMD_HELP is not set
+-# CONFIG_CMD_DEVINFO is not set
+-# CONFIG_CMD_UNLZO is not set
+-
+-#
+-# c2000			
+-#
+-# CONFIG_CMD_SOCINFO is not set
+-# CONFIG_CMD_GEMAC_STATS is not set
+-# CONFIG_CMD_PFE_STATS is not set
+-# CONFIG_CMD_PFE_COMMANDS is not set
+ # CONFIG_NET is not set
+ 
+ #
+@@ -294,7 +210,7 @@ CONFIG_MTD_NAND_IDS=y
+ # OTP driver                
+ #
+ # CONFIG_OTP is not set
+-# CONFIG_DRIVER_OTP is not set
++CONFIG_DRIVER_OTP=y
+ 
+ #
+ # SPAcc driver                
+diff --git a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+index f1c0276..d7a2eef 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+@@ -194,6 +194,7 @@ CONFIG_COMMAND_SUPPORT=y
+ # CONFIG_CMD_UPDATE_FAST_SPI is not set
+ # CONFIG_CMD_COPY is not set
+ # CONFIG_CMD_BOARDINFO is not set
++# CONFIG_CMD_IMAGEENV is not set
+ 
+ #
+ # console                       
+diff --git a/arch/arm/lib/bootb.c b/arch/arm/lib/bootb.c
+index a49a59b..a612caf 100644
+--- a/arch/arm/lib/bootb.c
++++ b/arch/arm/lib/bootb.c
+@@ -103,7 +103,7 @@ static int do_bootb_barebox(void)
+ #ifdef CONFIG_COMCERTO_NAND_ULOADER
+ 	/* this option is used when uloader is in NOR flash or I2C EEPROM and
+ 	barebox is in NAND */
+-	printf("\nCopying Barebox from NAND Flash(bootopt=%d)\n", bootopt);
++  printf("\nCopying Barebox from NAND Flash(bootopt=%d) @offset = 0x%0X\n", bootopt, 0);
+ 	read_nand(BAREBOX_LODING_ADDR, 0x0, count);
+ #else
+ 
+@@ -143,7 +143,19 @@ static int do_bootb_barebox(void)
+ 
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
+ 	boot_addr = (void *) verify_and_authenticate_boot_image((u8 *)BAREBOX_LODING_ADDR);
+-	if (boot_addr != NULL) {
++
++#if ( CONFIG_COMCERTO_NAND_ULOADER && CONFIG_MACH_COMCERTO_C2K_RV340 )
++  if (boot_addr == NULL) {
++	  /* this option is used when uloader is in NOR flash or I2C EEPROM and
++   	   barebox is in NAND */
++		printf("\nActive Image validation error");
++  	printf("\nCopying Barebox from NAND Flash(bootopt=%d) @offset = 0x%0X\n", bootopt, (unsigned)BAREBOX_PART_SIZE);
++	  read_nand(BAREBOX_LODING_ADDR, BAREBOX_PART_SIZE, count);
++	  boot_addr = (void *) verify_and_authenticate_boot_image((u8 *)BAREBOX_LODING_ADDR);
++  }
++#endif
++
++  if (boot_addr != NULL) {
+ 		bb_go((void*) boot_addr);
+ 	}
+ 	else {
+diff --git a/commands/Kconfig b/commands/Kconfig
+index 9a67f52..cde5f88 100644
+--- a/commands/Kconfig
++++ b/commands/Kconfig
+@@ -174,6 +174,13 @@ config CMD_BOARDINFO
+ 	help
+ 	  This command allows to update and show RV340 Board Specfic Information.
+ 
++config CMD_IMAGEENV
++	bool
++	prompt "RV340 imageenv"
++	default n
++	help
++	  This command reads and sets active<>inactive ID for board boot-up.
++
+ endmenu
+ 
+ menu "console                       "
+diff --git a/commands/Makefile b/commands/Makefile
+index 40c4176..e87b641 100755
+--- a/commands/Makefile
++++ b/commands/Makefile
+@@ -67,4 +67,5 @@ obj-$(CONFIG_CMD_PFE_DIAGS)	+= c2000_pfe_diags.o
+ obj-$(CONFIG_CMD_AR8328)	+= atheros.o
+ obj-$(CONFIG_CMD_COPY)		+= copy.o
+ obj-$(CONFIG_CMD_SATA)		+= sata.o
+-obj-$(CONFIG_CMD_BOARDINFO)		+= boardinfo.o
++obj-$(CONFIG_CMD_BOARDINFO)  += boardinfo.o
++obj-$(CONFIG_CMD_BOARDINFO)  += imageenv.o
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+index ed83697..4dc1ac9 100644
+--- a/commands/boardinfo.c
++++ b/commands/boardinfo.c
+@@ -36,16 +36,15 @@
+ #include <errno.h>
+ #include <environment.h>
+ 
+-#define SIZE_PID 11  /* Max 11 Character Product ID */
+-#define SIZE_VID  3  /* Max  3 Character H/W Version */
+-#define SIZE_S_N 11  /* Max 11 Character Board Serial Number */
+-#define SIZE_P_N 12  /* Max 11 Character Board Serial Number */
+-#define SIZE_SW_VER 4  /* Max 11 Character Board Serial Number */
+-#define SIZE_PROD_NAME 60  /* Max 11 Character Board Serial Number */
+-#define SIZE_PROD_SERIES 16  /* Max 11 Character Board Serial Number */
+-#define SIZE_SW_DESC 128  /* Max 11 Character Board Serial Number */
+-#define SIZE_SW_OBJID 32  /* Max 11 Character Board Serial Number */
+-
++#define SIZE_PID 11         /* Max  11 Character Product ID */
++#define SIZE_VID  3         /* Max  03 Character H/W Version */
++#define SIZE_S_N 11         /* Max  11 Character Board Serial Number */
++#define SIZE_P_N 12         /* Max  12 Character Board Part Number */
++#define SIZE_SW_VER 4       /* Max  04 Character Board Software Version */
++#define SIZE_PROD_NAME 16   /* Max  16 Character Board Product Name */
++#define SIZE_PROD_SERIES 16 /* Max  16 Character Board Product Series */
++#define SIZE_SW_DESC 128    /* Max 128 Character Board Software Description */
++#define SIZE_SW_OBJID 32    /* Max  32 Character Board Software Object ID */
+ 
+ #define COUNT_MAC        3 /* 3 MAC-IDs one each for LAN, WAN-1, WAN-2 */
+ #define TOTAL_MAC_OCTET  6 /* No. of MAC Octets in MAC ID */
+@@ -69,7 +68,7 @@ typedef struct c2krv340_board_info {
+ }  __attribute__ ((__packed__)) c2krv340;
+ 
+ char *help_string = "Check Usage: boardinfo <Enter>\n";
+-char *filename = "/dev/spi1.board-info" ;
++char *filename = "/dev/nand0.boardinfo";
+ 
+ static int command_boardinfo_mac(int argc, char *argv[])
+ {
+@@ -90,7 +89,6 @@ static int command_boardinfo_mac(int argc, char *argv[])
+   {
+     printf("Error %d! : %s\n", errno, errno_str());
+     close(fd);
+-    printf("\n");
+     return COMMAND_ERROR;
+   }
+ 
+@@ -106,15 +104,38 @@ static int command_boardinfo_mac(int argc, char *argv[])
+   flush(stdout);
+ 
+   mac_offset=macdata[1];
+-  printf("pid:%x\n",mac_offset);
++  if(mac_offset == 0xFF)
++  {
++    for (i = 0; i < COUNT_MAC; i++)
++    {
++      memset(ifname, 0x00, sizeof(ifname));
++      memset(out_str, 0x00, sizeof(out_str));
++
++      for(j=0;j<6;j++)
++         board_data->mac[i][j] = 0xFF;
++
++      sprintf(out_str,"%02X:%02X:%02X:%02X:%02X:%02X",\
++                        (unsigned char)board_data->mac[i][0],\
++                        (unsigned char)board_data->mac[i][1],\
++                        (unsigned char)board_data->mac[i][2],\
++                        (unsigned char)board_data->mac[i][3],\
++                        (unsigned char)board_data->mac[i][4],\
++                        (unsigned char)board_data->mac[i][5]);
++      sprintf(ifname,"%s", i == 0 ? "LAN" : (i == 1 ? "WAN1" : "WAN2"));
++      printf("\n%-4s MAC : %s", ifname, out_str);
++      setenv(ifname, out_str);
++    }
++    free(board_data);
++    printf("\n");
++    return COMMAND_SUCCESS;
++  }
++
+   count=count + mac_offset;
+-  mac_offset=macdata[count+1];
+-  printf("vid:%x\n",mac_offset);
+-  count=count + mac_offset+2;
+-  mac_offset=macdata[count+1];
+-  printf("ser:%x\n",mac_offset);
++  mac_offset = macdata[count+1];
++  count = count + mac_offset+2;
++  mac_offset = macdata[count+1];
+ 
+-  count = count+mac_offset+2;
++  count = count + mac_offset + 2;
+   for (i = 0; i < COUNT_MAC; i++)
+   {
+     memset(ifname, 0x00, sizeof(ifname));
+@@ -283,7 +304,7 @@ static int command_boardinfo_update(int argc, char *argv[])
+       boarddata[count++] = macdata[i][j];
+   }
+ 
+-  printf("\nEnter Part No: ");
++  printf("\nEnter Part No : ");
+   len=2;
+   count=count+len;
+   while (len < (SIZE_P_N + 2))
+@@ -311,7 +332,7 @@ static int command_boardinfo_update(int argc, char *argv[])
+   boarddata[count - len ] = type;
+   boarddata[count - len +1] = len-2;
+ 
+-  printf("\nEnter SW Version: ");
++  printf("\nEnter SW Version : ");
+   len=2;
+   count=count+len;
+   while (len < (SIZE_SW_VER + 2))
+@@ -341,7 +362,7 @@ static int command_boardinfo_update(int argc, char *argv[])
+   boarddata[count - len ] = type;
+   boarddata[count - len +1] = len-2;
+ 
+-  printf("\nEnter PROD Name: ");
++  printf("\nEnter PROD Name : ");
+   len=2;
+   count=count+len;
+   while (len < (SIZE_PROD_NAME + 2))
+@@ -371,7 +392,7 @@ static int command_boardinfo_update(int argc, char *argv[])
+   boarddata[count - len ] = type;
+   boarddata[count - len +1] = len-2;
+ 
+-  printf("\nEnter PROD Series: ");
++  printf("\nEnter PROD Series : ");
+   len=2;
+   count=count+len;
+   while (len < (SIZE_PROD_SERIES + 2))
+@@ -397,11 +418,11 @@ static int command_boardinfo_update(int argc, char *argv[])
+     len++;
+     boarddata[count++] = c;
+   }
+-  type = 0x00;
++  type = 0xA0;
+   boarddata[count - len ] = type;
+   boarddata[count - len +1] = len-2;
+ 
+-  printf("\nEnter SOFTWARE Description: ");
++  printf("\nEnter SOFTWARE Description : ");
+   len=2;
+   count=count+len;
+   while (len < (SIZE_SW_DESC + 2))
+@@ -427,11 +448,11 @@ static int command_boardinfo_update(int argc, char *argv[])
+     len++;
+     boarddata[count++] = c;
+   }
+-  type = 0x00;
++  type = 0xA1;
+   boarddata[count - len ] = type;
+   boarddata[count - len +1] = len-2;
+ 
+-  printf("\nEnter SOFTWARE Objectid: ");
++  printf("\nEnter SOFTWARE Objectid : ");
+   len=2;
+   count=count+len;
+   while (len < (SIZE_SW_OBJID + 2))
+@@ -457,7 +478,7 @@ static int command_boardinfo_update(int argc, char *argv[])
+     len++;
+     boarddata[count++] = c;
+   }
+-  type = 0x00;
++  type = 0xA2;
+   boarddata[count - len ] = type;
+   boarddata[count - len +1] = len-2;
+ 
+@@ -474,10 +495,8 @@ static int command_boardinfo_update(int argc, char *argv[])
+   if (ret && errno != -ENOSYS) {
+     printf("could not erase %s: %s\n", filename, errno_str());
+     close(fd);
+-    printf("\n");
+     return COMMAND_ERROR;
+   }
+-  printf("\nOpened file %s for WRITTING...\n", filename);
+   if ( (n_written = write(fd, boarddata, sizeof(boarddata))) < 0 )
+   {
+     printf("Write Error %d! : %s\n", errno, errno_str());
+@@ -497,15 +516,13 @@ static int command_boardinfo_show(int argc, char *argv[])
+   char buf_boarddata[512];
+   unsigned char mac_data[3][8];
+   int mac_length = 0;
+-  int j = 0, pid_length, vid_length, sn_length;
+-
++  int j = 0, pid_length, vid_length, sn_length, pn_length, swver_length, prodname_length, prodsrs_length, swdesc_length, swobjid_length;
+ 
+   fd = open(filename, O_RDONLY, 0);
+   if (fd < 0) {
+     printf("could not open %s!\n", filename);
+     return COMMAND_ERROR;
+   }
+-  printf("\nOpened file %s for READING...", filename);
+   board_data = (c2krv340 *)xmalloc(sizeof(c2krv340));
+   if ( board_data == NULL )
+   {
+@@ -523,12 +540,18 @@ static int command_boardinfo_show(int argc, char *argv[])
+     close(fd);
+     return COMMAND_ERROR;
+   }
+-  printf("Read %d bytes out of %d bytes\n", n_read, sizeof(c2krv340));
+   close(fd);
+   flush(stdout);
+ 
+-  printf("\nPID  : ");
+   pid_length = buf_boarddata[1];
++
++  if (pid_length == 0xFF)
++  {
++    printf("\nBoardinfo Partition %s is Empty!!!\nPlease program Boardinfo Partition using command: boardinfo -u\n", filename);
++    return COMMAND_ERROR;
++  }
++
++  printf("\nPID  : ");
+   for (i=0;i<pid_length;i++)
+   {
+     if (isprint(buf_boarddata[count]))
+@@ -538,9 +561,9 @@ static int command_boardinfo_show(int argc, char *argv[])
+     count++;
+   }
+ 
+-  printf("\nVID  : ");
+   vid_length = buf_boarddata [count+1];
+   count = count+2;
++  printf("\nVID  : ");
+   for (i=0;i<vid_length;i++)
+   {
+     if (isprint(buf_boarddata[count]))
+@@ -550,9 +573,9 @@ static int command_boardinfo_show(int argc, char *argv[])
+     count++;
+   }
+ 
+-  printf("\nS/N  : ");
+   sn_length = buf_boarddata [count+1];
+   count = count+2;
++  printf("\nS/N  : ");
+   for (i=0;i<sn_length;i++)
+   {
+     if (isprint(buf_boarddata[count]))
+@@ -583,6 +606,78 @@ static int command_boardinfo_show(int argc, char *argv[])
+     printf("\n%-4s MAC : %s", ifname, out_str);
+     setenv(ifname, out_str);
+   }
++  pn_length = buf_boarddata [count+1];
++  count = count+2;
++  printf("\nP/N  : ");
++  for (i=0;i<pn_length;i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  swver_length = buf_boarddata [count+1];
++  count = count+2;
++  printf("\nSW_VER  : ");
++  for (i = 0; i < swver_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  prodname_length = buf_boarddata [count+1];
++  count = count+2;
++  printf("\nPROD_NAME  : ");
++  for (i = 0; i < prodname_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  prodsrs_length = buf_boarddata [count+1];
++  count = count+2;
++  printf("\nPROD_SERIES  : ");
++  for (i = 0; i < prodsrs_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  swdesc_length = buf_boarddata [count+1];
++  count = count+2;
++  printf("\nSW_DESC  : ");
++  for (i = 0; i < swdesc_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  swobjid_length = buf_boarddata [count+1];
++  count = count+2;
++  printf("\nSW_OBJID  : ");
++  for (i = 0; i < swobjid_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
+   free(board_data);
+   printf("\n");
+   return COMMAND_SUCCESS;
+diff --git a/commands/imageenv.c b/commands/imageenv.c
+new file mode 100644
+index 0000000..90780ef
+--- /dev/null
++++ b/commands/imageenv.c
+@@ -0,0 +1,97 @@
++/*
++ * Copyright (c) 2007 Sascha Hauer <s.hauer@pengutronix.de>, Pengutronix
++ *
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++/**
++ * @file
++ * @brief Concatenate files to stdout command
++ */
++
++#include <common.h>
++#include <command.h>
++#include <fs.h>
++#include <fcntl.h>
++#include <linux/ctype.h>
++#include <errno.h>
++#include <xfuncs.h>
++#include <malloc.h>
++#include <environment.h>
++
++#define BUFSIZE 8
++
++/**
++ * @param[in] cmdtp FIXME
++ * @param[in] argc Argument count from command line
++ * @param[in] argv List of input arguments
++ */
++static int do_imageenv(struct command *cmdtp, int argc, char *argv[])
++{
++	int ret;
++	int fd;
++	char *buf;
++	int err = 0;
++
++
++	buf = xmalloc(BUFSIZE);
++
++		fd = open("/dev/nand0.env", O_RDONLY);
++		if (fd < 0) {
++			err = 1;
++			printf("could not open the file\n");
++			goto out;
++		}
++
++		ret = read(fd, buf, BUFSIZE);
++		if(ret < 0)
++		{
++		  err=1;
++			printf("Reading from the file failed\n");
++			close(fd);
++			goto out;
++		 }
++		close(fd);
++
++		if (buf[0] == 0x32)
++		{
++			 setenv("active","image2");
++			 setenv("inactive","image1");
++		}
++	  else if(buf[0] == 0x31)
++		{
++			 setenv("active","image1");
++			 setenv("inactive","image2");
++		}
++
++out:
++	free(buf);
++
++	return err;
++}
++
++BAREBOX_CMD_HELP_START(imageenv)
++BAREBOX_CMD_HELP_USAGE("imageenv\n")
++BAREBOX_CMD_HELP_SHORT("Reads active firmware image ID from nand environment partition and Sets active, inactive env variables\n")
++BAREBOX_CMD_HELP_TEXT ("Currently only active image ID supportedt\n")
++BAREBOX_CMD_HELP_END
++
++BAREBOX_CMD_START(imageenv)
++	.cmd		= do_imageenv,
++	.usage		= "read active image ID",
++	BAREBOX_CMD_HELP(cmd_imageenv_help)
++BAREBOX_CMD_END
+-- 
+2.7.4
+

@@ -1,0 +1,86 @@
+From f71581a0835ff9d60dbb26f3008197f245e42fd9 Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Fri, 9 Oct 2015 15:23:57 +0530
+Subject: [PATCH 22/60] SBR-92 Updated commands Kconfig to restrict building
+ RV340 specific command for RV340 Targets only
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ arch/arm/configs/comcerto-2k_mfcnevm_defconfig              | 1 -
+ arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig        | 1 -
+ arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig | 1 -
+ arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig      | 1 -
+ commands/Kconfig                                            | 2 ++
+ 5 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_defconfig
+index 4c09ed0..5b1d993 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_defconfig
+@@ -197,7 +197,6 @@ CONFIG_CMD_UMOUNT=y
+ CONFIG_CMD_NAND=y
+ CONFIG_CMD_NOR=y
+ CONFIG_CMD_COPY=y
+-# CONFIG_CMD_BOARDINFO is not set
+ 
+ #
+ # console
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig
+index 626e3ea..9e5d1ac 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig
+@@ -250,7 +250,6 @@ CONFIG_CMD_UMOUNT=y
+ CONFIG_CMD_NAND=y
+ CONFIG_CMD_NOR=y
+ CONFIG_CMD_COPY=y
+-# CONFIG_CMD_BOARDINFO is not set
+ 
+ #
+ # console
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig
+index 53e146d..584da50 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig
+@@ -191,7 +191,6 @@ CONFIG_CONSOLE_ACTIVATE_FIRST=y
+ # CONFIG_CMD_NAND is not set
+ # CONFIG_CMD_NOR is not set
+ # CONFIG_CMD_COPY is not set
+-# CONFIG_CMD_BOARDINFO is not set
+ 
+ #
+ # console
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig
+index a689853..c84d516 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig
+@@ -188,7 +188,6 @@ CONFIG_COMMAND_SUPPORT=y
+ # CONFIG_CMD_UMOUNT is not set
+ # CONFIG_CMD_NOR is not set
+ # CONFIG_CMD_COPY is not set
+-# CONFIG_CMD_BOARDINFO is not set
+ 
+ #
+ # console
+diff --git a/commands/Kconfig b/commands/Kconfig
+index cde5f88..6350ec3 100644
+--- a/commands/Kconfig
++++ b/commands/Kconfig
+@@ -169,6 +169,7 @@ config CMD_COPY
+ 
+ config CMD_BOARDINFO
+ 	bool
++	depends on MACH_COMCERTO_C2K_RV340
+ 	prompt "RV340 boardinfo"
+ 	default n
+ 	help
+@@ -176,6 +177,7 @@ config CMD_BOARDINFO
+ 
+ config CMD_IMAGEENV
+ 	bool
++	depends on MACH_COMCERTO_C2K_RV340
+ 	prompt "RV340 imageenv"
+ 	default n
+ 	help
+-- 
+2.7.4
+

@@ -1,0 +1,196 @@
+From 09b4703f5a2394da67641deab231c2d74380385e Mon Sep 17 00:00:00 2001
+From: SKC <chaitanya.sakinam@nxp.com>
+Date: Mon, 31 Jul 2017 00:46:30 -0500
+Subject: [PATCH] Addressed various bugs in secure boot feature:
+
+1. Bugs in "c2k_image check" tool are addressed. It is observed that image validation
+   is having issues when AES 256 bit encrypted image is passed for verification.
+2. Image verification tool is corrected to have support for validating the image when
+   key is part of the header.
+3. Addressed in figuring out AES key length in OTP when it is configured to be of AES 256.
+4. It is observed that when kernel image is having Key part of its header then only some part
+   of the kernel image is been read from flash. This is been fixed to have all the cases
+   included with it.
+5. The API ibr_wrapper_secureboot_get_hash_key() used in the file arch/arm/mach-comcerto/image.c
+   is returning error. This is a direct IBR function, hence no bug fix is done in this funciton.
+   rather we used raw read from OTP with the funciton ibr_wrapper_otp_read() and it solved the
+   issue.
+
+Signed-off-by: SKC <chaitanya.sakinam@nxp.com>
+---
+ arch/arm/mach-comcerto/image.c                    |  7 +++---
+ arch/arm/mach-comcerto/image_parser.c             | 28 +++++++++++++++++++----
+ arch/arm/mach-comcerto/include/mach/ibr_wrapper.h |  2 ++
+ arch/arm/mach-comcerto/include/mach/secureboot.h  |  1 +
+ arch/arm/mach-comcerto/secureboot.c               |  2 +-
+ common/image.c                                    |  6 ++---
+ 6 files changed, 35 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/mach-comcerto/image.c b/arch/arm/mach-comcerto/image.c
+index d220af7..599a311 100644
+--- a/arch/arm/mach-comcerto/image.c
++++ b/arch/arm/mach-comcerto/image.c
+@@ -196,7 +196,8 @@ void * verify_and_authenticate_boot_image(u8 *image_buf)
+ 			return NULL;
+ 
+ 		/* fetch public hash stored in OTP */
+-		ret = ibr_wrapper_secureboot_get_hash_key(&stored_hash[0]);
++		/*ret = ibr_wrapper_secureboot_get_hash_key(&stored_hash[0]);*/
++		ret = ibr_wrapper_otp_read(SEC_KEY_HASH_OFFSET_IN_BYTES, &stored_hash[0], SHA_256_LENGTH);
+ 		if (ret != RETCODE_OK) {
+ 			printf("Fetching hash failed \n");
+ 			return NULL;
+@@ -285,7 +286,7 @@ void * verify_and_authenticate_boot_image(u8 *image_buf)
+ 		while(buffer_len > SPACC_MAX_PROC_SIZE)
+ 		{
+ 			ret = spacc_decrypt(enc_buffer, SPACC_MAX_PROC_SIZE, C_AES, CM_CBC, aes_key, aes_key_length << 3,
+-							&boot_hdr->optional_field[pub_key_length],enc_buffer, is_first_pkt);
++							&boot_hdr->optional_field[hash_length + (key_in_header ? pub_key_length : 0)],enc_buffer, is_first_pkt);
+ 			if (ret != 0){
+ 				printf ("Image decryption failed\n");
+ 				return NULL;
+@@ -300,7 +301,7 @@ void * verify_and_authenticate_boot_image(u8 *image_buf)
+ 		if(buffer_len > 0)
+ 		{
+ 			ret = spacc_decrypt(enc_buffer, buffer_len, C_AES, CM_CBC, aes_key, aes_key_length << 3,
+-							&boot_hdr->optional_field[pub_key_length],enc_buffer, is_first_pkt);
++							&boot_hdr->optional_field[hash_length + (key_in_header ? pub_key_length : 0)],enc_buffer, is_first_pkt);
+ 			if (ret != 0){
+ 				printf ("Image decryption failed\n");
+ 				return NULL;
+diff --git a/arch/arm/mach-comcerto/image_parser.c b/arch/arm/mach-comcerto/image_parser.c
+index 6abd670..11785ed 100644
+--- a/arch/arm/mach-comcerto/image_parser.c
++++ b/arch/arm/mach-comcerto/image_parser.c
+@@ -38,12 +38,13 @@ static void do_c2k_image_check(char *image_s, char *key_location_s, char *key_of
+ 	void *buf;
+ 	int len;
+ 	img_hdr *c2k_image;
+-	u32 hdr_len = 0, buffer_len = 0;
++	u32 hdr_len = 0, buffer_len = 0, hash_len = 0;
+ 	u32 crc_read, crc;
+ 	u32 key_offset;
+ 	u32 key_size;
+ 	u32 aes_key_offset=0;
+ 	u32 aes_key_size = 0;
++	u32 aes_iv_size = 0;
+ 	void *payload;
+ 	u8 *enc_buffer;
+ 	u8 is_first_pkt=0;
+@@ -66,9 +67,15 @@ static void do_c2k_image_check(char *image_s, char *key_location_s, char *key_of
+ 		aes_key_offset = (u32) simple_strtoul(aes_key_offset_s, NULL, 16);
+ 	if (aes_key_length_s != NULL) {
+ 		if ((int) simple_strtoul(aes_key_length_s, NULL, 10) == 128)
++		{
+ 			aes_key_size = AES_128_KEY_LENGTH;
++			aes_iv_size = AES_IV_LENGTH;
++		}
+ 		else if ((int) simple_strtoul(aes_key_length_s, NULL, 10) == 256)
++		{
+ 			aes_key_size = AES_256_KEY_LENGTH;
++			aes_iv_size = AES_IV_LENGTH;
++		}
+ 	}
+ 
+ 	// check header
+@@ -81,9 +88,22 @@ static void do_c2k_image_check(char *image_s, char *key_location_s, char *key_of
+ 		return;
+ 	}
+ 
+-	hdr_len = IMAGE_HEADER_SIZE + key_size + aes_key_size; //don't take into account key in header for now
++	hdr_len = IMAGE_HEADER_SIZE + c2k_image->key_length + aes_iv_size;
++	switch (c2k_image->hash_type)
++	{
++		case 0: //null hash
++		case 1: //sha256 hash
++			hdr_len += 32; //#define SSBOOT_HASH_LENGTH	32
++			hash_len = 32;
++			break;
++		case 2: //rsa hash
++		case 3: //aes_rsa hash
++			hdr_len += key_size;
++			hash_len = key_size;
++			break;
++	}
+ 
+-	debug ("\nhdr_len %d IMAGE_HEADER_SIZE %d keysize %d aes_key_size %d\n",hdr_len,IMAGE_HEADER_SIZE,key_size,aes_key_size);
++	debug ("\nhdr_len %d IMAGE_HEADER_SIZE %d keysize %d aes_key_size %d hdr-Key_length:%d\n",hdr_len,IMAGE_HEADER_SIZE,key_size,aes_key_size,c2k_image->key_length);
+ 	debug (" c2k_image->image_len %d \n", c2k_image->image_len);
+ 
+ 	len = hdr_len + c2k_image->image_len;
+@@ -159,7 +179,7 @@ static void do_c2k_image_check(char *image_s, char *key_location_s, char *key_of
+ 
+ 	/* decrypt signature */
+ 	ret = ibr_wrapper_rsa_sig_decrypt(public_key_storage, key_size,
+-				&c2k_image->optional_field[0], key_size,
++				&c2k_image->optional_field[0], hash_len,
+ 				&extract_hash[0], SHA_256_LENGTH, RSA_PKCS1_PADDING);
+ 
+ 	if (ret){
+diff --git a/arch/arm/mach-comcerto/include/mach/ibr_wrapper.h b/arch/arm/mach-comcerto/include/mach/ibr_wrapper.h
+index 21b824d..63e8ae6 100644
+--- a/arch/arm/mach-comcerto/include/mach/ibr_wrapper.h
++++ b/arch/arm/mach-comcerto/include/mach/ibr_wrapper.h
+@@ -56,6 +56,8 @@ typedef enum _retcode
+ #define RSA_PKCS1_PADDING       1
+ 
+ #define SHA_256_LENGTH		32
++/* Key Offset is kept at 4 Byte offset */
++#define SEC_KEY_HASH_OFFSET_IN_BYTES	32
+ 
+ extern void ibr_wrapper_init(void);
+ extern void ibr_wrapper_spacc_init(void);
+diff --git a/arch/arm/mach-comcerto/include/mach/secureboot.h b/arch/arm/mach-comcerto/include/mach/secureboot.h
+index 24a5e90..7cb217e 100644
+--- a/arch/arm/mach-comcerto/include/mach/secureboot.h
++++ b/arch/arm/mach-comcerto/include/mach/secureboot.h
+@@ -2,6 +2,7 @@
+ #define _SECUREBOOT_H_
+ 
+ #define BIT_5_MSK	0x00000020
++#define BIT_5_SHIFT	5
+ #define SEC_CONFIG_AES_KEY_SIZE		BIT_5_MSK
+ 
+ #define SECURE_CONFIG_OFFSET_BYTE_0		0
+diff --git a/arch/arm/mach-comcerto/secureboot.c b/arch/arm/mach-comcerto/secureboot.c
+index c0c9d50..5243b71 100644
+--- a/arch/arm/mach-comcerto/secureboot.c
++++ b/arch/arm/mach-comcerto/secureboot.c
+@@ -31,7 +31,7 @@ u32 secureboot_get_aes_key_length()
+ 	if ( ret != RETCODE_OK )
+ 		return RETCODE_ERROR;
+ 
+-	switch (secureboot_config & SEC_CONFIG_AES_KEY_SIZE) {
++	switch ((secureboot_config & SEC_CONFIG_AES_KEY_SIZE) >> BIT_5_SHIFT) {
+ 		case 0:
+ 			aes_key_len = AES_128_KEY_LENGTH;
+ 		case 1:
+diff --git a/common/image.c b/common/image.c
+index 80e9746..4c4e7c7 100644
+--- a/common/image.c
++++ b/common/image.c
+@@ -366,18 +366,18 @@ struct image_handle *map_image(const char *filename, int verify)
+ 	}
+ 
+ 	//printf("\nimage_len = %u \n",image_len);
+-	image_data = xmalloc(ssboot_hdr_len + image_len + RSA_KEY_LENGTH_2K + AES_128_KEY_LENGTH + 1);
++	image_data = xmalloc(ssboot_hdr_len + image_len + RSA_KEY_LENGTH_2K + RSA_KEY_LENGTH_2K + AES_128_KEY_LENGTH + 1);
+ 	if (image_data == NULL)
+ 	{
+ 	  printf("xzalloc returned NULL: %s\n", errno_str());
+ 	  goto err_out;
+ 	}
+-	memset (image_data, 0x00, (ssboot_hdr_len + image_len + RSA_KEY_LENGTH_2K + AES_128_KEY_LENGTH + 1));
++	memset (image_data, 0x00, (ssboot_hdr_len + image_len + RSA_KEY_LENGTH_2K + RSA_KEY_LENGTH_2K + AES_128_KEY_LENGTH + 1));
+ 	image_flags |= IH_MALLOC;
+ 
+ 	memcpy(image_data,ssboot_hdr,ssboot_hdr_len);
+ 
+-	if (read(fd, image_data + ssboot_hdr_len, image_len + RSA_KEY_LENGTH_2K + AES_128_KEY_LENGTH) < 0) {
++	if (read(fd, image_data + ssboot_hdr_len, image_len + RSA_KEY_LENGTH_2K + RSA_KEY_LENGTH_2K + AES_128_KEY_LENGTH) < 0) {
+ 		printf("could not read: %s\n", errno_str());
+ 		goto err_out;
+ 	}
+-- 
+1.9.1
+

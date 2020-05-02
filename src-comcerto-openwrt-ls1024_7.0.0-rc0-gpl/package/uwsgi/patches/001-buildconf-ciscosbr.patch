@@ -1,0 +1,10 @@
+diff --git a/buildconf/ciscosbr.ini b/buildconf/ciscosbr.ini
+new file mode 100644
+index 0000000..b4d0866
+--- /dev/null
++++ b/buildconf/ciscosbr.ini
+@@ -0,0 +1,4 @@
++[uwsgi]
++main_plugin = 
++inherit = base
++plugins = cgi

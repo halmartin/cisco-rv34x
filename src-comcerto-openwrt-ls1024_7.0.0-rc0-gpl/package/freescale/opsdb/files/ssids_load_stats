@@ -1,0 +1,77 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+STAT_PATH="/tmp/stats/ssids_stats"
+
+scan_wifi() {
+	local cfgfile="$1"
+	DEVICES=
+	wl0_VIFS=
+	wl1_VIFS=
+
+	config_cb() {
+		local type="$1"
+		local section="$2"
+
+		# section start
+		case "$type" in
+			wifi-device)
+				append DEVICES "$section"
+				#config_set "$section" vifs ""
+				config_set "$section" ht_capab ""
+			;;
+		esac
+
+		# section end
+		config_get TYPE "$CONFIG_SECTION" TYPE
+		case "$TYPE" in
+			wifi-iface)
+				config_get device "$CONFIG_SECTION" device
+				eval append ${device}_VIFS "$CONFIG_SECTION"
+				eval vifs="\${${device}_VIFS}"
+				config_set "$device" vifs "$vifs"
+			;;
+		esac
+	}
+	config_load "${cfgfile:-wireless}"
+}
+
+include /lib/wifi
+scan_wifi
+
+cat /dev/null > ${STAT_PATH}
+
+# Get interface name
+local i=-1
+board="$(/usr/bin/board_check.sh)"
+while grep -qs "^ *wl$((++i)):" /proc/net/dev; do
+	local type
+	local device="wl${i}"
+
+	config_get type $device type
+	[ "$type" = broadcom ] && {
+		local vif vifs ifname status
+		local radio="2.4GHz"
+		config_get vifs "$device" vifs
+
+		for vif in $vifs; do
+			config_get ifname "$vif" ifname
+			config_get ssid "$vif" ssid
+			if [ "$board" = "RV160W" ];then
+				[ "$i" = "0" ] && radio="5GHz"
+			else
+				[ "$i" = "1" ] && radio="5GHz"
+			fi
+
+			config_get disabled "$vif" disabled
+			isup_stat="$(wl -i $device isup)"
+			[ "$isup_stat" = "1" -a "$disabled" != "1" ] && status=1 || status=0
+			isPermantent="0"
+
+
+			[ -n "$ifname" ] && echo "$radio,$ifname,$status,$isPermantent,SSID:$ssid" >> ${STAT_PATH}
+		done 
+	}
+done
+

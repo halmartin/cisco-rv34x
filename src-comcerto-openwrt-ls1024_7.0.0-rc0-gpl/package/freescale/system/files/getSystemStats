@@ -1,0 +1,57 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+reload() {
+# Get Current time
+uptimeStr=""
+current_time=""
+
+`uptime > /tmp/tmpUpTime`
+`date > /tmp/tmpDate`
+`sed -i "s/  */ /g" /tmp/tmpUpTime`
+`sed -i "s/  */ /g" /tmp/tmpDate`
+
+current_time=`cat /tmp/tmpUpTime | cut -d " " -f 2`
+current_date_time=`cat /tmp/tmpDate`
+
+days=`cat /tmp/tmpUpTime | grep days`
+if [ -n "$days" ];then
+	days=`cat /tmp/tmpUpTime | cut -d , -f 1 | cut -d " " -f 4`
+	time=`cat /tmp/tmpUpTime | cut -d , -f 2`
+	uptimeStr=$days" days,"
+	uptimeStr=$uptimeStr$time
+else
+	day=`cat /tmp/tmpUpTime | grep day`
+	if [ -n "$day" ];then
+		day=`cat /tmp/tmpUpTime | cut -d , -f 1 | cut -d " " -f 4`
+		time=`cat /tmp/tmpUpTime | cut -d , -f 2`
+		uptimeStr=$day" day,"
+		uptimeStr=$uptimeStr$time
+	else
+		uptimeStr=`cat /tmp/tmpUpTime | cut -d , -f 1 | cut -d " " -f 4`
+		temp=`echo $uptimeStr | grep :`
+		if [ -z "$temp" ];then
+			uptimeStr=$uptimeStr" min"
+		fi
+	fi	
+
+fi
+
+
+
+uci -P /var/state revert systemstats.system.system_up_time
+uci -P /var/state set systemstats.system.system_up_time="$uptimeStr"
+
+uci -P /var/state revert systemstats.system.current_time
+uci -P /var/state set systemstats.system.current_time="$current_time"
+
+uci -P /var/state revert systemstats.system.current_date_time
+uci -P /var/state set systemstats.system.current_date_time="$current_date_time"
+
+rm /tmp/tmpUpTime
+rm /tmp/tmpDate
+}
+
+reload

@@ -1,0 +1,9 @@
+#!/bin/sh
+IP_Addr_List=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($1 == "ip-address" && I != 1) {print $(I)};}'`
+
+for IP_Addr in $IP_Addr_List
+do
+	/usr/sbin/cportalctl deauth $IP_Addr >/dev/null
+done
+echo "code 0 errstr \"success\""
+

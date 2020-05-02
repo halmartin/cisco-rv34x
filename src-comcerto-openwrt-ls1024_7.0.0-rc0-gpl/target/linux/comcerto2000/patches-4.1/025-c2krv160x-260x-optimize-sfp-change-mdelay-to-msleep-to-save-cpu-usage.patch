@@ -1,0 +1,61 @@
+# 09-03-2017: harry.lin <harry.lin@deltaww.com>
+# Optimize sfp change mdelay to be msleep to save cpu usage.
+--- linux-4.1.8/drivers/net/phy/broadcom.c.org	2017-03-09 14:12:58.530671123 +0800
++++ linux-4.1.8/drivers/net/phy/broadcom.c	2017-03-09 14:14:03.530671066 +0800
+@@ -287,19 +287,19 @@
+ 				if ((reg & (1 << 0)) == 0) {
+ 					phy_write(phydev, 0x1e, 0x233);
+ 					phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
+-					mdelay(500);
++					msleep(500);
+ 					phy_write(phydev, 0x1e, 0x21);
+ 					reg = phy_read(phydev, 0x1f);
+ 					if ((reg & (1 << 4)) != (1 << 4)) {
+ 						phy_write(phydev, 0x1e, 0x233);
+ 						phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
+-						mdelay(500);
++						msleep(500);
+ 					}
+ 				}
+ 				else {
+ 					phy_write(phydev, 0x1e, 0x233);
+ 					phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
+-					mdelay(500);
++					msleep(500);
+ 				}
+ 			}
+ 		}
+@@ -310,7 +310,7 @@
+ 			/* Only for such as LCP-1250R-J3SR-S */
+ 			phy_write(phydev, 0x1e, 0x235);
+ 			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
+-			mdelay(500);
++			msleep(500);
+ 
+ 			for (retry = 9; retry >= 0; retry--) {
+ 				phy_write(phydev, 0x1e, 0x21);
+@@ -322,7 +322,7 @@
+ 					if (retry == 0) {
+ 						phy_write(phydev, 0x1e, 0x235);
+ 						phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(3 << 0));
+-						mdelay(500);
++						msleep(500);
+ 					}
+ 				}
+ 			}
+@@ -357,13 +357,13 @@
+ 				/* speed 100 duplex full */
+ 				phy_write(phydev, 0x1e, 0x233);
+ 				phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
+-				mdelay(500);
++				msleep(500);
+ 				phy_write(phydev, 0x1e, 0x21);
+ 				reg = phy_read(phydev, 0x1f);
+ 				if ((reg & (1 << 4)) != (1 << 4)) {
+ 					phy_write(phydev, 0x1e, 0x233);
+ 					phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
+-					mdelay(500);
++					msleep(500);
+ 					/* speed 100 duplex full */
+ 					phy_write(phydev, 0x0, 0x2100);
+ 				}

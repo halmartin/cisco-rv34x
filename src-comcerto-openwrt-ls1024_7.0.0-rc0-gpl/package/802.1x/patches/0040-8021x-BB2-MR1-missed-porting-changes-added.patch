@@ -1,0 +1,69 @@
+From 1ccf85e747c9bb402bc259ce69cc8e81385cb983 Mon Sep 17 00:00:00 2001
+From: Manish Tiwari <manish.tiwari@nxp.com>
+Date: Fri, 11 May 2018 19:57:27 +0530
+Subject: [PATCH] BB2-MR1-missed-porting-changes-added Signed-off-by: Manish
+ Tiwari <manish.tiwari@nxp.com>
+
+---
+ src/source/config.c |   23 +++++++++++++++--------
+ 1 file changed, 15 insertions(+), 8 deletions(-)
+
+diff --git a/src/source/config.c b/src/source/config.c
+index 9b550e0..1d52873 100644
+--- a/src/source/config.c
++++ b/src/source/config.c
+@@ -1,3 +1,7 @@
++/* 11/05/2018 Manish Tiwari <manish.tiwari@nxp.com>
++*  BB2 MR1 missed porting changes added
++*/
++
+ /* 19/12/2017   
+ * Manish Tiwari <manish.tiwari@nxp.com>
+ * PSK logs removed from syslog
+@@ -21,7 +25,8 @@
+ #include "ieee802_1x.h"
+ #include "md5.h"
+ 
+-#define LAN_IFACE_PP "eth2"
++/* Interface used for BB2 is eth3 and interface used for PP is eth2 */
++#define LAN_IFACE_NAME_CONF "eth3"
+ 
+ unsigned char BtoH(
+     unsigned char ch)
+@@ -439,9 +444,10 @@ struct rtapd_config * Config_read(int ioctl_sock, char *prefix_name)
+   
+ 	// initial default EAP IF name and Pre-Auth IF name	as "br0"
+ 	conf->num_eap_if = 1;	
+-	conf->num_preauth_if = 1;	
+-	strcpy(conf->eap_if_name[0], LAN_IFACE_PP);	
+-	strcpy(conf->preauth_if_name[0],LAN_IFACE_PP);
++	conf->num_preauth_if = 1;
++	
++	strcpy(conf->eap_if_name[0], LAN_IFACE_NAME_CONF);	
++	strcpy(conf->preauth_if_name[0],LAN_IFACE_NAME_CONF);
+ 	
+ 
+ 	// Get parameters from deiver through IOCTL cmd
+@@ -1057,14 +1063,15 @@ struct rtapd_config * nk_Config_read(char *config_filename, char *prefix_name)
+ 	// initial default EAP IF name and Pre-Auth IF name	as "eth0"
+ 	conf->num_eap_if = 1;	
+ 	conf->num_preauth_if = 1;	
+-	strcpy(conf->eap_if_name[0], LAN_IFACE_PP);	
+-	strcpy(conf->preauth_if_name[0], LAN_IFACE_PP);
++	strcpy(conf->eap_if_name[0], LAN_IFACE_NAME_CONF);	
++	strcpy(conf->preauth_if_name[0], LAN_IFACE_NAME_CONF);
+ 
+-	sprintf(s, "ip link set %s promisc on", LAN_IFACE_PP);
++	sprintf(s, "ip link set %s promisc on", LAN_IFACE_NAME_CONF);
++	
+ 	fp = popen(s,"r"); //TCK: Ideally Add group multicast desitnation receive on the interface.
+ 	if(fp == NULL)
+ 	{
+-		DBGPRINT(RT_DEBUG_ERROR, "Unable to set promiscous mode on LAN interface %s. Cannot receive group MAC packets. 8021x setting failed", LAN_IFACE_PP);			
++		DBGPRINT(RT_DEBUG_ERROR, "Unable to set promiscous mode on LAN interface %s. Cannot receive group MAC packets. 8021x setting failed", LAN_IFACE_NAME_CONF);	
+ 		return NULL;
+ 	}
+ 	else
+-- 
+1.7.9.5
+

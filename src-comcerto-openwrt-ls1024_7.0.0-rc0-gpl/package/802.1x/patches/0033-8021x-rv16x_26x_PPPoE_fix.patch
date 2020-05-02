@@ -1,0 +1,35 @@
+diff -ruaN c/src/source/ieee802_1x.c d/src/source/ieee802_1x.c
+--- c/src/source/ieee802_1x.c	2017-10-06 19:51:37.471383153 +0530
++++ d/src/source/ieee802_1x.c	2017-10-07 12:38:25.987375945 +0530
+@@ -115,7 +115,6 @@
+   FILE *fp=NULL;
+   char cmd[SIZE];
+   char *token, *ptr,*ptr1,last_token[SIZE];
+-
+ /** Get the NAS IP address **/
+   sprintf(cmd,"ip r get ");
+   strcat(cmd,inet_ntoa(*server));
+@@ -135,7 +134,8 @@
+       {
+         token = strsep(&ptr," ");
+ 	if (token)
+-	  strcpy(dev,token);
++		strcpy(dev,token);
++	
+ 	DBGPRINT(RT_DEBUG_INFO,"Interface = %s\n", dev);
+       }
+       if(token && strcmp(token, "src") == 0)
+@@ -165,8 +165,12 @@
+   DBGPRINT(RT_DEBUG_INFO,"RADIUS NAS IP Address = %04x\n", ntohl(*nasIP));
+ 
+ /** Get the interface name and RADIUS called-station-id **/
++/* Handling of RADIUS server wan side (type : PPPoE) called-station-id case */
++  if(strncmp(dev,"eth2", 4))
++  	sprintf(cmd,"cat /sys/class/net/eth0/address | sed 's/:/-/g'");
++  else
++  	sprintf(cmd,"cat /sys/class/net/%s/address | sed 's/:/-/g'",dev);
+ 
+-  sprintf(cmd,"cat /sys/class/net/%s/address | sed 's/:/-/g'",dev);
+   if((fp = popen(cmd,"r"))!=NULL)
+   {
+     memset(cmd,0,SIZE);

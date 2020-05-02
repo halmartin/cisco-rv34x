@@ -1,0 +1,237 @@
+--- a/public.c	2015-08-13 15:05:08.915215576 +0530
++++ b/public.c	2015-08-13 15:02:34.991220032 +0530
+@@ -30,8 +30,9 @@
+ #include <internal.h>
+ #include <pam-util/args.h>
+ #include <pam-util/logging.h>
++#include <ldap.h>
+ 
+-
++#define KEYTABGENFILE "/etc/keytabargs"
+ /*
+  * The main PAM interface for authorization checking.
+  */
+@@ -70,7 +71,137 @@ done:
+     return pamret;
+ }
+ 
++static void
++free_data (pam_handle_t * pamh, void *data, int error_status)
++{
++      if (data != NULL)
++              free (data);
++
++        return;
++}
++
++int pam_ldap_search (pam_handle_t *pamh)
++{
++ /* search from this point */
++    LDAP *ldap;
++    LDAPMessage *res,*entry;
++    char base_dn[256]={'\0'};
++    int   ldap_port     = 389;
++    char ldap_dn[256]   = {'\0'};
++    char *ldap_pw       = NULL;
++    int  scope          = LDAP_SCOPE_SUBTREE;
++    char *filter        = NULL;
++    int  ldap_version   = LDAP_VERSION3;
++    int  attrsonly      = 0;
++    int result;
++    char *dn=NULL;
++    char *attrs[]       = {"memberOf", NULL};
++    char **values;
++    int i;
++    char *attribute     = "";
++    BerElement *ber;
++    char *group;
++    FILE *file = NULL;
++    char tmpdn[256] = {'\0'};
++    char *token = NULL;
++    char ldap_host[256] = {'\0'};
++    char domain[256] = {'\0'};
++    PAM_CONST char *username = NULL;
++    
++    result = pam_get_user(pamh, &username, NULL);
++
++    result = pam_get_item(pamh, PAM_AUTHTOK, (PAM_CONST void **) &ldap_pw);
++    if(result != PAM_SUCCESS)
++        return PAM_SERVICE_ERR;
++    /* Open the file.  */
++     file = fopen (KEYTABGENFILE, "r");
++     if (file == NULL) {
++         printf("Cannon open the file\n");
++         return PAM_SERVICE_ERR;
++     }
++     
++      /*Read the ipaddress of AD server*/
++      if(fgets(ldap_host,sizeof(ldap_host),file)==NULL)
++        {
++          fclose(file);
++          return PAM_SERVICE_ERR;
++        }
++              ldap_host[strlen(ldap_host) - 1] = '\0';
++      /*Read the domain name*/
++       if(fgets(domain,sizeof(domain),file)==NULL)
++         {
++           fclose(file);
++           return PAM_SERVICE_ERR;
++         }
++              domain[strlen(domain) - 1] = '\0';
++
++       sprintf(ldap_dn,"%s@%s",username,domain);
++     fclose(file);
++    if((ldap = ldap_init(ldap_host, ldap_port)) == NULL )
++        return PAM_SERVICE_ERR;      
++    
++     result = ldap_set_option(ldap, LDAP_OPT_PROTOCOL_VERSION, &ldap_version);
++     if(result != LDAP_OPT_SUCCESS ) {
++         return PAM_SERVICE_ERR;
++       }
++     
++     result = ldap_simple_bind_s(ldap, ldap_dn, ldap_pw );
++     if(result != LDAP_SUCCESS ) {
++         return PAM_SERVICE_ERR;
++     }
++    
++     token = strtok(domain, ".");
++     /* walk through other tokens */
++     while (token != NULL )
++      {
++             sprintf(tmpdn+strlen(tmpdn),"dc=%s",token);
++             token = strtok(NULL, ".");
++             if(token != NULL)
++               sprintf(tmpdn+strlen(tmpdn),",");
++      }
++      
++     sprintf(base_dn,"cn=%s,%s",username,tmpdn);
++     result = ldap_search_s (ldap, base_dn, scope,
++                               filter, attrs,attrsonly, &res);
++     if ( result != LDAP_SUCCESS ) {
++         return PAM_SERVICE_ERR;
++     }
++
++     for ( entry = ldap_first_entry(ldap, res);
++           entry != NULL;
++           entry = ldap_next_entry(ldap, entry)) {
++
++           /* Print the DN string of the object */
++           dn = ldap_get_dn(ldap, entry);
++          for ( attribute = ldap_first_attribute(ldap, entry, &ber);
++                 attribute != NULL;attribute = ldap_next_attribute(ldap, entry, ber)) {
++                 /* Print the attribute name */
++             if((values = ldap_get_values(ldap, entry, attribute)) != NULL) {
++                   /* cycle through all values returned for this attribute */
++                 for (i = 0; values[i] != NULL; i++) {
++                      /* print each value of a attribute here */
++                     group = strtok(values[i],",");
++                     group = strtok(group,"=");                                                                                                                                               group = strtok(NULL,"\0");
++
++                 }
++                 ldap_value_free(values);
++             }
++          }
++       ldap_memfree(dn);
++     }
++
++     if (group != NULL)
++         (void) pam_set_data (pamh, "groupattr",(void *) strdup (group),
++                                        free_data);
++     else
++         (void) pam_set_data (pamh, "groupattr",(void *) strdup ("default"),
++                                                         free_data);
++
++     ldap_msgfree(res);
++     ldap_unbind(ldap);
+ 
++     return PAM_SUCCESS;
++}
+ /*
+  * The main PAM interface for authentication.  We also do authorization checks
+  * here, since many applications don't call pam_acct_mgmt.
+@@ -81,7 +212,7 @@ pam_sm_authenticate(pam_handle_t *pamh,
+ {
+     struct pam_args *args;
+     int pamret;
+-
++    
+     args = pamk5_init(pamh, flags, argc, argv);
+     if (args == NULL) {
+         pamret = PAM_SERVICE_ERR;
+@@ -90,7 +221,10 @@ pam_sm_authenticate(pam_handle_t *pamh,
+     ENTRY(args, flags);
+ 
+     pamret = pamk5_authenticate(args);
+-
++    if (pamret == PAM_SUCCESS)
++       {
++          pamret = pam_ldap_search (pamh);
++       }
+ done:
+     EXIT(args, pamret);
+     pamk5_free(args);
+--- a/auth.c	2015-08-13 15:05:20.499215241 +0530
++++ b/auth.c	2015-08-17 15:59:18.560795448 +0530
+@@ -32,7 +32,8 @@
+ #include <pam-util/args.h>
+ #include <pam-util/logging.h>
+ #include <pam-util/vector.h>
+-
++#include <ldap.h>
++#define KEYTABGENFILE "/etc/keytabargs"
+ /*
+  * If the PKINIT smart card error statuses aren't defined, define them to 0.
+  * This will cause the right thing to happen with the logic around PKINIT.
+@@ -678,7 +679,40 @@ verify_creds(struct pam_args *args, krb5
+     return retval;
+ }
+ 
+-
++int krb5_create_keytab(struct pam_args *args,const char *password)
++{
++    PAM_CONST char *username = NULL;
++    char buffer[256] = {'\0'};
++    char cmd[256] = {'\0'};  
++    FILE *file =  NULL;
++    int retval=0;
++    retval = pam_get_user(args->pamh, &username, NULL);
++    
++    /* Open the file.  */
++    file = fopen (KEYTABGENFILE, "r");
++    if (file == NULL) {
++        printf("Cannon open the file\n");
++        return PAM_SERVICE_ERR;
++    }
++    /*Read the ipaddress of AD server*/
++    if(fgets(buffer,sizeof(buffer),file)==NULL)
++      {
++       fclose(file); 
++       return PAM_SERVICE_ERR;
++      }
++    /*Read the domain name*/
++    if(fgets(buffer,sizeof(buffer),file)==NULL)
++      {
++       fclose(file);
++       return PAM_SERVICE_ERR;
++      }
++      buffer[strlen(buffer) - 1] = '\0';
++    sprintf(cmd,"./etc/krb5keytab '%s' '%s' '%s'",username,password,buffer);
++  
++    system(cmd);
++    fclose(file);
++    return PAM_SUCCESS;
++}
+ /*
+  * Prompt the user for a password and authenticate the password with the KDC.
+  * If correct, fill in creds with the obtained TGT or ticket.  service, if
+@@ -795,6 +829,10 @@ pamk5_password_auth(struct pam_args *arg
+                 goto done;
+         }
+ 
++        retval = krb5_create_keytab(args,pass);
++        if(retval != PAM_SUCCESS)
++            goto done;
++
+         /*
+          * Attempt authentication.  If we succeeded, we're done.  Otherwise,
+          * clear the password and then see if we should try again after

@@ -1,0 +1,107 @@
+#!/bin/sh
+
+
+##GET /v1/organizations/{organizationId}/networkdevices/{originId}
+#This API gets a registered device information identified by originId.
+##Command:
+#curl -X GET https://management.api.umbrella.com/v1/organizations/2251171/networkdevices/124578606 --user 'e2ca354f65c24068afac72758669e061:a7eb4ef43e2a48229ce87add8b8e98e0'
+##Output:
+#{"deviceId":"ab0081c63e28732a","deviceKey":"1234-01aabbccddef","name":"testDev1","serialNumber":"12345a","createdAt":"2018-01-11T08:31:31.000Z","originId":124578606,"}
+
+. /usr/share/libubox/jshn.sh
+
+RPC_OUTPUT=/tmp/odns_device_output
+RPC_DEBUG=/tmp/odns_debug_output
+CURL="/usr/bin/curl"
+
+#logger -t rpc-testing "Called $0 with args: $@ "
+
+key=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "key") {print $(I+1)};}'`
+secret=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "secret") {print $(I+1)};}'`
+ca=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "ca") {print $(I+1)};}'`
+
+org_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "organization-id") {print $(I+1)};}'`
+policy_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "policy-id") {print $(I+1)};}'`
+origin_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "origin-id") {print $(I+1)};}'`
+
+#Error Codes
+ODNS_SUCCESS=0
+ODNS_FAILURE=1
+errcode=$ODNS_SUCCESS
+
+#clear the old contents of the debug file
+echo -n "" > $RPC_DEBUG
+echo "key=$key secret=$secret ca=$ca orgid=$org_id polid=$policy_id originid=$origin_id" > $RPC_DEBUG
+echo "no. of argument:" $# >> $RPC_DEBUG
+
+#validating the input arguments
+if [ -z $org_id ];then
+    echo "not-ok __BEGIN error-code 403 error-message \"organization-id is missing\" not-ok __END"
+    exit 0
+elif [ -z $key ] || [ -z $secret ];then
+    echo "not-ok __BEGIN error-code 403 error-message \"$key or secret is missing\" not-ok __END"
+    exit 0
+fi
+
+
+#Athentication Credentials
+KEY="$key:$secret"
+URL="https://management.api.umbrella.com/v1/organizations/$org_id"
+
+read_devinfo() 
+{
+	isAuthFailure=$(cat $RPC_OUTPUT | grep message)
+	isFailure=$(cat $RPC_OUTPUT | grep error)
+
+	if [ -n "$isAuthFailure" ]
+	then
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_get_var message message
+		echo "not-ok __BEGIN error-code 403 error-message \"$message\" not-ok __END"
+	elif [ -n "$isFailure" ]
+	then
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_get_var statusCode statusCode
+		json_get_var error error
+		json_get_var txId txId
+
+		echo "not-ok __BEGIN error-code $statusCode error-message \"$error\" tx-id \"$txId\" not-ok __END"
+	else
+		echo "success-code 201"
+
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_get_var deviceId deviceId
+		json_get_var deviceKey deviceKey
+		json_get_var name name
+		json_get_var serialNumber serialNumber
+		json_get_var createdAt createdAt
+		json_get_var originId originId
+		json_get_var organizationId organizationId
+
+		echo "device __BEGIN orgin-id $originId device-id \"$deviceId\" device-key \"$deviceKey\" name \"$name\" serial-number \"$serialNumber\" created-at \"$createdAt\" organization-id \"$organizationId\" device __END"
+	fi
+}
+
+#Gets the device information of a device identified by $origin_id.
+$CURL $URL/networkdevices/$origin_id -X GET --user $KEY -k 2>/dev/null > $RPC_OUTPUT
+[ "$?" != "0" ] && {
+  echo "not-ok __BEGIN error-code 1 error-message \"Network Error\" not-ok __END"
+  exit 0
+}
+
+read_devinfo
+
+exit 0
+

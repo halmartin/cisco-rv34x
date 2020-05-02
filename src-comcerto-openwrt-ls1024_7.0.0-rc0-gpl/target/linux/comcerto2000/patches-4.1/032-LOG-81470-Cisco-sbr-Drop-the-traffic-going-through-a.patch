@@ -1,0 +1,44 @@
+--- a/include/net/netfilter/nf_conntrack.h	2017-03-23 16:45:21.104796413 +0530
++++ b/include/net/netfilter/nf_conntrack.h	2017-03-23 16:47:03.908169650 +0530
+@@ -309,6 +309,7 @@ struct kernel_param;
+ 
+ #if defined(CONFIG_CPE_FAST_PATH)
+ extern int nf_conntrack_set_drop_enable_report(struct sk_buff *skb);
++extern int nf_conntrack_set_drop_tuple_enable_report(struct nf_conntrack_tuple tuple);
+ extern int nf_conntrack_set_dpi_allow_report(struct sk_buff *skb);
+ extern int nf_conntrack_set_dpi_allow_and_mark(struct sk_buff *skb, int mark);
+ #endif
+--- a/net/netfilter/nf_conntrack_core.c	2017-03-23 16:46:13.178819012 +0530
++++ b/net/netfilter/nf_conntrack_core.c	2017-03-23 16:49:06.033198360 +0530
+@@ -1608,6 +1608,31 @@ int nf_conntrack_set_drop_enable_report(
+ 
+ EXPORT_SYMBOL(nf_conntrack_set_drop_enable_report);
+ 
++int nf_conntrack_set_drop_tuple_enable_report(struct nf_conntrack_tuple tuple)
++{
++    int err, prev;
++    struct nf_conntrack_tuple_hash *h;
++    struct nf_conn *ct;
++    
++    //spin_lock_bh(&nf_conntrack_lock);
++    h = nf_conntrack_find_get(&init_net, NF_CT_DEFAULT_ZONE, &tuple);
++    //spin_unlock_bh(&nf_conntrack_lock);
++    if (!h)
++        return -ENOENT;
++        
++    ct = nf_ct_tuplehash_to_ctrack(h);
++        
++    prev = test_and_set_bit(IPS_DROP_CONN_BIT, &ct->status);
++    err = nf_conntrack_event(IPCT_DROP, ct);
++    if(err < 0 && prev == 0)
++        clear_bit(IPS_DROP_CONN_BIT, &ct->status);
++    nf_ct_put(ct);
++    
++    return err;
++}
++EXPORT_SYMBOL(nf_conntrack_set_drop_tuple_enable_report);
++        
++
+ int nf_conntrack_set_dpi_allow_report(struct sk_buff *skb)
+ {
+ 	int err = 0;

@@ -1,0 +1,85 @@
+#!/bin/sh
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	"ssid" )
+		shift 1
+		ssid=$1
+	;;
+	"pin" )
+		shift 1
+		pin=$1
+	;;
+	"radio" )
+		shift 1
+		radio=$1
+	;;
+	* )
+		shift 1
+	;;
+	esac
+done
+
+RADIO=""
+
+board="$(/usr/bin/board_check.sh)"
+
+if [ "$board" = "RV160W" ];then
+	[ "$radio" = "WLAN0" ] && RADIO="wl1"
+	[ "$radio" = "WLAN1" ] && RADIO="wl0"
+	[ "$radio" = "BOTH" ] && RADIO="both"
+elif [ "$board" = "RV340W" ];then
+    [ "$radio" = "WLAN1" ] && RADIO="wl0"
+    [ "$radio" = "WLAN2" ] && RADIO="wl1"
+else
+	[ "$radio" = "WLAN0" ] && RADIO="wl0"
+	[ "$radio" = "WLAN1" ] && RADIO="wl1"
+	[ "$radio" = "BOTH" ] && RADIO="both"
+fi
+
+[ -n "$pin" ] && {
+	pin="$(echo $pin | sed 's/[- ]//g')"
+	checksum_result="$(/bin/wps_pin_check $pin)"
+	if [ "$checksum_result" = "2" ];then
+		echo "code 3 errstr \"Invalid WPS Pin\""
+		return 3
+	fi
+}
+
+if [ -n "$ssid" -a -n "$pin" ];then
+    # Reset wps pin fail state
+	wps_cli wps_reg_pinfail 0
+	wps_pin "$ssid" $pin $RADIO
+	wps_pin_result="$?"
+	if [ $wps_pin_result -eq 0 ];then
+		_cnt=0
+		while [ $_cnt -le 120 ]; do
+			sleep 1
+			_cnt=$(( $_cnt + 1 ))
+
+			wps_result="$(nvram get wps_proc_status)"
+			if [ "$wps_result" = "2" ];then
+				echo "code 0 errstr Success"
+				return 0
+			elif [ "$wps_result" = "1" -o "$wps_result" = "5" -o "$wps_result" = "6" -o "$wps_result" = "7" ];then
+				continue
+			elif [ "$wps_result" = "0" ];then
+				echo "code 2 errstr \"Time out\""
+				return 2
+			else
+#				echo "code 1 errstr \"\""
+				return 1
+			fi
+		done
+
+		echo "code 2 errstr \"Time out\""
+		return 2
+	else
+#		echo "code 1 errstr \"\""
+		return 1
+	fi
+else
+#	echo "code 1 errstr \"No ssid or pin provided\""
+	return 1
+fi
+

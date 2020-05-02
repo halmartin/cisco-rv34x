@@ -1,0 +1,2434 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add RV16X and RV26X support.
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c	2017-01-19 13:26:50.767127330 +0800
+@@ -0,0 +1,473 @@
++
++/*
++ * Copyright (C) 2011 Mindspeed Technologies Pvt Ltd.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of
++ * the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ * MA 02111-1307 USA
++ *
++ */
++
++/**
++ * @file
++ * @brief Comcerto 2000 Specific Board Initialization routines
++ *
++ */
++
++
++#include <common.h>
++#include <init.h>
++#include <driver.h>
++#include <partition.h>
++#include <fs.h>
++#include <asm/io.h>
++#include <asm/types.h>
++#include <mach/comcerto-2000.h>
++#include <mach/exp-bus.h>
++#include <generated/mach-types.h>
++#include <sizes.h>
++#include <c2000_eth_pdata.h>
++#include <config.h>
++#include <spi/spi.h>
++#include <mach/comcerto_spi.h>
++#include <mach/gpio.h>
++#include <miidev.h>
++#include <asm/armlinux.h>
++#include <fast_uart.h>
++#include <i2c/i2c.h>
++#include <mach/i2c.h>
++#include <mach/otp.h>
++#include <mach/ddr.h>
++#include <mach/reset.h>
++
++#define PHY_DEVICE      "phy0"
++
++#ifdef CONFIG_SPI
++static struct spi_board_info c2k_spi_dev_1[] = {
++        {
++                .name = SPI_FLASH_DEVICE_DRIVER, /* device name */
++                .max_speed_hz = 4000000, /* max freq this device can work with */
++                .bus_num = SPI_BUS_NUM_1, /* which driver to attach this device to */
++                .chip_select = SPI_CHIP_SELECT_NUM_0, /* which chip select this device is connected to */
++                .mode = SPI_CPOL | SPI_CPHA | SPI_DMA, /* operating modes */
++		.flash_name = MX66L51235F_SPI_FLASH_NAME, /* Flash name is one of the flash in the flash table.*/
++						/* This flash table information is maintained in the */
++						/* SPI flash client driver. */
++        },
++        {
++                .name = "comcerto_spi1", /* device name */
++                .max_speed_hz = 4000000, /* max freq this device can work with */
++                .bus_num = SPI_BUS_NUM_0, /* which driver to attach this device to */
++                .chip_select = SPI_CHIP_SELECT_NUM_1, /* which chip select this device is connected to */
++                .mode = SPI_CPOL | SPI_CPHA, /* operating modes */
++        },
++        {
++                .name = "comcerto_spi2", /* device name */
++                .max_speed_hz = 4000000, /* max freq this device can work with */
++                .bus_num = SPI_BUS_NUM_0, /* which driver to attach this device to */
++                .chip_select = SPI_CHIP_SELECT_NUM_2, /* which chip select this device is connected to */
++                .mode = SPI_CPOL | SPI_CPHA, /* operating modes */
++        },
++        {
++                .name = "legerity", /* device name */
++                .max_speed_hz = 4000000, /* max freq this device can work with */
++                .bus_num = SPI_BUS_NUM_0, /* which driver to attach this device to */
++                .chip_select = SPI_CHIP_SELECT_NUM_3, /* which chip select this device is connected to */
++                .mode = SPI_CPOL | SPI_CPHA, /* operating modes */
++        },
++};
++
++//Legacy spi
++
++static int c2k_spi_cs[4] = {0};
++
++static struct c2k_spi_master c2k_spi_1_data = {
++        .chipselect = c2k_spi_cs,
++        .num_chipselect = ARRAY_SIZE(c2k_spi_cs),
++	.bus_num = SPI_BUS_NUM_0, /* This field is used to identify LS SPI flash/HS SPI flash */
++};
++
++static struct device_d device_spi = {
++        .id = -1,
++        .name = "c2k_spi",
++        .map_base = SPI_BASEADDR,
++        .platform_data = &c2k_spi_1_data,
++};
++
++//--------------
++//Fast spi
++
++
++static int c2k_fast_spi_cs[2] = {0};
++
++static struct c2k_spi_master c2k_fast_spi_1_data = {
++	.chipselect = c2k_fast_spi_cs,
++	.num_chipselect = ARRAY_SIZE(c2k_fast_spi_cs),
++	.bus_num = SPI_BUS_NUM_1, /* This field is used to identify LS SPI flash/HS SPI flash */
++};
++
++
++static struct device_d device_fast_spi = {
++	.id = -1,
++	.name = "c2k_spi",
++	.map_base = FAST_SPI_BASEADDR,
++	.platform_data = &c2k_fast_spi_1_data,
++};
++#endif
++
++#if defined(CONFIG_NET_COMCERTO_2000)
++struct c2000_eth_platform_data eth0_pdata = {
++	.gemac_port = 0,
++	.mac_addr = 0,
++};
++
++struct device_d c2000_eth0 = {
++	.id = 0,
++	.name = "c2000_eth",
++	.map_base = COMCERTO_AXI_HFE_CFG_BASE,
++	/* .size  = 16M, */
++	.platform_data = &eth0_pdata,
++};
++
++struct c2000_eth_platform_data eth1_pdata = {
++	.gemac_port = 1,
++	.mac_addr = 0,
++};
++
++struct device_d c2000_eth1 = {
++	.id = 1,
++	.name = "c2000_eth",
++	.map_base = COMCERTO_AXI_HFE_CFG_BASE,
++	/* .size  = 16M, */
++	.platform_data = &eth1_pdata,
++};
++
++struct c2000_eth_platform_data eth2_pdata = {
++	.gemac_port = 2,
++	.mac_addr = 0,
++};
++
++struct device_d c2000_eth2 = {
++	.id = 2,
++	.name = "c2000_eth",
++	.map_base = COMCERTO_AXI_HFE_CFG_BASE,
++	/* .size  = 16M, */
++	.platform_data = &eth2_pdata,
++};
++#endif
++
++static struct memory_platform_data sdram_pdata = {
++	.name = "ram0",
++	.flags = DEVFS_RDWR,
++};
++
++static struct device_d sdram_dev = {
++	.id = -1,
++	.name = "mem",
++	.map_base = 0x00000000,
++	.size = SZ_512M,
++	.platform_data = &sdram_pdata,
++};
++
++static struct fast_uart_plat serial_plat = {
++	.clock = 200000000,      /* 200MHz  */
++};
++
++static struct device_d fast_uart_device = {
++	.id       = -1,
++	.name     = "fast_uart",
++	.map_base = UART_BASEADDR,
++	.platform_data = (void *)&serial_plat,
++};
++
++#ifdef CONFIG_I2C_C2K
++struct i2c_platform_data pdata = {
++	.bitrate = 0x40000
++};
++
++struct device_d c2k_i2c_dev = {
++	.id       = -1,
++	.name     = "c2k_i2c",
++	.map_base = COMCERTO_I2C_BASE,
++	.platform_data = &pdata,
++};
++
++static struct i2c_board_info i2c_devices[] = {
++	{
++		I2C_BOARD_INFO(I2C_EEPROM0_DEVICE_NAME, CFG_I2C_EEPROM0_ADDR),
++	},
++};
++#endif
++
++#ifdef CONFIG_OTP
++struct device_d c2k_otp_dev = {
++	.name     = "c2k_otp",
++	.map_base = COMCERTO_OTP_BASE,
++	.size     = OTP_SIZE,
++};
++#endif
++
++struct device_d c2k_nor_dev = {
++	.id	  = -1,
++	.name     = "cfi_flash",
++	.map_base = COMCERTO_AXI_EXP_BASE,
++	.size     = NOR_FLASH_SIZE,
++};
++
++
++void GPIO_reset_external_device(int block,int state)
++{
++	/* Blocks to be put in out of Reset and reset mode 
++	 * 0 ----> out of reset 
++	 * 1 ----> reset 
++	*/
++	switch (block){
++		case COMPONENT_ATHEROS_SWITCH:
++			if (state){
++				writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_5, COMCERTO_GPIO_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_OE_REG) & ~GPIO_5, COMCERTO_GPIO_OE_REG);
++			}else{
++				writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_5, COMCERTO_GPIO_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_OE_REG) | GPIO_5, COMCERTO_GPIO_OE_REG);
++				writel(readl(COMCERTO_GPIO_OUTPUT_REG) |GPIO_5, COMCERTO_GPIO_OUTPUT_REG);
++			}
++			break;
++		case COMPONENT_SLIC:
++			if (state){
++				writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_4, COMCERTO_GPIO_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_OE_REG) & ~GPIO_4, COMCERTO_GPIO_OE_REG);
++			}else{
++				writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_4, COMCERTO_GPIO_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_OE_REG) | GPIO_4, COMCERTO_GPIO_OE_REG);
++				writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_4, COMCERTO_GPIO_OUTPUT_REG);
++			}
++			break;
++		case COMPONENT_PCIE0:
++			if (state){
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_48, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_48, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) & ~GPIO_48, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}else{
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_48, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) & ~GPIO_48, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_48, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) | GPIO_48, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}
++			break;
++		case COMPONENT_PCIE1:
++			if (state){
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_47, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_47, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) & ~GPIO_47, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}else{
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_47, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) & ~GPIO_47, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_47, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) | GPIO_47, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}
++			break;
++		case COMPONENT_USB_HUB:
++			if (state){
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_50, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_50, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) & ~GPIO_50, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}else{
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_50, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) & ~GPIO_50, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_50, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) | GPIO_50, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}
++			break;
++		case COMPONENT_EXP_DAUGTHER_CARD:
++			if (state){
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_49, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_49, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) & ~GPIO_49, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}else{
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_49, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) & ~GPIO_49, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_49, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) | GPIO_49, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}
++			break;
++		case COMPONENT_RGMII0:
++			if (state){
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_46, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_46, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) & ~GPIO_46, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}else{
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_46, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) & ~GPIO_46, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_46, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) | GPIO_46, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}
++			break;
++		case COMPONENT_RGMII1:
++			if (state){
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_45, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_45, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG)& ~GPIO_45, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}else{
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_45, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel( readl(COMCERTO_GPIO_EXT_OE_REG) & ~GPIO_45, COMCERTO_GPIO_EXT_OE_REG);
++				writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_45, COMCERTO_GPIO_EXT_OUTPUT_REG);
++				writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) | GPIO_45, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++			}
++			break;
++		default:
++			break;
++	}
++}
++		
++
++static int c2000_device_init(void)
++{
++#if defined	(CONFIG_COMCERTO_BOOTLOADER) || (CONFIG_COMCERTO_DIAG)
++	u32 bootopt;
++#endif
++	int clk = HAL_get_axi_clk(); // Get AXI bus freq in MHz
++	serial_plat.clock = clk * 1000 * 1000;
++	register_device(&fast_uart_device);
++
++#ifdef CONFIG_I2C_C2K
++	i2c_register_board_info(0, i2c_devices, ARRAY_SIZE(i2c_devices));
++	register_device(&c2k_i2c_dev);
++#endif
++
++#ifdef CONFIG_SPI
++	spi_register_board_info(c2k_spi_dev_1, ARRAY_SIZE(c2k_spi_dev_1));
++	register_device(&device_spi);
++        register_device(&device_fast_spi);
++#endif
++
++#ifdef CONFIG_OTP
++        register_device(&c2k_otp_dev);
++#endif
++
++
++#if defined(CONFIG_NET_COMCERTO_2000)
++	register_device(&c2000_eth0);
++	register_device(&c2000_eth1);
++	register_device(&c2000_eth2);
++#endif
++	register_device(&c2k_nor_dev);
++
++	//Exp bus soft reset
++	writel (0x1, EXP_SWRST_REG);
++	while(readl(EXP_SWRST_REG) & 0x1);
++
++	//16-bit NOR bus is used on C2K EVM board
++	writel(((0x1) << 1), EXP_CS0_CFG_REG);
++
++	/* IBR, when booting from NOR, is changing expansion bus CS0 Mem Segment size to 1MiB
++	instead of the default reset value of 128MiB. Put back the reset default value */
++	writel(EXP_CS0_SEG_END_VAL, EXP_CS0_SEG_REG);
++
++	writel(EXP_CS1_BASE_VAL, EXP_CS1_BASE_REG);
++	writel(EXP_CS1_SEG_END_VAL, EXP_CS1_SEG_REG);
++
++	writel(EXP_CS2_BASE_VAL, EXP_CS2_BASE_REG);
++	writel(EXP_CS2_SEG_END_VAL, EXP_CS2_SEG_REG);
++
++	writel(EXP_CS3_BASE_VAL, EXP_CS3_BASE_REG);
++	writel(EXP_CS3_SEG_END_VAL, EXP_CS3_SEG_REG);
++
++#ifdef CONFIG_COMCERTO_NAND
++        writel(EXP_CS4_BASE_VAL, EXP_CS4_BASE_REG);
++	writel(EXP_CS4_SEG_END_VAL, EXP_CS4_SEG_REG);
++	//MLC NAND on EVM is 8-bit. Enable 8-bit bus
++        writel((readl(EXP_CS4_CFG_REG) & (~0x6)), EXP_CS4_CFG_REG);
++
++#endif
++
++	//CS0 EXP bus Timing tune. It reduces the time to flash NOR
++	writel(0x03034007, EXP_CS0_TMG1_REG);
++	writel(0x04040502, EXP_CS0_TMG2_REG);
++
++
++	//For 16bit ddr, reduce the size to half 
++	if (is_16bitDDR_config())
++		sdram_dev.size >>= 1;
++
++	register_device(&sdram_dev);
++
++#if defined	(CONFIG_COMCERTO_BOOTLOADER) || (CONFIG_COMCERTO_DIAG)
++	armlinux_add_dram(&sdram_dev);
++	armlinux_set_bootparams((void *)0x100);
++	armlinux_set_architecture(MACH_TYPE_COMCERTO);
++
++	bootopt = ((readl(COMCERTO_GPIO_SYSTEM_CONFIG) >>  BOOTSTRAP_BOOT_OPT_SHIFT) & BOOTSTRAP_BOOT_OPT_MASK);
++	if(bootopt == BOOT_LS_SPI){
++		/* ENV for SPI */
++		printf("Using ENV from SPI Flash.\n");
++		if (cdev_by_name(SPI_FLASH_BAREBOX_DEV_NAME))
++		{
++			devfs_add_partition(SPI_FLASH_BAREBOX_DEV_NAME, 0xA0000, 0x20000, PARTITION_FIXED, "env0");
++			protect_file("/dev/env0", 1);
++		}
++	}
++	else if(bootopt == BOOT_HS_SPI){
++		/* ENV for SPI */
++		printf("Using ENV from Fast SPI Flash.\n");
++		if (cdev_by_name(FAST_SPI_FLASH_BAREBOX_DEV_NAME))
++		{
++			devfs_add_partition(FAST_SPI_FLASH_BAREBOX_DEV_NAME, 0xA0000, 0x20000, PARTITION_FIXED, "env0");
++			protect_file("/dev/env0", 1);
++		}
++	}else{
++		/* ENV for NOR */
++		printf("Using ENV from NOR Flash.\n");
++		devfs_add_partition("nor0", 0xA0000, 0x20000, PARTITION_FIXED, "env0");
++		protect_file("/dev/env0", 1);
++	}
++
++	GPIO_reset_external_device(COMPONENT_SLIC, 0);
++#endif
++	return 0;
++}
++
++int c2000_eth_board_init(int gemac_port)
++{
++        struct mii_device *mdev;
++        struct cdev *cdev;
++
++        cdev = cdev_by_name(PHY_DEVICE);
++	if(!cdev)
++	{
++		printf("No MII Device registered !!\n");
++		return -1;
++	}
++
++        mdev = cdev->priv;
++
++        //eth0 port is chosen as criteria for bringingup out of reset because
++        //all MDIO access can happen through EMAC0 and without bringing eth0 first
++        //no Switch/PHY configuration can happen and no point in removing reset without eth0
++	if(gemac_port == 0)
++	{
++
++		//AR8327 Switch init
++		athrs17_init(mdev);
++		//AR8327 WAN PHY4 init
++		athrs17_phy_setup(mdev,EMAC0_PHY_ADDR);
++	}
++	else
++	{
++		//AR8327 LAN PHYs init
++		athrs17_phy_setup(mdev,EMAC1_PHY_ADDR);
++	}
++}
++
++device_initcall(c2000_device_init);
++
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/config.h barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/config.h
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/config.h	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/config.h	2017-01-19 13:26:50.767127330 +0800
+@@ -0,0 +1,51 @@
++#ifndef __CONFIG_H
++#define __CONFIG_H
++
++#define CONFIG_LBA48
++
++#define DDR_SIZE        SZ_512M
++
++#define CFG_I2C_EEPROM0_ADDR     0x50
++#define I2C_EEPROM0_DEVICE_NAME	"eeprom0"
++#define I2C_EEPROM_PAGE_SZ	128
++#define I2C_EEPROM_AT24C512B_SZ	64 * 1024
++#define I2C_EEPROM_SIZE		I2C_EEPROM_AT24C512B_SZ
++#define I2C_EEPROM0_SZ		(I2C_EEPROM_AT24C512B_SZ)
++
++#define NOR_FLASH_SIZE          64 * 1024 * 1024
++
++#define EMAC0_PHY_ADDR	4
++#define EMAC1_PHY_ADDR	0
++#define EMAC0_FLAGS 	0
++#define EMAC1_FLAGS 	GEMAC_NO_PHY
++#define EMAC2_FLAGS 	0
++
++#define EXP_CS0_BASE_VAL	0x0
++#define EXP_CS0_SEG_SIZE_VAL	0x7FFF
++#define EXP_CS0_SEG_END_VAL	(EXP_CS0_BASE_VAL + EXP_CS0_SEG_SIZE_VAL)
++
++#define EXP_CS1_BASE_VAL	(EXP_CS0_SEG_END_VAL + 1)
++#define EXP_CS1_SEG_SIZE_VAL	0xFF
++#define EXP_CS1_SEG_END_VAL	(EXP_CS1_BASE_VAL + EXP_CS1_SEG_SIZE_VAL)
++
++#define EXP_CS2_BASE_VAL	(EXP_CS1_SEG_END_VAL + 1)
++#define EXP_CS2_SEG_SIZE_VAL	0xFF
++#define EXP_CS2_SEG_END_VAL	(EXP_CS2_BASE_VAL + EXP_CS2_SEG_SIZE_VAL)
++
++#define EXP_CS3_BASE_VAL	(EXP_CS2_SEG_END_VAL + 1)
++#define EXP_CS3_SEG_SIZE_VAL	0xFF
++#define EXP_CS3_SEG_END_VAL	(EXP_CS3_BASE_VAL + EXP_CS3_SEG_SIZE_VAL)
++
++#define EXP_CS4_BASE_VAL	(EXP_CS3_SEG_END_VAL + 1)
++#define EXP_CS4_SEG_SIZE_VAL	0xFF
++#define EXP_CS4_SEG_END_VAL	(EXP_CS4_BASE_VAL + EXP_CS4_SEG_SIZE_VAL)
++
++#define SHIFT_4K_MUL	12
++
++#define COMCERTO_EXP_CS4_BASE_ADDR	(COMCERTO_AXI_EXP_BASE + (EXP_CS4_BASE_VAL << SHIFT_4K_MUL))
++
++#define COMCERTO_NAND_FLASH_SIZE	(2UL * 1024UL * 1024UL * 1024UL)
++
++
++#endif  /* __CONFIG_H */
++
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,288 @@
++#!/bin/sh
++
++. /env/config
++
++gpio_set_value $GPIO_LED_DIAG $OFF 
++
++echo "Setting env LAN, WAN1, WAN2..."
++boardinfo -m
++echo "done"
++echo -n "Exporting env LAN, WAN1, WAN2..."
++export LAN="$LAN" WAN1="$WAN1" WAN2="$WAN2"
++echo "done"
++
++if [  "X$LAN" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN1" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN2" != "XFF:FF:FF:FF:FF:FF" ]; then
++  echo "FOUND MACs from Boardinfo using same in bootargs"
++  export eth0_ethaddr="$WAN2" eth1_ethaddr="$WAN1" eth2_ethaddr="$LAN"
++  echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr, eth2mac = $eth2_ethaddr"
++  bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr,$eth2_ethaddr"
++elif [  "X$LAN" = "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN1" = "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN2" = "XFF:FF:FF:FF:FF:FF" ]; then
++  echo -e "One or More MACs from Boardinfo are INVALID OR NOT Programmed!!!\nHalting Boot Up...done."
++  exit 1
++fi
++echo "done"
++
++if [ x$1 = xnand ]; then
++  rootfs_loc=nand
++  kernel_loc=nand
++elif [ x$1 = xnor ]; then
++  rootfs_loc=nor
++  kernel_loc=nor
++elif [ x$1 = xsata ]; then
++  rootfs_loc=sata
++  kernel_loc=sata
++elif [ x$1 = xfastspi ]; then
++  rootfs_loc=fastspi
++  kernel_loc=fastspi
++elif [ x$1 = xspi ]; then
++  rootfs_loc=spi
++  kernel_loc=spi
++elif [ x$1 = xi2c ]; then
++  rootfs_loc=i2c
++  kernel_loc=i2c
++elif [ x$1 = xnfs ]; then
++  rootfs_loc=net
++  kernel_loc=nfs
++elif [ x$1 = xtftp ]; then
++  rootfs_loc=net
++  kernel_loc=tftp
++fi
++
++echo -n "Setting active/inactive env..."
++imageenv -g
++echo "done"
++echo -n "Exporting env..."
++export active="$active" inactive="$inactive"
++echo "done"
++echo "active = $active inactive = $inactive"
++
++if [ x$1 = xactive ]; then
++  echo "Booting active $active ..."
++  if [ x$active = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$active = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  fi
++elif [ x$1 = xinactive ]; then
++  echo "Booting inactive $inactive ..."
++  if [ x$inactive = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$inactive = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  fi
++else
++  echo "Booting default active $active ..."
++  if [ x$active = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$active = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  else
++    kernel=kernel1
++    rootfs=rootfs1
++  fi
++fi
++
++if [ x$rootfs = xrootfs1 ]; then
++  rootfs_mtdblock_nand=$ROOTFS_PART1
++elif [ x$rootfs = xrootfs2 ]; then
++  rootfs_mtdblock_nand=$ROOTFS_PART2
++fi
++
++if [ x$ip = xdhcp ]; then
++  bootargs="$bootargs ip=dhcp"
++elif [ x$ip = xnone ]; then
++  bootargs="$bootargs ip=none"
++else
++  bootargs="$bootargs ip=${eth0.ipaddr}::${eth0.gateway}:${eth0.netmask}:::"
++fi
++
++if [ x$rootfs_loc = xnet ]; then
++  bootargs="$bootargs root=/dev/nfs nfsroot=$nfsroot,v3,tcp noinitrd"
++elif [ x$rootfs_loc = xinitrd ]; then
++  bootargs="$bootargs root=/dev/ram0 rootfstype=ramfs rdinit=/linuxrc"
++elif [ x$rootfs_loc = xsata ]; then
++  bootargs="$bootargs root=/dev/sda2 rootfstype=$rootfs_type rw noinitrd"
++else
++  if [ x$rootfs_loc = xnand ]; then
++    rootfs_mtdblock=$rootfs_mtdblock_nand
++  elif [ x$rootfs_loc = xnor ]; then
++    rootfs_mtdblock=$rootfs_mtdblock_nor
++  elif [ x$rootfs_loc = xfastspi ]; then
++    rootfs_mtdblock=$rootfs_mtdblock_fastspi
++  elif [ x$rootfs_loc = xspi ]; then
++    rootfs_mtdblock=$rootfs_mtdblock_spi
++  elif [ x$rootfs_loc = xi2c ]; then
++    rootfs_mtdblock=$rootfs_mtdblock_i2c
++  fi
++
++  if [ x$rootfs_type = xubifs ]; then
++    if [ -z $ubiroot ]; then
++      ubiroot="rootfs"
++    fi
++    bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock"
++  else
++    bootargs="$bootargs root=/dev/mtdblock$rootfs_mtdblock"
++  fi
++
++  bootargs="$bootargs rootfstype=$rootfs_type rw noinitrd"
++fi
++
++if [ -n $nor_parts ]; then
++  mtdparts="${mtdparts}${nor_device}:${nor_parts}"
++fi
++
++if [ -n $nand_parts ]; then
++  if [ -n ${mtdparts} ]; then
++    mtdparts="${mtdparts};"
++  fi
++  mtdparts="${mtdparts}${nand_device}:${nand_parts}"
++fi
++
++if [ -n $spi_parts ]; then
++  if [ -n ${mtdparts} ]; then
++    mtdparts="${mtdparts};"
++  fi
++  mtdparts="${mtdparts}${spi_device}:${spi_parts}"
++fi
++
++if [ -n $fast_spi_parts ]; then
++  if [ -n ${mtdparts} ]; then
++    mtdparts="${mtdparts};"
++  fi
++  mtdparts="${mtdparts}${fast_spi_device}:${fast_spi_parts}"
++fi
++
++
++if [ -n $i2c_parts -a -n $i2c_device ]; then
++  if [ -n ${mtdparts} ]; then
++    mtdparts="${mtdparts};"
++  fi
++  mtdparts="${mtdparts}${i2c_device}:${i2c_parts}"
++fi
++
++if [ -n $mtdparts ]; then
++  bootargs="${bootargs} mtdparts=${mtdparts}"
++fi
++
++if [ -e /dev/ram0 ]; then
++if [ ! -e /dev/ram0.kernelraw ]; then
++  # arm raw kernel images are usually located at sdram start + 0x8000
++  addpart /dev/ram0 8M@0x8000(kernelraw)
++fi
++
++if [ ! -e /dev/ram0.kernel ]; then
++  # Here we can safely put the kernel without risking of overwriting it
++  # while extracting
++  addpart /dev/ram0 8M@32M(kernel)
++fi
++fi
++
++if [ x$kernel_loc = xnfs ] || [ x$kernel_loc = xtftp ]; then
++  if [ x$ip = xdhcp ]; then
++    dhcp
++  fi
++  if [ $kernelimage_type = uimage ]; then
++    netload="/dev/ram0.kernel"
++  elif [ x$kernelimage_type = xmulti-uimage ]; then
++    netload="/dev/ram0.kernel"
++  elif [ $kernelimage_type = zimage ]; then
++    netload="/dev/ram0.kernel"
++  elif [ $kernelimage_type = raw ]; then
++    netload="/dev/ram0.kernelraw"
++  elif [ $kernelimage_type = raw_lzo ]; then
++    netload="/dev/ram0.kernel"
++  else
++    echo "error: set kernelimage_type to one of 'uimage', 'zimage', 'raw' or 'raw_lzo'"
++    exit 1
++  fi
++  $kernel_loc $kernelimage $netload || exit 1
++  kdev="$netload"
++elif [ x$kernel_loc = xnor ]; then
++  kdev="/dev/nor0.kernel"
++elif [ x$kernel_loc = xnand ]; then
++  kdev="/dev/nand0.${kernel}.bb"
++elif [ x$kernel_loc = xfastspi ]; then
++  kdev="/dev/spi1.kernel"
++elif [ x$kernel_loc = xspi ]; then
++  kdev="/dev/spi0.kernel"
++elif [ x$kernel_loc = xi2c ]; then
++  kdev="/dev/i2ceeprom0.kernel"
++elif [ x$kernel_loc = xsata ]; then
++  addpart /dev/mem 3M@0x3008000(uImage)
++  sata read 3008000 1 5000
++  kdev="/dev/mem.uImage"
++  sata stop
++else
++  echo "error: set kernel_loc to one of 'nfs', 'tftp', 'nand', 'nor' , 'spi' , 'fastspi' or 'i2c'"
++  exit 1
++fi
++
++if [ -n $usb3_internal_clk ]; then
++  bootargs="$bootargs usb3_internal_clk=$usb3_internal_clk"
++fi
++
++if [ -n $pci_data ]; then
++  bootargs="$bootargs $pci_data"
++fi
++
++version
++if [ -n $bootver ]; then
++  bootargs="$bootargs bareboxver="$bootver""
++fi
++
++version_rv16x_26x
++if [ -n $bootver_rv16x_26x ]; then
++  bootargs="$bootargs bareboxver_rv16x_26x="$bootver_rv16x_26x""
++fi
++
++#POWER_LED ON
++gpio_direction_output $GPIO_LED_POWER $ON
++gpio_set_value $GPIO_LED_POWER $ON
++
++echo "booting kernel of type $kernelimage_type from $kdev"
++
++if [ x$kernelimage_type = xuimage ]; then
++  bootm $kdev
++  if [ $? != 0 ]; then
++    echo "bootm Failed to boot $kdev "
++    if [ x$kernel = xkernel1 ]; then
++      kernel=kernel2
++      rootfs=$ROOTFS_PART2
++    elif [ x$kernel = xkernel2 ]; then
++      kernel=kernel1
++      rootfs=$ROOTFS_PART1
++    fi
++    kdev="/dev/nand0.${kernel}.bb"
++    echo "Checking $kdev ..."
++    imageenv -c $kdev
++    if [ $? = 0 ]; then
++      imageenv -s "$rootfs"
++      echo "Booting kernel $kdev with Rootfs part : $rootfs"
++      bootm $kdev
++    else
++      echo "bootm Failed to boot $kdev Too!"
++      echo "Please execute Recovery Procedure!"
++      erase /dev/nand0.env
++      exit 1
++    fi
++  fi
++elif [ x$kernelimage_type = xmulti-uimage ]; then
++#limited multi image support, assuming that kernel is image 0 and ramdisk is image 1
++  bootm -r @1 -L 0x1A00000 $kdev
++elif [ x$kernelimage_type = xzimage ]; then
++  bootz $kdev
++elif [ x$kernelimage_type = xraw ]; then
++  if [ $kernel_loc != net ]; then
++    cp $kdev /dev/ram0.kernelraw
++  fi
++  bootu /dev/ram0.kernelraw
++elif [ x$kernelimage_type = xraw_lzo ]; then
++  unlzo $kdev /dev/ram0.kernelraw
++  bootu /dev/ram0.kernelraw
++fi
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/erase_firmware barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/erase_firmware
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/erase_firmware	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/erase_firmware	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,27 @@
++#!/bin/sh
++
++. /env/config
++
++if [ x$1 = ximage1 ]; then
++  echo "Erasing Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++elif [ x$1 = ximage2 ]; then
++  echo "Erasing Firmware image2"
++  kernel=kernel2
++  rootfs=rootfs2
++else
++  echo "No Input Option >> Erasing Default Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++fi
++if [ ! -e "/dev/nand0.$kernel" -o ! -e "/dev/nand0.$rootfs" ]; then
++  echo "Partition /dev/nand0.$kernel OR /dev/nand0.$rootfs does not exist!"
++  exit 1
++fi
++echo "Erasing Kernel ..."
++erase /dev/nand0.$kernel
++echo "done."
++echo "Erasing Rootfs ..."
++erase /dev/nand0.$rootfs
++echo "done."
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/hush_hack barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/hush_hack
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/hush_hack	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/hush_hack	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1 @@
++nand -a /dev/nand0.*
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/init barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/init
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/init	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/init	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,53 @@
++#!/bin/sh
++
++PATH=/env/bin
++export PATH
++
++. /env/config
++if [ -e /dev/nor0 -a -n "$nor_parts" ]; then
++	addpart /dev/nor0 $nor_parts
++fi
++
++if [ -e /dev/disk0 -a -n "$disk_parts" ]; then
++	addpart /dev/disk0 $disk_parts
++fi
++
++if [ -e /dev/nand0 -a -n "$nand_parts" ]; then
++	addpart /dev/nand0 $nand_parts
++
++	# Uh, oh, hush first expands wildcards and then starts executing
++	# commands. What a bug!
++	source /env/bin/hush_hack
++fi
++
++if [ -e /dev/i2ceeprom0 -a -n "$i2c_parts" ]; then
++	addpart /dev/i2ceeprom0 $i2c_parts
++fi
++
++if [ -e /dev/spi0 -a -n "$spi_parts" ]; then
++	addpart /dev/spi0 $spi_parts
++fi
++
++if [ -e /dev/spi1 -a -n "$fast_spi_parts" ]; then
++	addpart /dev/spi1 $fast_spi_parts
++fi
++
++if [ -f /env/bin/init_board ]; then
++	/env/bin/init_board
++fi
++
++#POWER_LED OFF
++gpio_direction_output $GPIO_LED_POWER $ON
++gpio_set_value $GPIO_LED_POWER $OFF
++
++echo
++echo -n "Hit any key to stop autoboot: "
++timeout -a $autoboot_timeout
++if [ $? != 0 ]; then
++	gpio_direction_output $GPIO_LED_DIAG $ON
++	gpio_set_value $GPIO_LED_DIAG $ON
++	. /env/bin/_update_help
++	exit
++fi
++
++boot
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/recover_fw barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/recover_fw
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/recover_fw	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/recover_fw	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,32 @@
++#!/bin/sh
++
++. /env/config
++RESPONSE=N
++readline "Do you want to update NAND Barebox [Y/y]? : " RESPONSE
++if [ x$RESPONSE = xY -o x$RESPONSE = xy ]; then
++  echo "RESPONSE=$RESPONSE >> Updating Barebox image $bareboximage ..."
++  . /env/bin/update -t barebox -d nand -m tftp -f $bareboximage
++  echo "done Barebox Update"
++else
++  echo "RESPONSE=$RESPONSE >> Barebox Updated Skipped in Recovery Procedure!"
++fi
++if [ x$1 = ximage1 ]; then
++  echo "Updating Firmware $1 ..."
++  kernel=kernel1
++  rootfs=rootfs1
++elif [ x$1 = ximage2 ]; then
++  echo "Updating Firmware $1 ..."
++  kernel=kernel2
++  rootfs=rootfs2
++else
++  echo "No input option >> Updating Default Firmware image1 ..."
++  kernel=kernel1
++  rootfs=rootfs1
++fi
++echo "Updating Kernel with Image : $kernelimage ..."
++. /env/bin/update -t $kernel -d nand -m tftp -f $kernelimage
++echo "done Kernel Update."
++echo "Updating Rootfs with Image : $rootfsimage ..."
++. /env/bin/update -t $rootfs -d nand -m tftp -f $rootfsimage
++echo "done Rootfs Update."
++echo "To set last updated image as default (active), Please set active/backup environment variables by editing and saving File: /env/config and reset board"
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update	2017-01-19 14:32:41.485252641 +0800
+@@ -0,0 +1,100 @@
++#!/bin/sh
++
++type=""
++device_type=""
++check=n
++mode=tftp
++
++. /env/config
++
++while getopt "ht:d:f:a:s:m:c" Option
++do
++if [ ${Option} = t ]; then
++	type=${OPTARG}
++elif [ ${Option} = d ]; then
++	device_type=${OPTARG}
++elif [ ${Option} = f ]; then
++	imagename=${OPTARG}
++elif [ ${Option} = a ]; then
++	address=${OPTARG}
++elif [ ${Option} = s ]; then
++	size=${OPTARG}
++elif [ ${Option} = c ]; then
++	check=y
++elif [ ${Option} = m ]; then
++	mode=${OPTARG}
++else
++	. /env/bin/_update_help
++	exit 0
++fi
++done
++
++if [ x${type} = xkernel1 -o  x${type} = xkernel2 ]; then
++  image=$kernelimage
++elif [ x${type} = xrootfs1 -o  x${type} = xrootfs2 ]; then
++	image=$rootfsimage
++elif [ x${type} = xbarebox ]; then
++	image=$bareboximage
++	if [ x${image} = x ]; then
++		image=barebox.bin
++	fi
++elif [ x${type} = xuloader ]; then
++	image=$uloaderimage
++elif [ x${type} = xbareboxenv ]; then
++	image=$bareboxenvimage
++	if [ x${image} = x ]; then
++		image=bareboxenv.bin
++	fi
++	type=env
++elif [ x${type} = xmd5sum1 -o  x${type} = xmd5sum2 ]; then
++  image=$md5sumimage
++elif [ x${type} = xconfigcert ]; then
++  image=$imageconfig
++elif [ x${type} = xwebrootdb ]; then
++	image=$imageweb
++elif [ x${type} = xlicense ]; then
++	image=$imagelic
++else
++	. /env/bin/_update_help
++	exit 1
++fi
++
++if [ x${imagename} != x ]; then
++	image=${imagename}
++fi
++
++if [ x${device_type} = xnand ]; then
++	part=/dev/nand0.${type}.bb
++elif [ x${device_type} = xnor ]; then
++	part=/dev/nor0.${type}
++elif [ x${device_type} = xi2c ]; then
++	part=/dev/i2ceeprom0.${type}
++elif [ x${device_type} = xspi ]; then
++	part=/dev/spi0.${type}
++elif [ x${device_type} = xfastspi ]; then
++	part=/dev/spi1.${type}
++else
++	. /env/bin/_update_help
++	exit 1
++fi
++
++if [ x${mode} != xtftp ] && [ x${mode} != xxmodem ] && [ x${mode} != xddr ]; then
++	echo "unsupported mode ${mode}."
++	. /env/bin/_update_help
++	exit 1
++fi
++
++. /env/bin/_update || exit 1
++
++if [ x${check} = xy ]; then
++	if [ x${mode} = xddr ]; then
++		crc32 -f $part
++		crc32 $address+$size
++	elif [ x${mode} = xtftp ]; then
++		crc32 -f $part
++	else
++		crc32 -f $image -F $part
++	fi
++else
++	true
++fi
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/_update barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/_update
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/_update	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/_update	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,71 @@
++#!/bin/sh
++
++if [ x$mode = xddr ]; then
++	if [ -z "$part" -o -z "$address" -o -z "$size" ]; then
++		echo "define \$part, \$address and \$size"
++		exit 1
++	fi
++else
++	if [ -z "$part" -o -z "$image" ]; then
++		echo "define \$part and \$image"
++		exit 1
++	fi
++fi
++
++if [ ! -e "$part" ]; then
++	echo "Partition $part does not exist"
++	exit 1
++fi
++
++if [ x$mode = xtftp ]; then
++	if [ x$ip = xdhcp ]; then
++		dhcp
++	fi
++
++	ping $eth0.serverip
++	if [ $? -ne 0 ] ; then
++		echo "Server did not reply! Update aborted."
++		exit 1
++	fi
++
++elif [ x$mode = xxmodem ]; then
++	loadb -f $image -c
++	if [ $? -ne 0 ] ; then
++		echo "loadb failed or cancelled! Update aborted."
++		exit 1
++	fi
++fi
++
++unprotect $part
++
++if [ x${device_type} != xi2c ]; then
++	echo
++	echo "erasing partition $part"
++	echo
++	erase $part
++fi
++
++if [ x$mode = xddr ]; then
++	echo
++	echo "flashing $size@$address to $part"
++	echo
++else
++	echo
++	echo "flashing $image to $part"
++	echo
++fi
++
++if [ x$mode = xtftp ]; then
++	tftp $image $part
++	if [ $? -ne 0 ] ; then
++		echo "!!!Probable use of old NAND layout.!!!"
++		echo "Use 'erase_old_nand_fmt' command to clean NAND."
++		exit 1
++	fi
++elif [ x$mode = xddr ]; then
++	memcpy $address -d $part 0 $size
++else
++	cp $image $part
++fi
++
++protect $part
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_barebox barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_barebox
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_barebox	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_barebox	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,3 @@
++#!/bin/sh
++
++. /env/bin/update -t barebox -d $1
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_firmware barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_firmware
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_firmware	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_firmware	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,30 @@
++#!/bin/sh
++
++. /env/config
++
++if [ x$1 = ximage1 ]; then
++  echo "Updating Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++  md5sum=md5sum1
++elif [ x$1 = ximage2 ]; then
++  echo "Updating Firmware image2"
++  kernel=kernel2
++  rootfs=rootfs2
++  md5sum=md5sum2
++else
++  echo "No Input Option >> Updating Default Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++  md5sum=md5sum1
++fi
++echo "Updating Kernel with Image : $kernelimage ..."
++update -t $kernel -d nand
++echo "done Kernel Update"
++echo "Updating Rootfs with Image : $rootfsimage ..."
++update -t $rootfs -d nand
++echo "done Rootfs Update"
++echo "Updating md5sum with Image : $md5sumimage ..."
++update -t $md5sum -d fastspi
++echo "done md5sum Update"
++echo "To set last updated image as default (active), Please set active/backup environment variables by editing and saving File: /env/config and reset board"
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/_update_help barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/_update_help
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/_update_help	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/_update_help	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,18 @@
++#!/bin/sh
++
++echo "usage: update -t <uloader | barebox | bareboxenv | kernel1 | kernel2 | rootfs1 | rootfs2> -d <nand | fastspi> [-m tftp|xmodem|ddr] [-f imagename |-a address] -c"
++echo "update tools."
++echo ""
++echo "options"
++echo " -c     to check the crc32 for the image and flashed one"
++echo ""
++echo "default mode is tftp"
++echo "type update -t uloader -d fastspi [-m tftp|xmodem|ddr] [-f imagename|-a address] to update uloader into flash"
++echo "type update -t barebox -d nand [-m tftp|xmodem|ddr] [-f imagename|-a address] to update barebox into flash"
++echo "type update -t <kernel1 | kernel2> -d nand [-m tftp|xmodem|ddr] [-f imagename| -a address] to update kernel into flash"
++echo "type update -t <rootfs1 | rootfs2> -d nand [-m tftp|xmodem|ddr] [-f imagename| -a address] to update rootfs into flash"
++echo "type update_firmware <image1 | image2> to update kernel, rootfs on image1 OR image2"
++echo "type update -t configcert -d nand to update yaffs2 partition : config "
++echo "type update -t webrootdb -d nand to update yaffs2 partition : webrootdb"
++echo "type update -t license -d nand to update yaffs2 partition : license"
++echo "type update_yaffs2 to update all yaffs2 partitions config, webrootdb, license"
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_kernel barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_kernel
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_kernel	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_kernel	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,3 @@
++#!/bin/sh
++
++. /env/bin/update -t kernel -d $1
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_rootfs barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_rootfs
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_rootfs	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_rootfs	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,3 @@
++#!/bin/sh
++
++. /env/bin/update -t rootfs -d $1
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_uloader barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_uloader
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_uloader	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_uloader	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,3 @@
++#!/bin/sh
++
++. /env/bin/update -t uloader -d $1
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_yaffs2 barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_yaffs2
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_yaffs2	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update_yaffs2	2017-01-19 14:32:41.496502304 +0800
+@@ -0,0 +1,13 @@
++#!/bin/sh
++
++. /env/config
++
++echo "Updating configcert with Image : $imageconfig ..."
++update -t configcert -d nand
++echo "done."
++echo "Updating webrootdb with Image : $imageweb ..."
++update -t webrootdb -d nand
++echo "done."
++echo "Updating license with Image : $imagelic ... "
++update -t license -d nand
++echo "done."
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/config barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/config
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/config	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/config	2017-01-19 14:41:20.878378171 +0800
+@@ -0,0 +1,70 @@
++#!/bin/sh
++
++# use 'dhcp' to do dhcp in barebox and in kernel
++# use 'none' if you want to skip kernel ip autoconfiguration
++ip=none
++
++# or set your networking parameters here
++#eth0.ipaddr=192.168.1.1
++#eth0.netmask=255.255.255.0
++#eth0.serverip=192.168.1.101
++#eth0.gateway=192.168.1.254
++eth0_ethaddr="00:0A:0B:0C:0D:0E"
++eth1_ethaddr="00:1A:1B:1C:1D:1E"
++eth2_ethaddr="00:2A:2B:2C:2D:2E"
++
++# can be either 'nfs', 'tftp' , 'nor' , 'nand' and 'sata'
++kernel_loc=nand
++
++# can be either 'net', 'nor' ,'initrd' , 'nand' and 'sata'
++rootfs_loc=nand
++
++# barebox images
++uloaderimage=microloader-c2krv16x-26x.bin
++bareboximage=barebox-c2krv16x-26x.bin
++
++# can be either 'jffs2' , 'ubifs' or 'ext4
++rootfs_type=ubifs
++rootfsimage=openwrt-comcerto2000-hgw-rootfs-ubi_nand.img
++
++# The image type of the kernel. Can be uimage, multi-uimage, zimage, raw, or raw_lzo
++kernelimage_type=uimage
++kernelimage=openwrt-comcerto2000-hgw-uImage.img
++
++# md5sum image
++md5sumimage=md5sum_fw-rv16x_26x-img
++
++# yaffs2 custom images
++imageconfig=root_configcert.yaffs2
++imageweb=root_webrootdb.yaffs2
++imagelic=root_license.yaffs2
++
++# active inactive image identifiers
++active=image1
++inactive=image2
++
++# Rootfs Partition Identifiers
++ROOTFS_PART1=4
++ROOTFS_PART2=7
++
++# GPIO Constants
++GPIO_LED_POWER=59
++GPIO_LED_DIAG=56
++ON=1
++OFF=0
++
++fast_spi_device="spi1.0"
++fast_spi_parts="128k(uloader)ro,512k(barebox)ro,128k(env),128k(boardinfo)ro,64k(md5sum1),64k(md5sum2)"
++
++nand_device="comcertonand"
++nand_parts="1024k(barebox),1024k(bareboxfact)ro,1024k(env),8M(kernel1),92M(rootfs1),1024k(reserved_dtb1),8M(kernel2),92M(rootfs2),1024k(reserved_dtb2),2M(configcert),12M(reserved),32M(webrootdb),2M(license)"
++
++autoboot_timeout=3
++
++usb3_internal_clk="yes"
++
++loglevel=4
++
++pci_data="pcie0_gen1_only=yes pcie1_gen1_only=no  pcie_external_clk=yes"
++
++bootargs="console=ttyS0,115200n8, loglevel=$loglevel, init=/etc/preinit"
+diff -Nur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/Makefile barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/Makefile
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/Makefile	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/Makefile	2017-01-19 13:34:31.585784384 +0800
+@@ -0,0 +1 @@
++obj-y += c2k_rv16x-26x.o
+diff -Nur barebox-2011.06.0-old/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig
+--- barebox-2011.06.0-old/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	2017-01-19 13:55:24.558378184 +0800
+@@ -0,0 +1,381 @@
++#
++# Automatically generated make config: don't edit
++# Linux/arm 2011.06.0 Barebox Configuration
++# Fri Mar 23 11:46:18 2012
++#
++# CONFIG_BOARD_LINKER_SCRIPT is not set
++CONFIG_GENERIC_LINKER_SCRIPT=y
++CONFIG_ARM=y
++CONFIG_ARM_LINUX=y
++
++#
++# System Type
++#
++CONFIG_ARCH_COMCERTO=y
++# CONFIG_ARCH_AT91 is not set
++# CONFIG_ARCH_EP93XX is not set
++# CONFIG_ARCH_IMX is not set
++# CONFIG_ARCH_MXS is not set
++# CONFIG_ARCH_NETX is not set
++# CONFIG_ARCH_NOMADIK is not set
++# CONFIG_ARCH_OMAP is not set
++# CONFIG_ARCH_S3C24xx is not set
++# CONFIG_ARCH_VERSATILE is not set
++
++#
++# Comcerto Configuration
++#
++CONFIG_ARCH_HAS_LOWLEVEL_INIT=y
++CONFIG_BOARDINFO="Mindspeed C2000"
++
++#
++# SoC Selection
++#
++CONFIG_COMCERTO_C2000=y
++
++#
++# Board Selection
++#
++# CONFIG_MACH_COMCERTO_C2K_EVM is not set
++# CONFIG_MACH_COMCERTO_C2K_MFCNEVM is not set
++CONFIG_MACH_COMCERTO_C2K_RV16X_26X=y
++# CONFIG_MACH_COMCERTO_C2K_ASIC is not set
++# CONFIG_MACH_COMCERTO_C2K_RTSM is not set
++
++#
++# Build Selection
++#
++# CONFIG_COMCERTO_VERIFICATION is not set
++# CONFIG_COMCERTO_DIAG is not set
++CONFIG_COMCERTO_BOOTLOADER=y
++# CONFIG_COMCERTO_ULOADER is not set
++# CONFIG_COMCERTO_NAND_ULOADER is not set
++CONFIG_COMCERTO_NAND=y
++# CONFIG_COMCERTO_GPIO is not set
++# CONFIG_M86201 is not set
++# CONFIG_M86202 is not set
++# CONFIG_M86203 is not set
++# CONFIG_M86204 is not set
++# CONFIG_M86206 is not set
++# CONFIG_M86207 is not set
++# CONFIG_M86208 is not set
++# CONFIG_M8620X is not set
++# CONFIG_M86260 is not set
++# CONFIG_M86261 is not set
++# CONFIG_M86261_NAS is not set
++# CONFIG_M86262 is not set
++# CONFIG_M8626X is not set
++# CONFIG_M86291 is not set
++# CONFIG_M86292 is not set
++# CONFIG_M86293 is not set
++# CONFIG_M86294 is not set
++# CONFIG_M86295 is not set
++# CONFIG_M86296 is not set
++# CONFIG_M86297 is not set
++# CONFIG_M86298 is not set
++# CONFIG_M8629X is not set
++
++CONFIG_COMCERTO_SERDES=y
++CONFIG_COMCERTO_I2C=y
++
++#
++# Processor Type
++#
++CONFIG_CPU_32=y
++CONFIG_CPU_32v7=y
++
++#
++# processor features
++#
++# CONFIG_BOOT_ENDIANNESS_SWITCH is not set
++# CONFIG_AEABI is not set
++
++#
++# Arm specific settings
++#
++CONFIG_CMD_ARM_CPUINFO=y
++# CONFIG_ARM_OPTIMZED_STRING_FUNCTIONS is not set
++CONFIG_ARM_EXCEPTIONS=y
++CONFIG_DEFCONFIG_LIST="$ARCH_DEFCONFIG"
++CONFIG_GREGORIAN_CALENDER=y
++CONFIG_HAS_KALLSYMS=y
++CONFIG_HAS_MODULES=y
++CONFIG_CMD_MEMORY=y
++CONFIG_ENV_HANDLING=y
++
++#
++# General Settings
++#
++CONFIG_LOCALVERSION_AUTO=y
++CONFIG_ENVIRONMENT_VARIABLES=y
++
++#
++# memory layout
++#
++CONFIG_HAVE_CONFIGURABLE_TEXT_BASE=y
++CONFIG_TEXT_BASE=0x00000000
++CONFIG_HAVE_CONFIGURABLE_MEMORY_LAYOUT=y
++# CONFIG_MEMORY_LAYOUT_DEFAULT is not set
++CONFIG_MEMORY_LAYOUT_FIXED=y
++CONFIG_STACK_BASE=0x00700000
++CONFIG_STACK_SIZE=0x8000
++CONFIG_MALLOC_BASE=0x00100000
++CONFIG_MALLOC_SIZE=0x500000
++# CONFIG_BROKEN is not set
++# CONFIG_EXPERIMENTAL is not set
++CONFIG_MALLOC_DLMALLOC=y
++# CONFIG_KALLSYMS is not set
++CONFIG_PROMPT="Barebox-C2K >"
++CONFIG_BAUDRATE=115200
++CONFIG_LONGHELP=y
++CONFIG_CBSIZE=1024
++CONFIG_MAXARGS=16
++CONFIG_SHELL_HUSH=y
++# CONFIG_SHELL_SIMPLE is not set
++CONFIG_GLOB=y
++CONFIG_PROMPT_HUSH_PS2="> "
++# CONFIG_HUSH_FANCY_PROMPT is not set
++CONFIG_HUSH_GETOPT=y
++CONFIG_CMDLINE_EDITING=y
++CONFIG_AUTO_COMPLETE=y
++CONFIG_MEM_SIZE=y
++# CONFIG_MENU is not set
++# CONFIG_PASSWORD is not set
++CONFIG_DYNAMIC_CRC_TABLE=y
++CONFIG_ERRNO_MESSAGES=y
++CONFIG_TIMESTAMP=y
++CONFIG_CONSOLE_FULL=y
++CONFIG_CONSOLE_ACTIVATE_FIRST=y
++# CONFIG_OF_FLAT_TREE is not set
++CONFIG_PARTITION=y
++CONFIG_DEFAULT_ENVIRONMENT=y
++CONFIG_DEFAULT_ENVIRONMENT_GENERIC=y
++CONFIG_DEFAULT_ENVIRONMENT_PATH="arch/arm/boards/comcerto-rv16x-26x/env"
++# CONFIG_POLLER is not set
++
++#
++# Debugging
++#
++# CONFIG_DEBUG_INFO is not set
++# CONFIG_ENABLE_FLASH_NOISE is not set
++# CONFIG_ENABLE_PARTITION_NOISE is not set
++# CONFIG_ENABLE_DEVICE_NOISE is not set
++CONFIG_COMMAND_SUPPORT=y
++
++#
++# commands
++#
++
++#
++# scripting
++#
++CONFIG_CMD_EDIT=y
++# CONFIG_CMD_SLEEP is not set
++CONFIG_CMD_SAVEENV=y
++CONFIG_CMD_LOADENV=y
++# CONFIG_CMD_EXPORT is not set
++CONFIG_CMD_PRINTENV=y
++CONFIG_CMD_READLINE=y
++CONFIG_CMD_TRUE=y
++CONFIG_CMD_FALSE=y
++# CONFIG_CMD_LOGIN is not set
++# CONFIG_CMD_PASSWD is not set
++
++#
++# file commands
++#
++CONFIG_CMD_LS=y
++CONFIG_CMD_RM=y
++CONFIG_CMD_CAT=y
++CONFIG_CMD_MKDIR=y
++CONFIG_CMD_RMDIR=y
++CONFIG_CMD_CP=y
++CONFIG_CMD_PWD=y
++CONFIG_CMD_CD=y
++CONFIG_CMD_MOUNT=y
++CONFIG_CMD_UMOUNT=y
++CONFIG_CMD_NAND=y
++CONFIG_CMD_NOR=y
++CONFIG_CMD_COPY=y
++
++#
++# console
++#
++CONFIG_CMD_CLEAR=y
++CONFIG_CMD_ECHO=y
++# CONFIG_CMD_ECHO_E is not set
++
++#
++# memory
++#
++# CONFIG_CMD_LOADB is not set
++# CONFIG_CMD_LOADY is not set
++# CONFIG_CMD_MEMINFO is not set
++# CONFIG_CMD_CRC is not set
++# CONFIG_CMD_MTEST is not set
++
++#
++# flash
++#
++CONFIG_CMD_FLASH=y
++# CONFIG_CMD_UBI is not set
++
++#
++# booting
++#
++CONFIG_CMD_BOOTM=y
++# CONFIG_CMD_BOOTM_ZLIB is not set
++# CONFIG_CMD_BOOTM_BZLIB is not set
++# CONFIG_CMD_BOOTM_SHOW_TYPE is not set
++CONFIG_CMD_BOOTZ=y
++CONFIG_CMD_BOOTU=y
++CONFIG_CMD_RESET=y
++# CONFIG_CMD_GO is not set
++CONFIG_CMD_TIMEOUT=y
++CONFIG_CMD_PARTITION=y
++CONFIG_CMD_TEST=y
++CONFIG_CMD_VERSION=y
++CONFIG_CMD_HELP=y
++CONFIG_CMD_DEVINFO=y
++# CONFIG_CMD_UNLZO is not set
++# CONFIG_CMD_I2C is not set
++CONFIG_CMD_SATA=y
++#
++# c2000
++#
++CONFIG_CMD_SOCINFO=y
++CONFIG_CMD_GEMAC_STATS=y
++CONFIG_CMD_PFE_STATS=y
++CONFIG_CMD_PFE_DIAGS=y
++CONFIG_CMD_AR8328=y
++CONFIG_CMD_PFE_COMMANDS=y
++CONFIG_NET=y
++# CONFIG_NET_DHCP is not set
++# CONFIG_NET_NFS is not set
++CONFIG_NET_PING=y
++CONFIG_NET_TFTP=y
++# CONFIG_NET_TFTP_PUSH is not set
++# CONFIG_NET_NETCONSOLE is not set
++# CONFIG_NET_RESOLV is not set
++
++#
++# Drivers
++#
++
++#
++# serial drivers
++#
++# CONFIG_DRIVER_SERIAL_ARM_DCC is not set
++CONFIG_DRIVER_FAST_UART=y
++# CONFIG_DRIVER_SERIAL_NS16550 is not set
++CONFIG_MIIDEV=y
++
++#
++# Network drivers
++#
++# CONFIG_DRIVER_NET_SMC911X is not set
++# CONFIG_DRIVER_NET_SMC91111 is not set
++CONFIG_NET_COMCERTO=y
++CONFIG_NET_COMCERTO_2000=y
++CONFIG_AR8328_SWITCH=y
++
++#
++# SPI drivers
++#
++CONFIG_SPI=y
++CONFIG_DRIVER_SPI_C2K=y
++CONFIG_DRIVER_SPI_DMA_C2K=y
++CONFIG_C2K_SPI_API=y
++CONFIG_C2K_SPI_COMMON=y
++CONFIG_SPI_FLASH_C2K=y
++CONFIG_I2C=y
++
++#
++# I2C Hardware Bus support
++#
++CONFIG_I2C_C2K=y
++
++#
++# flash drivers
++#
++CONFIG_DRIVER_CFI=y
++CONFIG_DRIVER_CFI_INTEL=y
++CONFIG_DRIVER_CFI_AMD=y
++CONFIG_DRIVER_CFI_BANK_WIDTH_1=y
++CONFIG_DRIVER_CFI_BANK_WIDTH_2=y
++CONFIG_DRIVER_CFI_BANK_WIDTH_4=y
++# CONFIG_DRIVER_CFI_BANK_WIDTH_8 is not set
++CONFIG_CFI_BUFFER_WRITE=y
++CONFIG_MTD=y
++CONFIG_NAND=y
++CONFIG_MTD_NAND_ECC_BCH=y
++# CONFIG_MTD_NAND_BCH is not set
++CONFIG_NAND_WRITE=y
++CONFIG_NAND_ECC_SOFT=y
++# CONFIG_NAND_ECC_HW is not set
++CONFIG_NAND_ECC_HW_SYNDROME=y
++# CONFIG_NAND_ECC_HW_NONE is not set
++# CONFIG_NAND_COMCERTO_ECC_8_HW_BCH is not set
++CONFIG_NAND_COMCERTO_ECC_24_HW_BCH=y
++CONFIG_COMCERTO_NAND_ERASE_FBB=y
++CONFIG_NAND_INFO=y
++CONFIG_NAND_BBT=y
++CONFIG_NAND_READ_OOB=y
++CONFIG_NAND_COMCERTO=y
++# CONFIG_MTD_NAND_VERIFY_WRITE is not set
++# CONFIG_MTD_NAND_ECC_SMC is not set
++CONFIG_MTD_NAND_IDS=y
++CONFIG_UBI=y
++# CONFIG_ATA is not set
++# CONFIG_USB is not set
++# CONFIG_USB_GADGET is not set
++# CONFIG_VIDEO is not set
++# CONFIG_MCI is not set
++
++#
++# MFD
++#
++# CONFIG_I2C_MC13892 is not set
++# CONFIG_I2C_MC34704 is not set
++# CONFIG_I2C_MC9SDZ60 is not set
++# CONFIG_I2C_LP3972 is not set
++# CONFIG_I2C_TWL4030 is not set
++# CONFIG_DRIVER_SPI_MC13783 is not set
++# CONFIG_LED is not set
++
++#
++# OTP
++#
++CONFIG_OTP=y
++CONFIG_DRIVER_OTP=y
++
++#
++# SPACC
++#
++CONFIG_SPACC=y
++CONFIG_DRIVER_SPACC=y
++
++#
++# SECUREBOOT
++#
++CONFIG_COMCERTO_SECUREBOOT=y
++# CONFIG_SECUREBOOT_TEST is not set
++
++#
++# Filesystem support
++#
++CONFIG_FS_CRAMFS=y
++CONFIG_FS_RAMFS=y
++CONFIG_FS_DEVFS=y
++# CONFIG_FS_FAT is not set
++CONFIG_PARTITION_NEED_MTD=y
++CONFIG_ZLIB=y
++CONFIG_CRC32=y
++# CONFIG_DIGEST is not set
++# CONFIG_GENERIC_FIND_NEXT_BIT is not set
++# CONFIG_PROCESS_ESCAPE_SEQUENCE is not set
++
++#
++# SATA support
++#
++CONFIG_COMCERTO_SATA=y
+diff -Nur barebox-2011.06.0-old/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig
+--- barebox-2011.06.0-old/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig	2017-01-19 13:53:12.758377809 +0800
+@@ -0,0 +1,329 @@
++#
++# Automatically generated make config: don't edit
++# Linux/arm 2011.06.0 Barebox Configuration
++# Fri Mar 23 11:33:04 2012
++#
++# CONFIG_BOARD_LINKER_SCRIPT is not set
++CONFIG_GENERIC_LINKER_SCRIPT=y
++CONFIG_ARM=y
++
++#
++# System Type
++#
++CONFIG_ARCH_COMCERTO=y
++# CONFIG_ARCH_AT91 is not set
++# CONFIG_ARCH_EP93XX is not set
++# CONFIG_ARCH_IMX is not set
++# CONFIG_ARCH_MXS is not set
++# CONFIG_ARCH_NETX is not set
++# CONFIG_ARCH_NOMADIK is not set
++# CONFIG_ARCH_OMAP is not set
++# CONFIG_ARCH_S3C24xx is not set
++# CONFIG_ARCH_VERSATILE is not set
++
++#
++# Comcerto Configuration
++#
++CONFIG_ARCH_HAS_LOWLEVEL_INIT=y
++CONFIG_BOARDINFO="Mindspeed C2000"
++
++#
++# SoC Selection
++#
++CONFIG_COMCERTO_C2000=y
++
++#
++# Board Selection
++#
++# CONFIG_MACH_COMCERTO_C2K_EVM is not set
++# CONFIG_MACH_COMCERTO_C2K_MFCNEVM is not set
++CONFIG_MACH_COMCERTO_C2K_RV16X_26X=y
++# CONFIG_MACH_COMCERTO_C2K_ASIC is not set
++# CONFIG_MACH_COMCERTO_C2K_RTSM is not set
++
++#
++# Build Selection
++#
++# CONFIG_COMCERTO_VERIFICATION is not set
++# CONFIG_COMCERTO_DIAG is not set
++# CONFIG_COMCERTO_BOOTLOADER is not set
++# CONFIG_COMCERTO_ULOADER is not set
++CONFIG_COMCERTO_NAND_ULOADER=y
++CONFIG_COMCERTO_PLL=y
++CONFIG_COMCERTO_DDR=y
++CONFIG_COMCERTO_NAND=y
++# CONFIG_COMCERTO_GPIO is not set
++# CONFIG_M86201 is not set
++# CONFIG_M86202 is not set
++# CONFIG_M86203 is not set
++# CONFIG_M86204 is not set
++# CONFIG_M86206 is not set
++# CONFIG_M86207 is not set
++# CONFIG_M86208 is not set
++# CONFIG_M8620X is not set
++# CONFIG_M86260 is not set
++# CONFIG_M86261 is not set
++# CONFIG_M86261_NAS is not set
++# CONFIG_M86262 is not set
++# CONFIG_M8626X is not set
++# CONFIG_M86291 is not set
++# CONFIG_M86292 is not set
++# CONFIG_M86293 is not set
++# CONFIG_M86294 is not set
++# CONFIG_M86295 is not set
++# CONFIG_M86296 is not set
++# CONFIG_M86297 is not set
++CONFIG_M86298=y
++CONFIG_M8629X=y
++
++#
++# Processor Type
++#
++CONFIG_CPU_32=y
++CONFIG_CPU_32v7=y
++
++#
++# processor features
++#
++# CONFIG_BOOT_ENDIANNESS_SWITCH is not set
++# CONFIG_AEABI is not set
++
++#
++# Arm specific settings
++#
++# CONFIG_CMD_ARM_CPUINFO is not set
++# CONFIG_ARM_OPTIMZED_STRING_FUNCTIONS is not set
++# CONFIG_ARM_EXCEPTIONS is not set
++CONFIG_DEFCONFIG_LIST="$ARCH_DEFCONFIG"
++CONFIG_HAS_KALLSYMS=y
++CONFIG_HAS_MODULES=y
++# CONFIG_CMD_MEMORY is not set
++CONFIG_HAVE_NOSHELL=y
++
++#
++# General Settings
++#
++# CONFIG_LOCALVERSION_AUTO is not set
++CONFIG_ENVIRONMENT_VARIABLES=y
++
++#
++# memory layout
++#
++CONFIG_HAVE_CONFIGURABLE_TEXT_BASE=y
++CONFIG_TEXT_BASE=0x83000000
++CONFIG_HAVE_CONFIGURABLE_MEMORY_LAYOUT=y
++# CONFIG_MEMORY_LAYOUT_DEFAULT is not set
++CONFIG_MEMORY_LAYOUT_FIXED=y
++CONFIG_STACK_BASE=0x000C000
++CONFIG_STACK_SIZE=0x1000
++CONFIG_MALLOC_BASE=0x000D000
++CONFIG_MALLOC_SIZE=0x3000
++# CONFIG_BROKEN is not set
++# CONFIG_EXPERIMENTAL is not set
++CONFIG_MALLOC_DLMALLOC=y
++# CONFIG_MALLOC_DUMMY is not set
++# CONFIG_KALLSYMS is not set
++CONFIG_PROMPT="uLoader >"
++CONFIG_BAUDRATE=115200
++CONFIG_SIMPLE_READLINE=y
++# CONFIG_LONGHELP is not set
++CONFIG_CBSIZE=1024
++CONFIG_MAXARGS=16
++# CONFIG_SHELL_HUSH is not set
++# CONFIG_SHELL_SIMPLE is not set
++CONFIG_SHELL_NONE=y
++# CONFIG_CMDLINE_EDITING is not set
++# CONFIG_MEM_SIZE is not set
++# CONFIG_MENU is not set
++# CONFIG_PASSWORD is not set
++CONFIG_DYNAMIC_CRC_TABLE=y
++# CONFIG_ERRNO_MESSAGES is not set
++# CONFIG_TIMESTAMP is not set
++CONFIG_CONSOLE_FULL=y
++CONFIG_CONSOLE_ACTIVATE_FIRST=y
++# CONFIG_OF_FLAT_TREE is not set
++# CONFIG_PARTITION is not set
++# CONFIG_DEFAULT_ENVIRONMENT is not set
++# CONFIG_POLLER is not set
++
++#
++# Debugging
++#
++# CONFIG_DEBUG_INFO is not set
++# CONFIG_ENABLE_FLASH_NOISE is not set
++# CONFIG_ENABLE_PARTITION_NOISE is not set
++# CONFIG_ENABLE_DEVICE_NOISE is not set
++# CONFIG_COMMAND_SUPPORT is not set
++
++#
++# commands
++#
++
++#
++# scripting
++#
++# CONFIG_CMD_EDIT is not set
++# CONFIG_CMD_EXEC is not set
++# CONFIG_CMD_SLEEP is not set
++# CONFIG_CMD_SAVEENV is not set
++# CONFIG_CMD_LOADENV is not set
++# CONFIG_CMD_EXPORT is not set
++# CONFIG_CMD_PRINTENV is not set
++# CONFIG_CMD_READLINE is not set
++# CONFIG_CMD_TRUE is not set
++# CONFIG_CMD_FALSE is not set
++# CONFIG_CMD_LOGIN is not set
++# CONFIG_CMD_PASSWD is not set
++
++#
++# file commands
++#
++# CONFIG_CMD_LS is not set
++# CONFIG_CMD_RM is not set
++# CONFIG_CMD_CAT is not set
++# CONFIG_CMD_MKDIR is not set
++# CONFIG_CMD_RMDIR is not set
++# CONFIG_CMD_CP is not set
++# CONFIG_CMD_PWD is not set
++# CONFIG_CMD_CD is not set
++# CONFIG_CMD_MOUNT is not set
++# CONFIG_CMD_UMOUNT is not set
++# CONFIG_CMD_NAND is not set
++# CONFIG_CMD_NOR is not set
++# CONFIG_CMD_COPY is not set
++
++#
++# console
++#
++# CONFIG_CMD_CLEAR is not set
++# CONFIG_CMD_ECHO is not set
++
++#
++# memory
++#
++# CONFIG_CMD_LOADB is not set
++# CONFIG_CMD_LOADY is not set
++# CONFIG_CMD_MEMINFO is not set
++# CONFIG_CMD_CRC is not set
++# CONFIG_CMD_MTEST is not set
++
++#
++# flash
++#
++# CONFIG_CMD_FLASH is not set
++# CONFIG_CMD_UBI is not set
++
++#
++# booting
++#
++# CONFIG_CMD_BOOTM is not set
++# CONFIG_CMD_BOOTZ is not set
++# CONFIG_CMD_BOOTU is not set
++# CONFIG_CMD_RESET is not set
++# CONFIG_CMD_GO is not set
++# CONFIG_CMD_TIMEOUT is not set
++# CONFIG_CMD_PARTITION is not set
++# CONFIG_CMD_VERSION is not set
++# CONFIG_CMD_HELP is not set
++# CONFIG_CMD_DEVINFO is not set
++# CONFIG_CMD_UNLZO is not set
++
++#
++# c2000
++#
++# CONFIG_CMD_SOCINFO is not set
++# CONFIG_CMD_GEMAC_STATS is not set
++# CONFIG_CMD_PFE_STATS is not set
++# CONFIG_CMD_PFE_DIAGS is not set
++# CONFIG_CMD_PFE_COMMANDS is not set
++# CONFIG_NET is not set
++
++#
++# Drivers
++#
++
++#
++# serial drivers
++#
++# CONFIG_DRIVER_SERIAL_ARM_DCC is not set
++CONFIG_DRIVER_FAST_UART=y
++# CONFIG_DRIVER_SERIAL_NS16550 is not set
++
++#
++# SPI drivers
++#
++# CONFIG_SPI is not set
++# CONFIG_DRIVER_SPI_C2K is not set
++# CONFIG_DRIVER_SPI_DMA_C2K is not set
++# CONFIG_C2K_SPI_API is not set
++# CONFIG_SPI_FLASH_C2K is not set
++# CONFIG_I2C is not set
++
++#
++# flash drivers
++#
++# CONFIG_DRIVER_CFI is not set
++CONFIG_MTD=y
++CONFIG_NAND=y
++# CONFIG_MTD_NAND_ECC_BCH is not set
++# CONFIG_NAND_WRITE is not set
++# CONFIG_NAND_ECC_SOFT is not set
++# CONFIG_NAND_ECC_HW is not set
++CONFIG_NAND_ECC_HW_SYNDROME=y
++# CONFIG_NAND_ECC_HW_NONE is not set
++# CONFIG_NAND_COMCERTO_ECC_8_HW_BCH is not set
++CONFIG_NAND_COMCERTO_ECC_24_HW_BCH=y
++# CONFIG_COMCERTO_NAND_ERASE_FBB is not set
++CONFIG_NAND_INFO=y
++# CONFIG_NAND_BBT is not set
++# CONFIG_NAND_READ_OOB is not set
++CONFIG_NAND_COMCERTO=y
++# CONFIG_MTD_NAND_VERIFY_WRITE is not set
++# CONFIG_MTD_NAND_ECC_SMC is not set
++# CONFIG_MTD_NAND_IDS is not set
++# CONFIG_UBI is not set
++# CONFIG_ATA is not set
++# CONFIG_USB is not set
++# CONFIG_USB_GADGET is not set
++# CONFIG_VIDEO is not set
++# CONFIG_MCI is not set
++
++#
++# MFD
++#
++# CONFIG_I2C_MC13892 is not set
++# CONFIG_DRIVER_SPI_MC13783 is not set
++# CONFIG_LED is not set
++
++#
++# OTP
++#
++# CONFIG_OTP is not set
++CONFIG_DRIVER_OTP=y
++
++#
++# SPACC
++#
++CONFIG_SPACC=y
++CONFIG_DRIVER_SPACC=y
++
++#
++# SECUREBOOT
++#
++CONFIG_COMCERTO_SECUREBOOT=y
++# CONFIG_SECUREBOOT_TEST is not set
++
++CONFIG_BOOTB=y
++
++#
++# Filesystem support
++#
++# CONFIG_FS_CRAMFS is not set
++# CONFIG_FS_RAMFS is not set
++# CONFIG_FS_DEVFS is not set
++# CONFIG_FS_FAT is not set
++# CONFIG_DIGEST is not set
++# CONFIG_GENERIC_FIND_NEXT_BIT is not set
++# CONFIG_PROCESS_ESCAPE_SEQUENCE is not set
++
++# CONFIG_COMCERTO_SATA is not set
+diff -Nur barebox-2011.06.0-old/arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig
+--- barebox-2011.06.0-old/arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig	2017-01-19 13:51:54.098378173 +0800
+@@ -0,0 +1,311 @@
++#
++# Automatically generated make config: don't edit
++# Linux/arm 2011.06.0 Barebox Configuration
++# Fri Mar 23 11:33:04 2012
++#
++# CONFIG_BOARD_LINKER_SCRIPT is not set
++CONFIG_GENERIC_LINKER_SCRIPT=y
++CONFIG_ARM=y
++
++#
++# System Type
++#
++CONFIG_ARCH_COMCERTO=y
++# CONFIG_ARCH_AT91 is not set
++# CONFIG_ARCH_EP93XX is not set
++# CONFIG_ARCH_IMX is not set
++# CONFIG_ARCH_MXS is not set
++# CONFIG_ARCH_NETX is not set
++# CONFIG_ARCH_NOMADIK is not set
++# CONFIG_ARCH_OMAP is not set
++# CONFIG_ARCH_S3C24xx is not set
++# CONFIG_ARCH_VERSATILE is not set
++
++#
++# Comcerto Configuration
++#
++CONFIG_ARCH_HAS_LOWLEVEL_INIT=y
++CONFIG_BOARDINFO="Mindspeed C2000"
++
++#
++# SoC Selection
++#
++CONFIG_COMCERTO_C2000=y
++
++#
++# Board Selection
++#
++# CONFIG_MACH_COMCERTO_C2K_EVM is not set
++# CONFIG_MACH_COMCERTO_C2K_MFCNEVM is not set
++CONFIG_MACH_COMCERTO_C2K_RV16X_26X=y
++# CONFIG_MACH_COMCERTO_C2K_ASIC is not set
++# CONFIG_MACH_COMCERTO_C2K_RTSM is not set
++
++#
++# Build Selection
++#
++# CONFIG_COMCERTO_VERIFICATION is not set
++# CONFIG_COMCERTO_DIAG is not set
++# CONFIG_COMCERTO_BOOTLOADER is not set
++CONFIG_COMCERTO_ULOADER=y
++# CONFIG_COMCERTO_NAND_ULOADER is not set
++CONFIG_COMCERTO_PLL=y
++CONFIG_COMCERTO_DDR=y
++CONFIG_COMCERTO_NAND=y
++# CONFIG_COMCERTO_GPIO is not set
++# CONFIG_M86201 is not set
++# CONFIG_M86202 is not set
++# CONFIG_M86203 is not set
++# CONFIG_M86204 is not set
++# CONFIG_M86206 is not set
++# CONFIG_M86207 is not set
++# CONFIG_M86208 is not set
++# CONFIG_M8620X is not set
++# CONFIG_M86260 is not set
++# CONFIG_M86261 is not set
++# CONFIG_M86261_NAS is not set
++# CONFIG_M86262 is not set
++# CONFIG_M8626X is not set
++# CONFIG_M86291 is not set
++# CONFIG_M86292 is not set
++# CONFIG_M86293 is not set
++# CONFIG_M86294 is not set
++# CONFIG_M86295 is not set
++# CONFIG_M86296 is not set
++# CONFIG_M86297 is not set
++CONFIG_M86298=y
++CONFIG_M8629X=y
++
++#
++# Processor Type
++#
++CONFIG_CPU_32=y
++CONFIG_CPU_32v7=y
++
++#
++# processor features
++#
++# CONFIG_BOOT_ENDIANNESS_SWITCH is not set
++# CONFIG_AEABI is not set
++
++#
++# Arm specific settings
++#
++# CONFIG_CMD_ARM_CPUINFO is not set
++# CONFIG_ARM_OPTIMZED_STRING_FUNCTIONS is not set
++# CONFIG_ARM_EXCEPTIONS is not set
++CONFIG_DEFCONFIG_LIST="$ARCH_DEFCONFIG"
++CONFIG_HAS_KALLSYMS=y
++CONFIG_HAS_MODULES=y
++# CONFIG_CMD_MEMORY is not set
++CONFIG_HAVE_NOSHELL=y
++
++#
++# General Settings
++#
++# CONFIG_LOCALVERSION_AUTO is not set
++CONFIG_ENVIRONMENT_VARIABLES=y
++
++#
++# memory layout
++#
++CONFIG_HAVE_CONFIGURABLE_TEXT_BASE=y
++CONFIG_TEXT_BASE=0x83000000
++CONFIG_HAVE_CONFIGURABLE_MEMORY_LAYOUT=y
++# CONFIG_MEMORY_LAYOUT_DEFAULT is not set
++CONFIG_MEMORY_LAYOUT_FIXED=y
++CONFIG_STACK_BASE=0x000C000
++CONFIG_STACK_SIZE=0x1000
++CONFIG_MALLOC_BASE=0x000D000
++CONFIG_MALLOC_SIZE=0x3000
++# CONFIG_BROKEN is not set
++# CONFIG_EXPERIMENTAL is not set
++CONFIG_MALLOC_DLMALLOC=y
++# CONFIG_KALLSYMS is not set
++CONFIG_PROMPT="uLoader >"
++CONFIG_BAUDRATE=115200
++CONFIG_SIMPLE_READLINE=y
++# CONFIG_LONGHELP is not set
++CONFIG_CBSIZE=1024
++CONFIG_MAXARGS=16
++# CONFIG_SHELL_HUSH is not set
++CONFIG_SHELL_SIMPLE=y
++# CONFIG_SHELL_NONE is not set
++# CONFIG_CMDLINE_EDITING is not set
++CONFIG_MEM_SIZE=y
++# CONFIG_MENU is not set
++# CONFIG_PASSWORD is not set
++# CONFIG_ERRNO_MESSAGES is not set
++# CONFIG_TIMESTAMP is not set
++CONFIG_CONSOLE_FULL=y
++CONFIG_CONSOLE_ACTIVATE_FIRST=y
++# CONFIG_OF_FLAT_TREE is not set
++# CONFIG_PARTITION is not set
++# CONFIG_DEFAULT_ENVIRONMENT is not set
++# CONFIG_POLLER is not set
++
++#
++# Debugging
++#
++# CONFIG_DEBUG_INFO is not set
++# CONFIG_ENABLE_FLASH_NOISE is not set
++# CONFIG_ENABLE_PARTITION_NOISE is not set
++# CONFIG_ENABLE_DEVICE_NOISE is not set
++CONFIG_COMMAND_SUPPORT=y
++
++#
++# commands
++#
++
++#
++# scripting
++#
++# CONFIG_CMD_EDIT is not set
++# CONFIG_CMD_EXEC is not set
++# CONFIG_CMD_SLEEP is not set
++# CONFIG_CMD_SAVEENV is not set
++# CONFIG_CMD_LOADENV is not set
++# CONFIG_CMD_EXPORT is not set
++# CONFIG_CMD_PRINTENV is not set
++# CONFIG_CMD_READLINE is not set
++# CONFIG_CMD_TRUE is not set
++# CONFIG_CMD_FALSE is not set
++# CONFIG_CMD_LOGIN is not set
++# CONFIG_CMD_PASSWD is not set
++
++#
++# file commands
++#
++# CONFIG_CMD_LS is not set
++# CONFIG_CMD_RM is not set
++# CONFIG_CMD_CAT is not set
++# CONFIG_CMD_MKDIR is not set
++# CONFIG_CMD_RMDIR is not set
++# CONFIG_CMD_CP is not set
++# CONFIG_CMD_PWD is not set
++# CONFIG_CMD_CD is not set
++# CONFIG_CMD_MOUNT is not set
++# CONFIG_CMD_UMOUNT is not set
++# CONFIG_CMD_NOR is not set
++# CONFIG_CMD_COPY is not set
++
++#
++# console
++#
++# CONFIG_CMD_CLEAR is not set
++# CONFIG_CMD_ECHO is not set
++
++#
++# memory
++#
++# CONFIG_CMD_LOADB is not set
++# CONFIG_CMD_LOADY is not set
++# CONFIG_CMD_MEMINFO is not set
++# CONFIG_CMD_CRC is not set
++# CONFIG_CMD_MTEST is not set
++
++#
++# flash
++#
++# CONFIG_CMD_FLASH is not set
++# CONFIG_CMD_UBI is not set
++
++#
++# booting
++#
++# CONFIG_CMD_BOOTM is not set
++# CONFIG_CMD_BOOTZ is not set
++# CONFIG_CMD_BOOTU is not set
++# CONFIG_CMD_RESET is not set
++# CONFIG_CMD_GO is not set
++# CONFIG_CMD_TIMEOUT is not set
++# CONFIG_CMD_PARTITION is not set
++# CONFIG_CMD_VERSION is not set
++# CONFIG_CMD_HELP is not set
++# CONFIG_CMD_DEVINFO is not set
++# CONFIG_CMD_UNLZO is not set
++
++#
++# c2000
++#
++# CONFIG_CMD_SOCINFO is not set
++# CONFIG_CMD_GEMAC_STATS is not set
++# CONFIG_CMD_PFE_STATS is not set
++# CONFIG_CMD_PFE_DIAGS is not set
++# CONFIG_CMD_PFE_COMMANDS is not set
++# CONFIG_NET is not set
++
++#
++# Drivers
++#
++
++#
++# serial drivers
++#
++# CONFIG_DRIVER_SERIAL_ARM_DCC is not set
++CONFIG_DRIVER_FAST_UART=y
++# CONFIG_DRIVER_SERIAL_NS16550 is not set
++
++#
++# SPI drivers
++#
++CONFIG_SPI=y
++CONFIG_DRIVER_SPI_C2K=y
++CONFIG_DRIVER_SPI_DMA_C2K=y
++CONFIG_C2K_SPI_API=y
++CONFIG_C2K_SPI_COMMON=y
++CONFIG_SPI_FLASH_C2K=y
++# CONFIG_I2C is not set
++
++#
++# flash drivers
++#
++# CONFIG_DRIVER_CFI is not set
++CONFIG_MTD=y
++# CONFIG_NAND is not set
++# CONFIG_UBI is not set
++# CONFIG_ATA is not set
++# CONFIG_USB is not set
++# CONFIG_USB_GADGET is not set
++# CONFIG_VIDEO is not set
++# CONFIG_MCI is not set
++
++#
++# MFD
++#
++# CONFIG_I2C_MC13892 is not set
++# CONFIG_DRIVER_SPI_MC13783 is not set
++# CONFIG_LED is not set
++
++#
++# OTP
++#
++# CONFIG_OTP is not set
++CONFIG_DRIVER_OTP=y
++
++#
++# SPACC
++#
++CONFIG_SPACC=y
++CONFIG_DRIVER_SPACC=y
++
++#
++# SECUREBOOT
++#
++CONFIG_COMCERTO_SECUREBOOT=y
++# CONFIG_SECUREBOOT_TEST is not set
++
++CONFIG_BOOTB=y
++
++#
++# Filesystem support
++#
++# CONFIG_FS_CRAMFS is not set
++# CONFIG_FS_RAMFS is not set
++# CONFIG_FS_DEVFS is not set
++# CONFIG_FS_FAT is not set
++# CONFIG_DIGEST is not set
++# CONFIG_GENERIC_FIND_NEXT_BIT is not set
++# CONFIG_PROCESS_ESCAPE_SEQUENCE is not set
++
++# CONFIG_COMCERTO_SATA is not set
+diff -Nur barebox-2011.06.0-old/arch/arm/mach-comcerto/Kconfig barebox-2011.06.0/arch/arm/mach-comcerto/Kconfig
+--- barebox-2011.06.0-old/arch/arm/mach-comcerto/Kconfig	2017-01-19 13:06:57.637128501 +0800
++++ barebox-2011.06.0/arch/arm/mach-comcerto/Kconfig	2017-01-19 13:44:11.968378084 +0800
+@@ -36,6 +36,10 @@
+         bool "MFCN_EVM"
+         help
+ 
++config  MACH_COMCERTO_C2K_RV16X_26X
++        bool "RV16X_26X"
++        help
++
+ config  MACH_COMCERTO_C2K_ASIC
+ 	bool "ASIC"
+ 	help
+@@ -71,6 +75,7 @@
+ 	select COMCERTO_I2C
+ 	select COMCERTO_NAND
+ 	select COMCERTO_GPIO if MACH_COMCERTO_C2K_MFCNEVM
++	select COMCERTO_GPIO if MACH_COMCERTO_C2K_RV16X_26X
+ 	select HAVE_MMU
+ 	select MMU
+ 	select ARCH_HAS_L2X0
+diff -Nur barebox-2011.06.0-old/arch/arm/Makefile barebox-2011.06.0/arch/arm/Makefile
+--- barebox-2011.06.0-old/arch/arm/Makefile	2017-01-19 13:06:57.425252874 +0800
++++ barebox-2011.06.0/arch/arm/Makefile	2017-01-19 13:37:41.928378230 +0800
+@@ -59,6 +59,7 @@
+ # by CONFIG_* macro name.
+ board-$(CONFIG_MACH_COMCERTO_C2K_EVM)           := comcerto-evm
+ board-$(CONFIG_MACH_COMCERTO_C2K_MFCNEVM)       := comcerto-mfcnevm
++board-$(CONFIG_MACH_COMCERTO_C2K_RV16X_26X)     := comcerto-rv16x-26x
+ board-$(CONFIG_MACH_COMCERTO_C2K_ASIC)          := comcerto-asic
+ board-$(CONFIG_MACH_COMCERTO_C2K_RTSM)          := comcerto-rtsm
+ board-$(CONFIG_MACH_A9M2410)			:= a9m2410
+diff -Nur barebox-2011.06.0-old/drivers/net/comcerto/ar8328.c barebox-2011.06.0/drivers/net/comcerto/ar8328.c
+--- barebox-2011.06.0-old/drivers/net/comcerto/ar8328.c	2017-01-19 13:06:57.745258250 +0800
++++ barebox-2011.06.0/drivers/net/comcerto/ar8328.c	2017-01-19 13:40:42.458377951 +0800
+@@ -3,7 +3,7 @@
+ #include <miidev.h>
+ #include "ar8328.h"
+ 
+-#if defined(CONFIG_MACH_COMCERTO_C2K_MFCNEVM)
++#if defined(CONFIG_MACH_COMCERTO_C2K_MFCNEVM) || defined(CONFIG_MACH_COMCERTO_C2K_RV16X_26X)
+ #include <mach/reset.h>
+ #endif
+ 
+@@ -111,7 +111,7 @@
+ 	int phy_addr; 
+ 	unsigned int dummy;
+ 
+-#if defined(CONFIG_MACH_COMCERTO_C2K_MFCNEVM)
++#if defined(CONFIG_MACH_COMCERTO_C2K_MFCNEVM) || defined(CONFIG_MACH_COMCERTO_C2K_RV16X_26X)
+ 	/* Make the Atheros switch out of reset */
+ 	GPIO_reset_external_device(COMPONENT_ATHEROS_SWITCH,0);
+ 	udelay(1000000); //here delay 1s to give switch a chance to init.
+@@ -125,7 +125,7 @@
+ 	/* FIXME bit 30 of the PWS_REG is marked as reserved in the datasheet. */
+ 	athrs17_reg_write(mdev, S17_PWS_REG, S17_PWS_CHIP_AR8327);
+ 
+-#if defined(CONFIG_MACH_COMCERTO_C2K_MFCNEVM)
++#if defined(CONFIG_MACH_COMCERTO_C2K_MFCNEVM) || defined(CONFIG_MACH_COMCERTO_C2K_RV16X_26X)
+ 	/* Set RGMII RXCLK delays */
+ 	athrs17_reg_write(mdev, S17_P5PAD_MODE_REG, S17_MAC0_RGMII_RXCLK_DELAY);
+ #endif
+diff -Nur barebox-2011.06.0-old/drivers/net/comcerto/Kconfig barebox-2011.06.0/drivers/net/comcerto/Kconfig
+--- barebox-2011.06.0-old/drivers/net/comcerto/Kconfig	2017-01-19 13:06:57.745258250 +0800
++++ barebox-2011.06.0/drivers/net/comcerto/Kconfig	2017-01-19 13:39:41.795252783 +0800
+@@ -10,7 +10,7 @@
+ 
+ config AR8328_SWITCH
+ 	depends on NET_COMCERTO_2000
+-	depends on MACH_COMCERTO_C2K_EVM || MACH_COMCERTO_C2K_MFCNEVM
++	depends on MACH_COMCERTO_C2K_EVM || MACH_COMCERTO_C2K_MFCNEVM || MACH_COMCERTO_C2K_RV16X_26X
+ 	bool "AR8328 Switch Driver"
+ 	default y
+ 
+diff -Nur barebox-2011.06.0-old/uldr_sku_gen.sh barebox-2011.06.0/uldr_sku_gen.sh
+--- barebox-2011.06.0-old/uldr_sku_gen.sh	2017-01-19 13:06:57.667128608 +0800
++++ barebox-2011.06.0/uldr_sku_gen.sh	2017-01-19 13:38:57.685252871 +0800
+@@ -5,7 +5,7 @@
+ }
+ 
+ cd $1
+-sku=$(echo $2 | sed -e 's\uloader\\g' | sed -e 's\c2kevm\\g' | sed -e 's\c2kasic\\g' | sed -e 's\nand\\g' | sed -e 's\c2kmfcnevm\\g')
++sku=$(echo $2 | sed -e 's\uloader\\g' | sed -e 's\c2kevm\\g' | sed -e 's\c2kasic\\g' | sed -e 's\nand\\g' | sed -e 's\c2kmfcnevm\\g' | sed -e 's\c2krv16x-26x\\g')
+ bin_file=$3
+ size=$(ls -l barebox.bin | cut -d' ' -f 5)
+ head -c 48 barebox.bin > temp.bin

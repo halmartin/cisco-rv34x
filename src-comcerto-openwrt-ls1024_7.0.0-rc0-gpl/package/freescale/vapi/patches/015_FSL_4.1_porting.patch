@@ -1,0 +1,27 @@
+diff -Naur a/VAPI/linux/gtl_csme/csmencaps/af_csmencaps.c b/VAPI/linux/gtl_csme/csmencaps/af_csmencaps.c
+--- a/VAPI/linux/gtl_csme/csmencaps/af_csmencaps.c	2016-10-26 17:34:25.199291000 +0530
++++ b/VAPI/linux/gtl_csme/csmencaps/af_csmencaps.c	2016-10-26 19:30:32.298285000 +0530
+@@ -1919,7 +1919,11 @@
+  *	If necessary we block.
+  */
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
++static int csmencaps_recvmsg(struct socket *sock, struct msghdr *msg, size_t len, int flags)
++#else
+ static int csmencaps_recvmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg, size_t len, int flags)
++#endif
+ #else
+ static int csmencaps_recvmsg(struct socket *sock, struct msghdr *msg, int len, int flags, struct scm_cookie *scm)
+ #endif
+@@ -2017,7 +2021,11 @@
+ 
+ /* send the socket message */
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0)
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,1,0)
++static int csmencaps_sendmsg(struct socket *sock, struct msghdr *msg, size_t len)
++#else
+ static int csmencaps_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg, size_t len)
++#endif
+ #else
+ static int csmencaps_sendmsg(struct socket *sock, struct msghdr *msg, int len, struct scm_cookie *scm)
+ #endif

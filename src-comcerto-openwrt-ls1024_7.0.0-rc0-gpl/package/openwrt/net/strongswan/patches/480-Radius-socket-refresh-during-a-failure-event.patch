@@ -1,0 +1,48 @@
+From 261ba78519136a2fb2d5a0db8f25a1ddc2e3fde7 Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Fri, 9 Feb 2018 15:08:10 +0530
+Subject: [PATCH] Radius socket refresh during a failure event
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ src/libradius/radius_socket.c | 24 ++++++++++++++++++++++--
+ 1 file changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/src/libradius/radius_socket.c b/src/libradius/radius_socket.c
+index 115be79..7de774a 100644
+--- a/src/libradius/radius_socket.c
++++ b/src/libradius/radius_socket.c
+@@ -268,8 +268,28 @@ METHOD(radius_socket_t, request, radius_message_t*,
+ 		}
+ 		if (send(*fd, data.ptr, data.len, 0) != data.len)
+ 		{
+-			DBG1(DBG_CFG, "sending RADIUS message failed: %s", strerror(errno));
+-			return NULL;
++			if (errno == EINVAL  )
++			{//May be our WAN change might have triggered this issue. So recreate the socket
++				close(*fd);
++				*fd = -1;
++
++				DBG1(DBG_CFG, "Going for socket refresh");
++				if (!check_connection(this, fd, port))
++				{
++					DBG1(DBG_CFG, "Check connection after socket refresh failed");
++					return NULL;
++				}
++				if (send(*fd, data.ptr, data.len, 0) != data.len)
++				{
++					DBG1(DBG_CFG, "sending RADIUS message failed even after socket refresh: %s", strerror(errno));
++					return NULL;
++				}
++			}
++			else
++			{
++				DBG1(DBG_CFG, "sending RADIUS message failed: %s", strerror(errno));
++				return NULL;
++			}
+ 		}
+ 		switch (receive_response(*fd, timeout, request->get_identifier(request),
+ 								 &response))
+-- 
+1.9.1
+

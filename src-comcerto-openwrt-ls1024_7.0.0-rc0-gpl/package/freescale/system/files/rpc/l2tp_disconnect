@@ -1,0 +1,9 @@
+#!/bin/sh
+
+local l2tpctrl_pid
+CLIENT_TUNNEL_IP=$2
+l2tpctrl_pid=`pgrep -f $CLIENT_TUNNEL_IP`
+
+logger -t l2tpd "Disconnecting Client with IP address $CLIENT_TUNNEL_IP"
+
+[ -n "$l2tpctrl_pid" ] && { kill -9 $l2tpctrl_pid; }

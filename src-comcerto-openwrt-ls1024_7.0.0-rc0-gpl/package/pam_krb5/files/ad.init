@@ -1,0 +1,77 @@
+#!/bin/sh /etc/rc.common
+. /lib/functions.sh
+
+START=99
+
+CONFIGFILE=/tmp/etc/krb5.conf
+KEYTABARGS=/tmp/etc/keytabargs
+
+ETC_KEYTABARGS=/etc/keytabargs
+ETC_CONFIGFILE=/etc/krb5.conf
+
+configure() {
+        local cfg="$1"
+        local enable
+        local primary_ipaddr
+        local primary_port
+        local domain
+
+        config_get enable "$cfg" enable
+        if [ $enable -eq 1 ]
+              then
+
+               config_get primary_ipaddr "$cfg" primary_ipaddr
+               config_get primary_port "$cfg" primary_port
+               config_get domain "$cfg" domain
+               domain=`echo $domain | tr [a-z] [A-Z]`
+               config_get basedn "$cfg" basedn
+
+               echo "[libdefaults]" > $CONFIGFILE
+               echo " clockskew = 300" >> $CONFIGFILE
+               echo " default_realm = $domain" >> $CONFIGFILE
+               echo "[realms]" >> $CONFIGFILE
+               echo "     $domain = {" >> $CONFIGFILE
+               echo "        kdc = $primary_ipaddr" >> $CONFIGFILE
+               echo "        master_kdc = $primary_ipaddr" >> $CONFIGFILE
+               echo " }" >> $CONFIGFILE
+               
+               echo $primary_ipaddr > $KEYTABARGS
+               echo $domain >> $KEYTABARGS
+               echo $basedn >> $KEYTABARGS
+		ln -s $CONFIGFILE $ETC_CONFIGFILE
+		ln -s $KEYTABARGS $ETC_KEYTABARGS
+        fi
+
+}
+
+boot () {
+
+	if [ ! -L $ETC_CONFIGFILE ]; then
+		rm -f $ETC_CONFIGFILE
+	fi
+
+	if [ ! -L $ETC_KEYTABARGS ]; then
+		rm -f $ETC_KEYTABARGS
+	fi
+
+	start
+}
+
+start() {
+        rm -rf $CONFIGFILE
+        rm -rf $KEYTABARGS
+        touch $CONFIGFILE
+        touch $KEYTABARGS
+        export KRB5RCACHETYPE=none
+        config_load ad
+        config_foreach configure ad
+}
+
+stop() {
+        rm -rf $ETC_KEYTABARGS
+        rm -rf $ETC_CONFIGFILE
+        rm -rf $CONFIGFILE
+        rm -rf $KEYTABARGS
+        touch $CONFIGFILE
+        touch $KEYTABARGS
+}

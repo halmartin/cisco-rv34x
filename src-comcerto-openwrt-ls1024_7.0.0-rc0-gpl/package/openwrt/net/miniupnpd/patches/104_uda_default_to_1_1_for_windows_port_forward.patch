@@ -1,0 +1,16 @@
+--- a/genconfig.sh	2016-05-31 11:00:35.770407362 +0530
++++ b/genconfig.sh	2016-05-31 11:01:47.350407362 +0530
+@@ -6,9 +6,10 @@
+ # This software is subject to the conditions detailed in the
+ # LICENCE file provided within the distribution
+ 
+-# default to UPnP Device Architecture (UDA) v2.0
+-UPNP_VERSION_MAJOR=2
+-UPNP_VERSION_MINOR=0
++# default to UPnP Device Architecture (UDA) v1.1
++# some control points do not like UDA v2.0
++UPNP_VERSION_MAJOR=1
++UPNP_VERSION_MINOR=1
+ 
+ for argv; do
+ case "$argv" in

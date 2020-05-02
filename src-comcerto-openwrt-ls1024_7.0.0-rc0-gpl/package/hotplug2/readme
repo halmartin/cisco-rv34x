@@ -1,0 +1,3 @@
+CHANGES:
+1. Makefile:
+	- GLIBC support added. To compile with libbsd library for glibc builds.

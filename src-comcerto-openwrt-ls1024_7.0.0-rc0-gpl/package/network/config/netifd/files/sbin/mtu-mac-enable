@@ -1,0 +1,144 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions/network.sh
+. /lib/netifd/netifd-proto.sh
+. /lib/config/uci.sh
+
+
+reload() {
+
+	sed -i.bak -e s/\'//g /tmp/networkconfig #strip off any "'" in the file.
+
+	#diff=$(cat /tmp/networkconfig | grep -E "mtu|enable|macaddr" | awk -F . '{print $3"."$1"."$2}' | sort -r | awk -F . '{print $2"."$3"."$1}' | grep -vE "wan16.m|wan26.m")
+	diff=$(cat /tmp/networkconfig | grep -E "mtu|macaddr" | awk -F . '{print $3"."$1"."$2}' | sort -r | awk -F . '{print $2"."$3"."$1}' | grep -vE "wan16.m|wan26.m")
+	for line in $diff
+	do
+
+	option=$(echo $line | cut -f 3 -d '.')
+	option=$(echo $option | cut -f 1 -d '=')
+	case $option in
+	
+	mtu|mtunew)
+	ifname=$(echo $line | cut -f 2 -d '.')
+	mtu=$(echo $line | cut -f 2 -d '=')
+	proto=`uci get network.$ifname.proto`
+	
+		case $proto in
+	
+		static|dhcp)
+		iface=`uci get network.$ifname.ifname`
+		ifconfig $iface down mtu $mtu
+		sleep 2
+		ifconfig $iface up
+
+		;;
+
+		pppoe)
+		iface=`uci get network.$ifname.ifname`
+		ifconfig $iface down mtu $mtu
+		v6ifname=`echo $ifname | sed s/wan[1-9]*/\&6/g | sed s/p//`
+		v6mac=`uci get network.$v6ifname.macaddr`
+		ifconfig $iface down hw ether $v6mac
+		sleep 2
+		ifconfig $iface up
+		
+		;;
+	
+		esac	
+	;;
+	
+	macaddr|macaddrnew)
+	ifname=$(echo $line | cut -f 2 -d '.')
+	mac=$(echo $line | cut -f 2 -d '=')
+	proto=`uci get network.$ifname.proto`
+		case $proto in
+		#{	
+		static|dhcp)
+		ifnames=$(echo $ifname | sed s/p//g)
+		iface=`uci get network.$ifname.ifname`
+		ifconfig $iface down hw ether $mac
+		sleep 2
+		ifconfig $iface up
+		
+		;;
+
+		pppoe)
+
+		if [ "$option" = "macaddrnew" ]
+		then
+			iface=`uci get network.$ifname.ifname`
+			ifconfig $iface down hw ether $mac
+			sleep 2
+			ifconfig $iface up
+		fi
+		#}
+		esac	
+
+	;;
+	
+	enable)
+	
+	ifname=$(echo $line | cut -f 2 -d '.')
+	enabled=$(echo $line | cut -f 2 -d '=')
+	
+		case $enabled in
+		1)
+		ifup $ifname
+		;;
+		0)
+		ifdown $ifname
+		;;
+	
+		esac
+	;;
+	
+	esac	
+	done 
+
+#	[ "$1" == "gui" ] && {
+#		#logger -t testing "########Since transaction is from GUI. I am exiting."
+#		exit 0
+#	}
+
+	[ "$1" == "gui" ] && {
+
+	#This is for handling RPC disconnect/connect and back to a GUI change. PPSBR-
+	allIfaces=$(cat /tmp/networkconfig | grep -E "=interface" | awk -F '.' '{print $2}' | awk -F '=' '{print $1}' | uniq)
+	for iface in $allIfaces
+	do
+		network_get_autostart iface_status $iface
+		case $iface_status in
+		0)
+			sleep 2
+			#logger -t netifd-testing "##############Syncup issues. Bringing up the iface:$iface again."
+			ifup $iface
+		;;
+		1)
+			#logger -t netifd-testing "#############Syncup issues. Do nothing as the autostart is already enabled on $iface"
+		;;
+		esac
+
+		#Now, check for PPTP/L2TP mode on its logical interface if exists.
+		network_get_protocol iface_proto $iface
+		if [ "$iface_proto" = 'static' -o "$iface_proto" = 'dhcp' ]
+		then
+			logical_iface=$(echo $iface | sed s/wan[1-9]*/\&p/g)
+			network_get_protocol logical_proto $logical_iface
+			if [ "$logical_proto" = 'l2tp' -o "$logical_proto" = 'pptp' ]
+			then
+				network_get_autostart logical_status $logical_iface
+				case $logical_status in
+				0)
+					sleep 2
+					#logger -t netifd-testing "##############Syncup issues. Bringing up the iface:$logical_iface again."
+					ifup $logical_iface
+				;;
+				1)
+					#logger -t netifd-testing "#############Syncup issues. Do nothing as the autostart is already enabled on $logical_iface"
+				;;
+				esac
+			fi
+		fi
+	done
+	}
+}

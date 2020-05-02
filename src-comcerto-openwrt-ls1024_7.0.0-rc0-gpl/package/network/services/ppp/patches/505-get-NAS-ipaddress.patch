@@ -1,0 +1,99 @@
+diff -rauN a/pppd/plugins/radius/buildreq.c b/pppd/plugins/radius/buildreq.c
+--- a/pppd/plugins/radius/buildreq.c	2016-06-13 15:30:53.240525021 +0530
++++ b/pppd/plugins/radius/buildreq.c	2016-06-13 15:33:42.115554781 +0530
+@@ -11,8 +11,13 @@
+ 
+ #include <includes.h>
+ #include <radiusclient.h>
++#include <syslog.h>
++
++#define CONF_FILE       "/etc/radiusclient/servers"
++#define BUFFER_SIZE 100
+ 
+ unsigned char rc_get_seqnbr(void);
++UINT4 get_NAS_ip_address();
+ 
+ /*
+  * Function: rc_get_nas_id
+@@ -41,8 +46,9 @@
+ 		/*
+ 		 * Fill in NAS-IP-Address
+ 		 */
+-		if ((client_id = rc_own_ipaddress()) == 0)
+-			return (ERROR_RC);
++                client_id = get_NAS_ip_address();
++		/*if ((client_id = rc_own_ipaddress()) == 0)
++			return (ERROR_RC);*/
+ 
+ 		if (rc_avpair_add(sendpairs, PW_NAS_IP_ADDRESS, &client_id,
+ 				  0, VENDOR_NONE) == NULL)
+@@ -52,6 +58,69 @@
+ 	return (OK_RC);
+ }
+ 
++
++UINT4 get_NAS_ip_address()
++{
++   char hostname[BUFFER_SIZE];
++   char secret[BUFFER_SIZE];
++
++   char buffer[BUFFER_SIZE];
++   char *p;
++   FILE *fserver, *fp = NULL;
++   int timeout;
++   int line = 0;
++   static char conf_file[BUFFER_SIZE]; /* configuration file */
++   struct in_addr ip;
++   char cmd[BUFFER_SIZE];
++   char source_ip[20];
++   uint32_t ipaddr;
++
++   strcpy(conf_file, CONF_FILE);
++   /* the first time around, read the configuration file */
++   if ((fserver = fopen (conf_file, "r")) == (FILE*)NULL) {
++   	syslog(LOG_ERR, "Could not open configuration file %s: %s\n",
++   		conf_file, strerror(errno));
++   	return (ERROR_RC);
++   }
++
++   while (!feof(fserver) && (fgets (buffer, sizeof(buffer), fserver) != (char*) NULL) && 
++         (!ferror(fserver))) {
++   	line++;
++   	p = buffer;
++
++       	/*
++   	 *	Skip blank lines and whitespace
++   	 */
++   	while (*p && ((*p == ' ') || (*p == '\t') || (*p == '\r') || (*p == '\n'))) {
++   		p++;
++   	}
++
++   	/*
++   	 *	Nothing, or just a comment. Ignore the line.
++   	 */
++   	if ((!*p) || (*p == '#')) {
++   		continue;
++   	}
++
++   	timeout = 3;
++   	if (sscanf(p, "%s %s %d", hostname, secret, &timeout) < 2) {
++   		syslog(LOG_ERR, "ERROR reading %s, line %d: Could not read hostname or secret\n",
++   			 conf_file, line);
++   		continue;			/* invalid line */
++   	}
++   } //while
++   fclose(fserver);
++
++    sprintf(cmd, "ip -4 r g %s | head -n 1 | sed -e \"s/.*src \\([^ ]*\\).*/\\1/\"", 
++                          strtok(hostname, ":"));
++    fp = popen(cmd, "r");
++    fscanf(fp, "%s", source_ip);
++    inet_aton(source_ip, &ip);
++    ipaddr = htonl(ip.s_addr);
++    pclose(fp);
++  return ipaddr; 
++}
++
+ /*
+  * Function: rc_buildreq
+  *

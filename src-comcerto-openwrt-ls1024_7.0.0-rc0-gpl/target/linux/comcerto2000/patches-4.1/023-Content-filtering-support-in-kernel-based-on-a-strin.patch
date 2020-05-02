@@ -1,0 +1,831 @@
+From f27335e617b9596763ac66adda060a58afee0d86 Mon Sep 17 00:00:00 2001
+From: SKC <chaitanya.sakinam@nxp.com>
+Date: Fri, 17 Feb 2017 03:50:51 -0600
+Subject: [PATCH] Content filtering support in kernel based on a string.
+
+Signed-off-by: SKC <chaitanya.sakinam@nxp.com>
+---
+ include/uapi/linux/netfilter_ipv4/Kbuild       |   1 +
+ include/uapi/linux/netfilter_ipv4/ipt_webstr.h |  40 ++
+ net/ipv4/netfilter/Kconfig                     |   6 +
+ net/ipv4/netfilter/Makefile                    |   1 +
+ net/ipv4/netfilter/ipt_webstr.c                | 722 +++++++++++++++++++++++++
+ 5 files changed, 770 insertions(+)
+ create mode 100644 include/uapi/linux/netfilter_ipv4/ipt_webstr.h
+ create mode 100644 net/ipv4/netfilter/ipt_webstr.c
+
+diff --git a/include/uapi/linux/netfilter_ipv4/Kbuild b/include/uapi/linux/netfilter_ipv4/Kbuild
+index c9bdab4..07ddf16 100644
+--- a/include/uapi/linux/netfilter_ipv4/Kbuild
++++ b/include/uapi/linux/netfilter_ipv4/Kbuild
+@@ -10,3 +10,4 @@ header-y += ipt_ecn.h
+ header-y += ipt_ttl.h
+ header-y += ip_autofw.h
+ header-y += ipt_TRIGGER.h
++header-y += ipt_webstr.h
+diff --git a/include/uapi/linux/netfilter_ipv4/ipt_webstr.h b/include/uapi/linux/netfilter_ipv4/ipt_webstr.h
+new file mode 100644
+index 0000000..9e1a078
+--- /dev/null
++++ b/include/uapi/linux/netfilter_ipv4/ipt_webstr.h
+@@ -0,0 +1,40 @@
++/* Kernel module to match a http header string into a packet.
++ *
++ * Copyright (C) 2003, CyberTAN Corporation
++ * All Rights Reserved.
++ *
++ * Description:
++ *   This is kernel module for web content inspection. It was derived from 
++ *   'string' match module, declared as above.
++ *
++ *   The module follows the Netfilter framework, called extended packet 
++ *   matching modules. 
++ */
++
++#ifndef _IPT_WEBSTR_H
++#define _IPT_WEBSTR_H
++
++#define BM_MAX_NLEN 256
++#define BM_MAX_HLEN 1024
++
++#define BLK_JAVA		0x01
++#define BLK_ACTIVE		0x02
++#define BLK_COOKIE		0x04
++#define BLK_PROXY		0x08
++
++typedef char *(*proc_ipt_search) (char *, char *, int, int);
++
++struct ipt_webstr_info {
++	char string[BM_MAX_NLEN];
++	u_int16_t invert;
++	u_int16_t len;
++	u_int8_t type;
++};
++
++enum ipt_webstr_type {
++    IPT_WEBSTR_HOST,
++	IPT_WEBSTR_URL,
++	IPT_WEBSTR_CONTENT
++};
++
++#endif /* _IPT_WEBSTR_H */
+diff --git a/net/ipv4/netfilter/Kconfig b/net/ipv4/netfilter/Kconfig
+index 3d0d16f..6f247f5 100644
+--- a/net/ipv4/netfilter/Kconfig
++++ b/net/ipv4/netfilter/Kconfig
+@@ -149,6 +149,12 @@ config IP_NF_TARGET_TRIGGER
+ 	help
+ 	  To compile it as a module, choose M here.  If unsure, say N.
+ 
++config IP_NF_MATCH_WEBSTR
++	tristate "WEBSTR match support (webstring match)"
++	depends on NF_NAT
++	help
++	  To compile it as a module, choose M here.  If unsure, say N.
++
+ config NF_NAT_PROTO_GRE
+ 	tristate
+ 	depends on NF_CT_PROTO_GRE
+diff --git a/net/ipv4/netfilter/Makefile b/net/ipv4/netfilter/Makefile
+index a7108d4..709e04a 100644
+--- a/net/ipv4/netfilter/Makefile
++++ b/net/ipv4/netfilter/Makefile
+@@ -64,6 +64,7 @@ obj-$(CONFIG_IP_NF_TARGET_MASQUERADE) += ipt_MASQUERADE.o
+ obj-$(CONFIG_IP_NF_TARGET_REJECT) += ipt_REJECT.o
+ obj-$(CONFIG_IP_NF_TARGET_SYNPROXY) += ipt_SYNPROXY.o
+ obj-$(CONFIG_IP_NF_TARGET_TRIGGER) += ipt_TRIGGER.o
++obj-$(CONFIG_IP_NF_MATCH_WEBSTR) += ipt_webstr.o
+ 
+ # generic ARP tables
+ obj-$(CONFIG_IP_NF_ARPTABLES) += arp_tables.o
+diff --git a/net/ipv4/netfilter/ipt_webstr.c b/net/ipv4/netfilter/ipt_webstr.c
+new file mode 100644
+index 0000000..afbad5c
+--- /dev/null
++++ b/net/ipv4/netfilter/ipt_webstr.c
+@@ -0,0 +1,722 @@
++/* Kernel module to match a string into a packet.
++ *
++ * Copyright (C) 2000 Emmanuel Roger  <winfield@freegates.be>
++ * 
++ * ChangeLog
++ *	19.02.2002: Gianni Tedesco <gianni@ecsc.co.uk>
++ *		Fixed SMP re-entrancy problem using per-cpu data areas
++ *		for the skip/shift tables.
++ *	02.05.2001: Gianni Tedesco <gianni@ecsc.co.uk>
++ *		Fixed kernel panic, due to overrunning boyer moore string
++ *		tables. Also slightly tweaked heuristic for deciding what
++ * 		search algo to use.
++ * 	27.01.2001: Gianni Tedesco <gianni@ecsc.co.uk>
++ * 		Implemented Boyer Moore Sublinear search algorithm
++ * 		alongside the existing linear search based on memcmp().
++ * 		Also a quick check to decide which method to use on a per
++ * 		packet basis.
++ *	17.02.2017: NXP
++ *		Ported to linux 4.1.y
++ */
++
++/* Kernel module to match a http header string into a packet.
++ *
++ * Copyright (C) 2003, CyberTAN Corporation
++ * All Rights Reserved.
++ *
++ * Description:
++ *   This is kernel module for web content inspection. It was derived from 
++ *   'string' match module, declared as above.
++ *
++ *   The module follows the Netfilter framework, called extended packet 
++ *   matching modules. 
++ */
++
++#include <linux/module.h>
++#include <linux/skbuff.h>
++#include <linux/tcp.h>
++#include <net/sock.h>
++#include <linux/sysctl.h>
++#include <linux/netfilter_ipv4/ip_tables.h>
++#include <linux/netfilter_ipv4/ipt_webstr.h>
++#define	isdigit(x) ((x) >= '0' && (x) <= '9')
++#define	isupper(x) (((unsigned)(x) >= 'A') && ((unsigned)(x) <= 'Z'))
++#define	islower(x) (((unsigned)(x) >= 'a') && ((unsigned)(x) <= 'z'))
++#define	isalpha(x) (isupper(x) || islower(x))
++#define	toupper(x) (isupper(x) ? (x) : (x) - 'a' + 'A')
++#define tolower(x) (isupper(x) ? ((x) - 'A' + 'a') : (x))
++
++#define split(word, wordsize, wordlist, next, delim) \
++for (next = wordlist, \
++     strncpy(word, next, wordsize), \
++     word[(next = strstr(next, delim)) ? strstr(word, delim) - word : wordsize - 1] = '\0', \
++     next = next ? next + sizeof(delim) - 1 : NULL; \
++     strlen(word); \
++     next = next ? : "", \
++     strncpy(word, next, wordsize), \
++     word[(next = strstr(next, delim)) ? strstr(word, delim) - word : wordsize - 1] = '\0', \
++     next = next ? next + sizeof(delim) - 1 : NULL)
++
++#define BUFSIZE 	1024
++/* Flags for get_http_info() */
++#define HTTP_HOST	0x01
++#define HTTP_URL	0x02
++/* Flags for mangle_http_header() */
++#define HTTP_COOKIE	0x04
++#if 0
++#define SPARQ_LOG       printk
++#else /*  */
++#define SPARQ_LOG(format, args...)
++#endif /*  */
++typedef struct httpinfo {
++	int lock;
++	char host[BUFSIZE + 1];
++	int hostlen;
++	char url[BUFSIZE + 1];
++	int urllen;
++	char needle[BUFSIZE];
++} httpinfo_t;
++
++httpinfo_t *pGlobalHttpInfo = NULL;
++static int get_http_info(const struct sk_buff *skb, int flags,
++			 httpinfo_t ** ppinfo);
++void ipt_logfn(unsigned int hooknum, const struct sk_buff *skb,
++	       const struct net_device *in, const struct net_device *out,
++	       const char *prefix);
++int web_iptlog_fn(const char *, const struct sk_buff *, httpinfo_t *);
++static int http_info_lock(void);
++static int http_info_unlock(void);
++
++extern int nf_conntrack_set_dpi_allow_report(struct sk_buff *skb);
++static unsigned int contentfilter_type;
++static struct ctl_table_header *contentfilter_ctl_hdr;
++//static struct ctl_table_header *blockurl_ctl_hdr;
++static char blockurl_last[256];
++/* for enabling and disabling keyword filter logs */
++int web_keyword_filter = 0;
++static int http_info_lock(void)
++{
++	if (pGlobalHttpInfo->lock)
++		return 0;
++	pGlobalHttpInfo->lock = 1;
++	return 1;
++}
++
++static int http_info_unlock(void)
++{
++	if (pGlobalHttpInfo->lock)
++		pGlobalHttpInfo->lock = 0;
++	return 1;
++}
++
++/* Return 1 for match, 0 for accept, -1 for partial. */
++static int find_pattern2(const char *data, size_t dlen, const char *pattern,
++			 size_t plen, char term, unsigned int *numoff,
++			 unsigned int *numlen)
++{
++	size_t i, j, k;
++	int state = 0;
++	*numoff = *numlen = 0;
++	SPARQ_LOG("%s: pattern = '%s', dlen = %u\n", __FUNCTION__, pattern,
++		  dlen);
++	if (dlen == 0)
++		return 0;
++	if (dlen <= plen) {	/* Short packet: try for partial? */
++		if (strncasecmp(data, pattern, dlen) == 0)
++			return -1;
++
++		else
++			return 0;
++	}
++	for (i = 0; i <= (dlen - plen); i++) {
++
++		/* DFA : \r\n\r\n :: 1234 */
++		if (*(data + i) == '\r') {
++			if (!(state % 2))
++				state++;	/* forwarding move */
++
++			else
++				state = 0;	/* reset */
++		}
++
++		else if (*(data + i) == '\n') {
++			if (state % 2)
++				state++;
++
++			else
++				state = 0;
++		}
++
++		else
++			state = 0;
++		if (state >= 4)
++			break;
++
++		/* pattern compare */
++		if (memcmp(data + i, pattern, plen) != 0)
++			continue;
++
++		/* Here, it means patten match!! */
++		*numoff = i + plen;
++		for (j = *numoff, k = 0; data[j] != term; j++, k++)
++			if (j > dlen)
++				return -1;	/* no terminal char */
++		*numlen = k;
++		return 1;
++	}
++	return 0;
++}
++
++static int mangle_http_header(const struct sk_buff *skb, int flags)
++{
++	struct iphdr *iph = ip_hdr(skb);
++	struct tcphdr *tcph = (void *)iph + iph->ihl * 4;
++	unsigned char *data = (void *)tcph + tcph->doff * 4;
++	unsigned int datalen = (skb)->len - (iph->ihl * 4) - (tcph->doff * 4);
++	int found, offset, len;
++	int ret = 0;
++	httpinfo_t *htinfo = NULL;
++	SPARQ_LOG("%s: seq=%u\n", __FUNCTION__, ntohl(tcph->seq));
++
++	/* Basic checking, is it HTTP packet? */
++	if (datalen < 10)
++		return ret;	/* Not enough length, ignore it */
++	if (memcmp(data, "GET ", sizeof("GET ") - 1) != 0
++	    && memcmp(data, "POST ", sizeof("POST ") - 1) != 0)
++		return ret;	/* Pass it */
++
++	/* COOKIE modification */
++	if (flags & HTTP_COOKIE) {
++		found =
++		    find_pattern2(data, datalen, "Cookie: ",
++				  sizeof("Cookie: ") - 1, '\r', &offset, &len);
++		if (found) {
++			char c;
++			offset -= (sizeof("Cookie: ") - 1);
++
++			/* Swap the 2rd and 4th bit */
++			c = *(data + offset + 2);
++			*(data + offset + 2) = *(data + offset + 4);
++			*(data + offset + 4) = c;
++			ret++;
++			goto end;
++		}
++		offset = 0;
++		len = 0;
++		found =
++		    find_pattern2(data, datalen, "Set-Cookie: ",
++				  sizeof("Set-Cookie: ") - 1, '\r', &offset,
++				  &len);
++		if (found) {
++			char c;
++			offset -= (sizeof("Set-Cookie: ") - 1);
++
++			/* Swap the 2rd and 4th bit */
++			c = *(data + offset + 2);
++			*(data + offset + 2) = *(data + offset + 4);
++			*(data + offset + 4) = c;
++			ret++;
++			SPARQ_LOG("%s: found Set-Cookie: \n", __FUNCTION__);
++			goto end;
++		}
++		offset = 0;
++		len = 0;
++		found =
++		    find_pattern2(data, datalen, "Set-Cookie2: ",
++				  sizeof("Set-Cookie2: ") - 1, '\r', &offset,
++				  &len);
++		if (found) {
++			char c;
++			offset -= (sizeof("Set-Cookie2: ") - 1);
++
++			/* Swap the 2rd and 4th bit */
++			c = *(data + offset + 2);
++			*(data + offset + 2) = *(data + offset + 4);
++			*(data + offset + 4) = c;
++			ret++;
++			SPARQ_LOG("%s: found Set-Cookie2: \n", __FUNCTION__);
++			goto end;
++		}
++	}
++	return 0;
++end:
++	if (get_http_info(skb, HTTP_URL, &htinfo) > 0) {
++		web_iptlog_fn("[COOKIE_BLOCKED]", skb, htinfo);
++	}
++	return ret;
++}
++
++static int get_http_info(const struct sk_buff *skb, int flags,
++			 httpinfo_t ** ppinfo)
++{
++	struct iphdr *iph = ip_hdr(skb);
++	struct tcphdr *tcph = (void *)iph + iph->ihl * 4;
++	unsigned char *data = (void *)tcph + tcph->doff * 4;
++	unsigned int datalen = (skb)->len - (iph->ihl * 4) - (tcph->doff * 4);
++	int found, offset;
++	int hostlen, pathlen;
++	httpinfo_t *info = NULL;
++	int ret = 0;
++	SPARQ_LOG("%s: seq=%u\n", __FUNCTION__, ntohl(tcph->seq));
++	*ppinfo = NULL;
++
++	/* Basic checking, is it HTTP packet? */
++	if (datalen < 10)
++		return ret;	/* Not enough length, ignore it */
++	if (memcmp(data, "GET ", sizeof("GET ") - 1) != 0
++	    && memcmp(data, "POST ", sizeof("POST ") - 1) != 0)
++		return ret;	/* Pass it */
++	if (!(flags & (HTTP_HOST | HTTP_URL)))
++		return ret;
++
++	/* find the 'Host: ' value */
++	found =
++	    find_pattern2(data, datalen, "Host: ", sizeof("Host: ") - 1, '\r',
++			  &offset, &hostlen);
++	SPARQ_LOG("Host found=%d\n", found);
++	if (!found || !hostlen)
++		return ret;
++	if (http_info_lock() == 0)
++		return ret;
++	info = pGlobalHttpInfo;
++	memset(info, 0x00, sizeof(httpinfo_t));
++	*ppinfo = info;
++	ret++;			/* Host found, increase the return value */
++	hostlen = (hostlen < BUFSIZE) ? hostlen : BUFSIZE;
++	strncpy(info->host, data + offset, hostlen);
++	*(info->host + hostlen) = 0;	/* null-terminated */
++	info->hostlen = hostlen;
++	SPARQ_LOG("HOST=%s, hostlen=%d\n", info->host, info->hostlen);
++	if (!(flags & HTTP_URL))
++		return ret;
++
++	/* find the 'GET ' or 'POST ' value */
++	found =
++	    find_pattern2(data, datalen, "GET ", sizeof("GET ") - 1, '\r',
++			  &offset, &pathlen);
++	if (!found)
++		found =
++		    find_pattern2(data, datalen, "POST ", sizeof("POST ") - 1,
++				  '\r', &offset, &pathlen);
++	SPARQ_LOG("GET/POST found=%d\n", found);
++
++	/* ignor this field */
++	if (!found || (pathlen -= (sizeof(" HTTP/x.x") - 1)) <= 0)
++		return ret;
++	ret++;			/* GET/POST found, increase the return value */
++	pathlen = ((pathlen + hostlen) < BUFSIZE) ? pathlen : BUFSIZE - hostlen;
++	strncpy(info->url, info->host, hostlen);
++	strncpy(info->url + hostlen, data + offset, pathlen);
++	*(info->url + hostlen + pathlen) = 0;	/* null-terminated */
++	info->urllen = hostlen + pathlen;
++	SPARQ_LOG("URL=%s, urllen=%d\n", info->url, info->urllen);
++	return ret;
++}
++
++/* Linear string search based on memcmp() */
++static char *search_linear(char *needle, char *haystack, int needle_len,
++			   int haystack_len)
++{
++	char *k = haystack + (haystack_len - needle_len);
++	char *t = haystack;
++	SPARQ_LOG("%s: haystack=%s, needle=%s\n", __FUNCTION__, t, needle);
++	for (; t <= k; t++) {
++
++		//SPARQ_LOG("%s: haystack=%s, needle=%s\n", __FUNCTION__, t, needle);
++		if (strncasecmp(t, needle, needle_len) == 0)
++			return t;
++
++		//if ( memcmp(t, needle, needle_len) == 0 ) return t;
++	}
++	return NULL;
++}
++
++static int javaCheck(const char *data, size_t dlen)
++{
++	char *searchStart = (char *)data;
++	int searchLength = dlen;
++	int offset2 = 0, pathlen2 = 0;
++	int offset3 = 0, pathlen3 = 0;
++	int match = 0;
++	int vicelen = 0;
++
++	/* ".js/" in the middle of the URL */
++	vicelen = sizeof(".js/") - 1;
++	match =
++	    find_pattern2(searchStart, searchLength, ".js/",
++			  sizeof(".js/") - 1, '\r', &offset2, &pathlen2);
++	if (match)
++		goto midExt;
++
++	/* ".js " at the end of the URL */
++	match = 0;
++	offset2 = 0, pathlen2 = 0;
++	vicelen = sizeof(".js") - 1;
++	match =
++	    find_pattern2(searchStart, searchLength, ".js", sizeof(".js") - 1,
++			  '\r', &offset2, &pathlen2);
++	SPARQ_LOG("%s: MATCH....js extensions at %d, url: %s urllen: %d\n",
++		  __FUNCTION__, offset2, data, dlen);
++	if (match)
++		goto endExt;
++
++	/* ".jar/" in the middle of the URL */
++	match = 0;
++	offset2 = 0, pathlen2 = 0;
++	vicelen = sizeof(".jar/") - 1;
++	match =
++	    find_pattern2(searchStart, searchLength, ".jar/",
++			  sizeof(".jar/") - 1, '\r', &offset2, &pathlen2);
++	if (match)
++		goto midExt;
++
++	/* ".jar " at the end of the URL */
++	match = 0;
++	offset2 = 0, pathlen2 = 0;
++	vicelen = sizeof(".jar") - 1;
++	match =
++	    find_pattern2(searchStart, searchLength, ".jar",
++			  sizeof(".jar") - 1, '\r', &offset2, &pathlen2);
++	if (match)
++		goto endExt;
++
++	/* ".class/" in the middle of the URL */
++	match = 0;
++	offset2 = 0, pathlen2 = 0;
++	vicelen = sizeof(".class/") - 1;
++	match =
++	    find_pattern2(searchStart, searchLength, ".class/",
++			  sizeof(".class/") - 1, '\r', &offset2, &pathlen2);
++	if (match)
++		goto midExt;
++
++	/* ".class " at the end of the URL */
++	match = 0;
++	offset2 = 0, pathlen2 = 0;
++	vicelen = sizeof(".class") - 1;
++	match =
++	    find_pattern2(searchStart, searchLength, ".class",
++			  sizeof(".class") - 1, '\r', &offset2, &pathlen2);
++	if (match)
++		goto endExt;
++
++	/* we could not find any java extensions in the url..let it go */
++	goto fail;
++endExt:
++	if (offset2 == dlen)
++		goto found;
++
++	else
++		goto fail;
++midExt:
++	/* check if we find a '/' between "http://" and ".js/" */
++	match = 0;
++	vicelen = sizeof("/") - 1;
++	match =
++	    find_pattern2(searchStart, searchLength, "/", sizeof("/") - 1,
++			  '\r', &offset3, &pathlen3);
++	if ((match) && (offset3 && (offset3 < offset2))) {
++
++		/* This url contains java script information ..block */
++		SPARQ_LOG("%s: MATCH....java\n", __FUNCTION__);
++		goto found;
++	}
++
++	else
++		goto fail;
++found:
++	return 1;
++fail:
++	return 0;
++}
++
++static bool
++webstr_mt(const struct sk_buff *skb, const struct xt_action_param *par)
++{
++	const struct ipt_webstr_info *info = par->matchinfo;
++	struct iphdr *ip = ip_hdr(skb);
++	proc_ipt_search search = search_linear;
++	char token[] = "<&nbsp;>";
++	char *wordlist = (char *)&info->string;
++	httpinfo_t *htinfo = NULL;
++	int flags = 0;
++	int found = 0;
++	long int opt = 0;
++	if (!ip || info->len < 1)
++		return false;
++	SPARQ_LOG("\n************************************************\n"
++		  "%s: type=%s\n", __FUNCTION__,
++		  (info->type ==
++		   IPT_WEBSTR_URL) ? "IPT_WEBSTR_URL" : (info->type ==
++							 IPT_WEBSTR_HOST)
++		  ? "IPT_WEBSTR_HOST" : "IPT_WEBSTR_CONTENT");
++
++	/* Determine the flags value for get_http_info(), and mangle packet 
++	 * if needed. */
++	switch (info->type) {
++	case IPT_WEBSTR_URL:	/* fall through */
++		flags |= HTTP_URL;
++	case IPT_WEBSTR_HOST:
++		flags |= HTTP_HOST;
++		break;
++	case IPT_WEBSTR_CONTENT:
++		opt = simple_strtol(wordlist, (char **)NULL, 10);
++		SPARQ_LOG("%s: string=%s, opt=%#lx\n", __FUNCTION__, wordlist,
++			  opt);
++		if (opt & (BLK_JAVA | BLK_ACTIVE | BLK_PROXY))
++			flags |= HTTP_URL;
++		if (opt & BLK_PROXY)
++			flags |= HTTP_HOST;
++		if (opt & BLK_COOKIE) {
++			found = mangle_http_header(skb, HTTP_COOKIE);
++			if (found)
++				goto webstr_mt_ret;
++		}
++		break;
++	default:
++		printk("%s: Sorry! Cannot find this match option.\n", __FILE__);
++		return false;
++	}
++
++	/* Get the http header info */
++	if (get_http_info(skb, flags, &htinfo) < 1)
++		return false;
++
++	/* Check if the http header content contains the forbidden keyword */
++	if (info->type == IPT_WEBSTR_HOST || info->type == IPT_WEBSTR_URL) {
++		int nlen = 0, hlen = 0;
++		char *needle = NULL, *haystack = NULL;
++		char *next;
++		int wordsize = 0;
++		if (info->type == IPT_WEBSTR_HOST) {
++			haystack = htinfo->host;
++			hlen = htinfo->hostlen;
++		} else {
++			haystack = htinfo->url;
++			hlen = htinfo->urllen;
++		}
++		needle = htinfo->needle;
++		wordsize = sizeof(htinfo->needle);
++		split(needle, wordsize, wordlist, next, token) {
++			nlen = strlen(needle);
++			SPARQ_LOG("keyword=%s, nlen=%d, hlen=%d\n", needle,
++				  nlen, hlen);
++			if (!nlen || !hlen || nlen > hlen)
++				continue;
++			if (search(needle, haystack, nlen, hlen) != NULL) {
++				found = 1;
++                if(contentfilter_type ==20)
++                    {
++                      nf_conntrack_set_dpi_allow_report(skb);
++                    }
++				if (info->type == IPT_WEBSTR_URL) {
++					web_iptlog_fn("[KEYWORD_BLOCKED]", skb,
++						      htinfo);
++				}
++				break;
++			}
++            else
++            {
++                if(contentfilter_type == 10 && (memcmp(needle, blockurl_last, strlen(blockurl_last) - 1) == 0))
++                {
++                    nf_conntrack_set_dpi_allow_report(skb);    
++                }
++            
++            }
++		}
++	}
++
++	else {			/* IPT_WEBSTR_CONTENT */
++		int vicelen;
++		if (opt & BLK_JAVA) {
++			if (javaCheck(htinfo->url, htinfo->urllen)) {
++				web_iptlog_fn("[JAVA_BLOCKED]", skb, htinfo);
++				found = 1;
++				goto webstr_mt_ret;
++			}
++#ifdef FIMPLE
++			vicelen = sizeof(".js") - 1;
++			if (strncasecmp
++			    (htinfo->url + htinfo->urllen - vicelen, ".js",
++			     vicelen) == 0) {
++				SPARQ_LOG("%s: MATCH....java\n", __FUNCTION__);
++				found = 1;
++				goto webstr_mt_ret;
++			}
++			vicelen = sizeof(".class") - 1;
++			if (strncasecmp
++			    (htinfo->url + htinfo->urllen - vicelen, ".class",
++			     vicelen) == 0) {
++				SPARQ_LOG("%s: MATCH....java\n", __FUNCTION__);
++				found = 1;
++				goto webstr_mt_ret;
++			}
++#endif /* FIMPLE */
++		}
++		if (opt & BLK_ACTIVE) {
++			vicelen = sizeof(".ocx") - 1;
++			if (strncasecmp
++			    (htinfo->url + htinfo->urllen - vicelen, ".ocx",
++			     vicelen) == 0) {
++				SPARQ_LOG("%s: MATCH....activex\n",
++					  __FUNCTION__);
++				web_iptlog_fn("[ACTIVEX_BLOCKED]", skb, htinfo);
++				found = 1;
++				goto webstr_mt_ret;
++			}
++			vicelen = sizeof(".cab") - 1;
++			if (strncasecmp
++			    (htinfo->url + htinfo->urllen - vicelen, ".cab",
++			     vicelen) == 0) {
++				SPARQ_LOG("%s: MATCH....activex\n",
++					  __FUNCTION__);
++				web_iptlog_fn("[ACTIVEX_BLOCKED]", skb, htinfo);
++				found = 1;
++				goto webstr_mt_ret;
++			}
++		}
++		if (opt & BLK_PROXY) {
++			if (strncasecmp
++			    (htinfo->url + htinfo->hostlen, "http://",
++			     sizeof("http://") - 1) == 0) {
++				web_iptlog_fn("[PROXY_BLOCKED]", skb, htinfo);
++				SPARQ_LOG("%s: MATCH....proxy\n", __FUNCTION__);
++				found = 1;
++				goto webstr_mt_ret;
++			}
++		}
++	}
++webstr_mt_ret:
++	SPARQ_LOG("%s: Verdict =======> %s \n", __FUNCTION__,
++		  found ? "DROP" : "ACCEPT");
++	http_info_unlock();
++	return (found ^ info->invert);
++}
++
++/*******************************************************************************
++* web_iptlog_fn-
++*
++* This function logs websites that are blocked by this module.
++*/
++int web_iptlog_fn(const char *pBlocked, const struct sk_buff *skb,
++		  httpinfo_t * htinfo)
++{
++	char keywordBlkStr[BUFSIZE + 40];
++	if (pBlocked == NULL || skb == NULL || htinfo == NULL)
++		return -1;
++	memset(keywordBlkStr, 0x0, sizeof(keywordBlkStr));
++
++	/* allow keyword block messages only if this keyword is set */
++	if (web_keyword_filter) {
++		snprintf(keywordBlkStr, sizeof(keywordBlkStr),
++			 "%s [URL]==>[ %s ]", pBlocked, htinfo->url);
++/* TODO */
++#if 0
++		ipt_logfn(0, skb, NULL, NULL, keywordBlkStr);
++#endif /*  */
++	}
++	return 0;
++}
++
++static int webstr_mt_check(const struct xt_mtchk_param *par)
++{
++	const struct ipt_webstr_info *info = par->matchinfo;
++	if (info->type == IPT_WEBSTR_HOST || info->type == IPT_WEBSTR_URL
++	    || info->type == IPT_WEBSTR_CONTENT)
++		return 0;
++	return -EINVAL;
++}
++
++static struct xt_match webstr_mt_reg __read_mostly = {
++	.name = "webstr",
++	.family = NFPROTO_IPV4,
++	.match = webstr_mt,
++	.matchsize = sizeof(struct ipt_webstr_info),
++	.checkentry = webstr_mt_check,
++	.me = THIS_MODULE
++};
++#if 0
++static struct ctl_table contentfilter_ctl_table[] = {
++            {
++              .procname   = "contentfilter_type",
++              .data       = &contentfilter_type,
++              .maxlen     = sizeof(unsigned int),
++              .mode       = 0644,
++              .proc_handler   = proc_dointvec,
++            },
++            { }
++};
++struct ctl_path contentfilter_ctl_path[] = {
++        { .procname = "net", },
++        { .procname = "ipv4", },
++        { }
++};
++static struct ctl_table blockurl_ctl_table[] = {
++                {
++                  .procname   = "blockurl_last",
++                  .data       = blockurl_last,
++                  .maxlen     = 256,
++                  .mode       = 0644,
++                  .proc_handler   = proc_dostring,
++                 },
++                 { }
++};
++
++#else
++static struct ctl_table contentfilter_ctl_table[] = {
++	{
++		.procname   = "blockurl_last",
++		.data       = blockurl_last,
++		.maxlen     = 256,
++		.mode       = 0644,
++		.proc_handler   = proc_dostring,
++	},
++	{
++		.procname   = "contentfilter_type",
++		.data       = &contentfilter_type,
++		.maxlen     = sizeof(unsigned int),
++		.mode       = 0644,
++		.proc_handler   = proc_dointvec,
++	},
++	{}
++};
++
++static struct ctl_table cnt_blk_kern_table[] = {
++	{
++		.procname       = "kernel",
++		.mode           = 0555,
++		.child          = contentfilter_ctl_table,
++	},
++	{}
++};
++
++#endif
++
++static int __init webstr_mt_init(void)
++{
++	pGlobalHttpInfo =
++	    (httpinfo_t *) kmalloc(sizeof(httpinfo_t), GFP_KERNEL);
++	if (pGlobalHttpInfo == NULL)
++		return -1;
++	memset(pGlobalHttpInfo, 0x00, sizeof(httpinfo_t));
++
++    //contentfilter_ctl_hdr=register_sysctl_paths(contentfilter_ctl_path,contentfilter_ctl_table);
++    //blockurl_ctl_hdr=register_sysctl_paths(contentfilter_ctl_path,blockurl_ctl_table);
++
++	contentfilter_ctl_hdr = register_sysctl_table(cnt_blk_kern_table);
++
++    return xt_register_match(&webstr_mt_reg);
++}
++
++static void __exit webstr_mt_fini(void)
++{
++    //unregister_sysctl_table(contentfilter_ctl_hdr);
++    //unregister_sysctl_table(blockurl_ctl_hdr);
++	unregister_sysctl_table(contentfilter_ctl_hdr);
++	xt_unregister_match(&webstr_mt_reg);
++	if (pGlobalHttpInfo)
++		kfree(pGlobalHttpInfo);
++}
++
++module_init(webstr_mt_init);
++module_exit(webstr_mt_fini);
+-- 
+1.9.1
+

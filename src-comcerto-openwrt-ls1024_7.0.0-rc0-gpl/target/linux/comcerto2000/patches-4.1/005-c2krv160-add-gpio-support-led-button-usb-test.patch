@@ -1,0 +1,148 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add gpio support led, button, and usb.
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-01-17 15:01:09.705254141 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-01-17 16:41:32.015252860 +0800
+@@ -63,6 +63,7 @@
+ #include <asm/mach/time.h>
+ #include <mach/gpio.h>
+ #include <asm/suspend.h>
++#include <linux/leds.h>
+ 
+ 
+ //#include <mach/comcerto-2000/timer.h>
+@@ -114,9 +115,83 @@
+ 	writel((readl(COMCERTO_GPIO_PIN_SELECT_REG1) & ~NOR_GPIO) | NOR_BUS, COMCERTO_GPIO_PIN_SELECT_REG1);
+ 	c2k_gpio_pin_stat.c2k_gpio_pins_0_31 |= NOR_GPIO_PIN;
+ #endif
++
++	/* Configure USB_EN1 and USB_EN2 GPIO pins for RV160W */
++	writel((readl(COMCERTO_GPIO_63_32_PIN_SELECT) | USB_GPIO_PIN), COMCERTO_GPIO_63_32_PIN_SELECT);
++	writel((readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) | USB_GPIO_PIN), COMCERTO_GPIO_63_32_PIN_OUTPUT);
++	c2k_gpio_pin_stat.c2k_gpio_pins_32_63 |= USB_GPIO_PIN;
++
++	/*
++	 * Configure LEDs connected to GPIO[63:32] pins
++	 *
++	 * Do not set GPIO of LEDs in "c2k_gpio_pin_stat". Otherwise,
++	 * "leds-gpio" will be unable to use LEDs.
++	 */
++	writel(readl(COMCERTO_GPIO_63_32_PIN_SELECT) | ALL_GPIO_63_32_LED_PINS, COMCERTO_GPIO_63_32_PIN_SELECT);
+ }
+ 
+ /* --------------------------------------------------------------------
++ * GPIO LED device
++ * -------------------------------------------------------------------- */
++
++static struct gpio_led gpio_leds[] = {
++	{
++		.name           = "rv160w::power-gled",
++		.default_trigger    = "default-on",
++		.gpio           = POWER_GLED_GPIO_NUM,
++		.active_low     = 0,
++	},{
++		.name           = "rv160w::usb2_2-aled",
++		.default_trigger    = "none",
++		.gpio           = USB2_2_ALED_GPIO_NUM,
++		.active_low     = 0,
++	},{
++		.name           = "rv160w::usb2_2-gled",
++		.default_trigger    = "none",
++		.gpio           = USB2_2_GLED_GPIO_NUM,
++		.active_low     = 0,
++	},{
++		.name           = "rv160w::wlan5_0-gled",
++		.default_trigger    = "none",
++		.gpio           = WLAN5G_GLED_GPIO_NUM,
++		.active_low     = 0,
++	},{
++		.name           = "rv160w::wlan2_4-gled",
++		.default_trigger    = "none",
++		.gpio           = WLAN2G_GLED_GPIO_NUM,
++		.active_low     = 0,
++	},{
++		.name           = "rv160w::vpn-aled",
++		.default_trigger    = "none",
++		.gpio           = VPN_ALED_GPIO_NUM,
++		.active_low     = 0,
++	},{
++		.name           = "rv160w::vpn-gled",
++		.default_trigger    = "none",
++		.gpio           = VPN_GLED_GPIO_NUM,
++		.active_low     = 0,
++	},{
++		.name           = "rv160w::diag-rled",
++		.default_trigger    = "none",
++		.gpio           = DIAG_RLED_GPIO_NUM,
++		.active_low     = 0,
++	},
++};
++
++static struct gpio_led_platform_data gpio_led_info = {
++	.leds           = gpio_leds,
++	.num_leds       = ARRAY_SIZE(gpio_leds),
++};
++
++static struct platform_device leds_gpio = {
++	.name   = "leds-gpio",
++	.id     = -1,
++	.dev    = {
++	.platform_data = &gpio_led_info,
++	},
++};
++
++/* --------------------------------------------------------------------
+  *  NOR device
+  * -------------------------------------------------------------------- */
+ #if defined(CONFIG_MTD_COMCERTO_NOR)
+@@ -709,6 +784,7 @@
+ #if defined(CONFIG_COMCERTO_ELP_SUPPORT)
+ 	&comcerto_elp_device,
+ #endif
++	&leds_gpio,
+ };
+ 
+ 
+--- linux-4.1.8/arch/arm/mach-comcerto/include/mach/comcerto-2000/gpio.h.org	2017-01-17 15:00:49.535253189 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/include/mach/comcerto-2000/gpio.h	2017-01-17 15:00:54.715253997 +0800
+@@ -298,10 +298,41 @@
+ #define NOR_BUS			(GPIO25_EXP_ALE | GPIO26_EXP_RDY)
+ #define NOR_GPIO_PIN		(GPIO_PIN_25 | GPIO_PIN_26)
+ 
++#define USB_GPIO_PIN        (GPIO_PIN_52)
++
+ #define C2K_GPIO_NR_GPIOS	64
+ 
+ #define ARCH_NR_GPIOS		C2K_GPIO_NR_GPIOS
+ 
++/* Power LED, green (Output Pin/Active HIGH) */
++#define POWER_GLED_GPIO_NUM     59
++#define POWER_GLED_GPIO_PIN     GPIO_PIN_59
++/* USB2.0_2 LED, amber (Output Pin/Active HIGH) */
++#define USB2_2_ALED_GPIO_NUM 53
++#define USB2_2_ALED_GPIO_PIN GPIO_PIN_53
++/* USB2.0_2 LED, green (Output Pin/Active HIGH) */
++#define USB2_2_GLED_GPIO_NUM 54
++#define USB2_2_GLED_GPIO_PIN GPIO_PIN_54
++/* VPN LED, amber (Output Pin/Active HIGH) */
++#define VPN_ALED_GPIO_NUM 57
++#define VPN_ALED_GPIO_PIN GPIO_PIN_57
++/* VPN LED, green (Output Pin/Active HIGH) */
++#define VPN_GLED_GPIO_NUM 58
++#define VPN_GLED_GPIO_PIN GPIO_PIN_58
++/* DIAG LED, red (Output Pin/Active HIGH) */
++#define DIAG_RLED_GPIO_NUM 56
++#define DIAG_RLED_GPIO_PIN GPIO_PIN_56
++/* WLAN5.0G LED, green (Output Pin/Active HIGH) */
++#define WLAN5G_GLED_GPIO_NUM 48
++#define WLAN5G_GLED_GPIO_PIN GPIO_PIN_48
++/* WLAN5.0G LED, green (Output Pin/Active HIGH) */
++#define WLAN2G_GLED_GPIO_NUM 47
++#define WLAN2G_GLED_GPIO_PIN GPIO_PIN_47
++
++#define ALL_GPIO_63_32_LED_PINS ( POWER_GLED_GPIO_PIN | USB2_2_ALED_GPIO_PIN | USB2_2_GLED_GPIO_PIN \
++                                | WLAN2G_GLED_GPIO_PIN | WLAN5G_GLED_GPIO_PIN | VPN_ALED_GPIO_PIN \
++                                | VPN_GLED_GPIO_PIN | DIAG_RLED_GPIO_PIN )
++
+ #ifndef __ASSEMBLY__
+ /* This is a temporary bit mask for avoiding usage of reserved gpio pins. */
+ struct c2k_gpio_pin_stat_info {

@@ -1,0 +1,107 @@
+From 94750e1bc0ea426f0efe446b4962535d2619931e Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Date: Thu, 30 Mar 2017 23:38:16 -0500
+Subject: [PATCH 2/2] 430 PSK best match lookup for ikev1
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+---
+ .../encoding/payloads/encrypted_payload.c          |  5 +++++
+ src/libcharon/sa/ikev1/phase1.c                    | 23 +++++++++++++++++++++-
+ 2 files changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/src/libcharon/encoding/payloads/encrypted_payload.c b/src/libcharon/encoding/payloads/encrypted_payload.c
+index a033f60..42d7864 100644
+--- a/src/libcharon/encoding/payloads/encrypted_payload.c
++++ b/src/libcharon/encoding/payloads/encrypted_payload.c
+@@ -14,6 +14,10 @@
+  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+  * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  * for more details.
++ *
++ * 31/03/2017	Sridhar Pothuganti <sridhar.pothuganti@ncp.com>
++ * 	Added required log
++ *
+  */
+ 
+ #include <stddef.h>
+@@ -573,6 +577,7 @@ static status_t parse(private_encrypted_payload_t *this, chunk_t plain)
+ 		{
+ 			DBG1(DBG_ENC, "invalid %N payload length, decryption failed?",
+ 				 payload_type_names, type);
++			DBG1(DBG_ENC, "Invalid HASH or PSK!");
+ 			parser->destroy(parser);
+ 			return PARSE_ERROR;
+ 		}
+diff --git a/src/libcharon/sa/ikev1/phase1.c b/src/libcharon/sa/ikev1/phase1.c
+index 7f3a086..e32e37d 100644
+--- a/src/libcharon/sa/ikev1/phase1.c
++++ b/src/libcharon/sa/ikev1/phase1.c
+@@ -14,6 +14,11 @@
+  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+  * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  * for more details.
++ *
++ * 31/03/2017	Sridhar Pothuganti <sridhar.pothuganti@ncp.com>
++ *	Looking for PSK based on local and remote identifiers instead of using 
++ * the initial PSK arrived based on IP addresses of gateways.
++ *
+  */
+ 
+ #include "phase1.h"
+@@ -113,6 +118,7 @@ static shared_key_t *lookup_shared_key(private_phase1_t *this,
+ 	auth_cfg_t *my_auth, *other_auth;
+ 	enumerator_t *enumerator;
+ 
++	DBG3(DBG_IKE, "Looking up for shared secret keys of connection: '%s'", this->ike_sa->get_name(this->ike_sa));
+ 	/* try to get a PSK for IP addresses */
+ 	me = this->ike_sa->get_my_host(this->ike_sa);
+ 	other = this->ike_sa->get_other_host(this->ike_sa);
+@@ -120,15 +126,22 @@ static shared_key_t *lookup_shared_key(private_phase1_t *this,
+ 	other_id = identification_create_from_sockaddr(other->get_sockaddr(other));
+ 	if (my_id && other_id)
+ 	{
++		DBG3(DBG_IKE, "FSLDBG: Finding shared secret for '%Y'[%H] - '%Y'[%H]",
++								my_id, me, other_id, other);
+ 		shared_key = lib->credmgr->get_shared(lib->credmgr, SHARED_IKE,
+ 											  my_id, other_id);
+ 	}
++	DBG3(DBG_IKE, "FSLDBG: Before destroying IDs, its details are:  myid,me,otherid,other: '%Y'[%H] - '%Y'[%H]",
++							my_id, me, other_id, other);
+ 	DESTROY_IF(my_id);
+ 	DESTROY_IF(other_id);
+ 	if (shared_key)
+ 	{
+-		return shared_key;
++		DBG3(DBG_IKE, "FSLDBG: Hurray! Got the shared secret key '%s'",(shared_key->get_key(shared_key)).ptr);
++		DBG3(DBG_IKE, "FSLDBG: Though we got some key, WE ARE NOT USING THIS, since it is only based on IP!");
++//		return shared_key;    IMP: Experimental.....! Need to revert back if something goes wrong.
+ 	}
++	DBG3(DBG_IKE, "FSLDBG: Tried for PSK based on IP.");
+ 
+ 	if (peer_cfg)
+ 	{	/* as initiator or aggressive responder, use identities */
+@@ -147,6 +160,8 @@ static shared_key_t *lookup_shared_key(private_phase1_t *this,
+ 			}
+ 			if (my_id && other_id)
+ 			{
++				DBG2(DBG_IKE, "Searching for PSK with :my_id,me,other_id,other: '%Y'[%H] - '%Y'[%H]",
++						my_id, me, other_id, other);
+ 				shared_key = lib->credmgr->get_shared(lib->credmgr, SHARED_IKE,
+ 													  my_id, other_id);
+ 				if (!shared_key)
+@@ -156,6 +171,12 @@ static shared_key_t *lookup_shared_key(private_phase1_t *this,
+ 				}
+ 			}
+ 		}
++
++		if (shared_key)
++			DBG3(DBG_IKE, "Got the shared secret key '%s'.",(shared_key->get_key(shared_key)).ptr);
++		else
++			DBG2(DBG_IKE, "Shared key not found.");
++
+ 		return shared_key;
+ 	}
+ 	/* as responder, we try to find a config by IP */
+-- 
+1.9.1
+

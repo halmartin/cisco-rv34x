@@ -1,0 +1,726 @@
+#!/bin/sh
+
+# input: "type <enum: local/ca-certification/certification-sign-request> name <string> valid-duration <int16>"
+#        "country <string> state-province <string> subject-alternative-name <string> subject-alternative-type <enum: email/fqdn/ip>"
+#        " locality <string> organization <string> organization-unit <string> common <string> email <string> key-encryption-length <enum: 512/1024/2048>"
+# output: "code <int32> errstr <string>"
+
+. /etc/boardInfo
+
+LOCAL_CERT=0
+CA_CERT=1
+CSR=2
+PKCS12=2
+
+CONF_FILE_SS="/etc/ssl/openssl_ss.cnf"
+CONF_FILE_CA="/etc/ssl/openssl_ca.cnf"
+CONF_FILE=""
+
+CA_CERT_DIR=/etc/ssl/certs
+OTHER_CERT_DIR=/etc/ssl/certs
+KEY_DIR=/etc/ssl/private
+CERT_DIR=""
+
+TMP_CERTS_IN=/tmp/in_certs
+TMP_CERTS_OUT=/tmp/out_certs
+
+CA_CERT_EXT=_CA
+PEM_EXT=pem
+
+SUB_ALT_EMAIL="email-type"
+SUB_ALT_DNS="fqdn-type"
+SUB_ALT_IP="ip-type"
+
+TMP_CERT_DIR="/tmp/tmpCerts"
+
+
+OrigArguments="$@"
+split_values=`echo $@ | sed -r "s/ (name |valid-duration |subject |request |info |is-self-signed |is-ca-enabled |format |subject-alternative-type |country |key-encryption-length |subject-alternative-name |locality |organization |organization-unit |common-name |csr-name |ca-file |file |email |state-province )/\n\1/g"`
+
+isSelfSigned=$(echo "$split_values" | grep "^is-self-signed" | cut -d ' ' -f 2-)
+isCaEnabled=$(echo "$split_values" | grep "^is-ca-enabled" | cut -d ' ' -f 2-)
+cert_name=$(echo "$split_values" | grep "^name" | cut -d ' ' -f 2-)
+if [ -n "$isCaEnabled" ];then
+ check_cert_name=$cert_name$CA_CERT_EXT
+else
+ check_cert_name=$cert_name
+fi
+#dupcheck=`uci get certificate.$cert_name.cert_name`
+dupcheck=`uci get certificate.$check_cert_name.cert_name`
+
+[ -n "$dupcheck" ] && {
+	echo "Certificate already exists"
+	exit 1
+}
+
+
+# Self Signed & CA certificate defers only in properties of config files.
+generate_ss_or_ca_certificate()
+{
+	cert_format=$(echo "$split_values" | grep "^format" | cut -d ' ' -f 2-)
+	cert_valid_duration=$(echo "$split_values" | grep "^valid-duration" | cut -d ' ' -f 2-)
+	cert_key_encryption=$(echo "$split_values" | grep "^key-encryption-length" | cut -d ' ' -f 2-)
+	sub_alt_name=$(echo "$split_values" | grep "^subject-alternative-name" | cut -d ' ' -f 2-)
+	sub_alt_type=$(echo "$split_values" | grep "^subject-alternative-type" | cut -d ' ' -f 2-)
+	cert_country_name=$(echo "$split_values" | grep "^country" | cut -d ' ' -f 2-)
+	cert_state=$(echo "$split_values" | grep "^state-province" | cut -d ' ' -f 2-)
+	cert_locality_name=$(echo "$split_values" | grep "^locality" | cut -d ' ' -f 2-)
+	cert_organization_name=$(echo "$split_values" | grep "^organization" | grep -v "organization-unit" | cut -d ' ' -f 2-)
+	cert_organization_unit_name=$(echo "$split_values" | grep "^organization-unit" | cut -d ' ' -f 2-)
+	cert_common_name=$(echo "$split_values" | grep "^common-name" | cut -d ' ' -f 2-)
+	cert_email_address=$(echo "$split_values" | grep "^email" | cut -d ' ' -f 2-)
+
+	local signed_by_state
+	Certtype="$1"
+	if [ "$Certtype" = "ss" ];then
+		CONF_FILE=$CONF_FILE_SS
+		CERT_DIR=$OTHER_CERT_DIR
+		certificate_type=$LOCAL_CERT
+		IS_CA_ENABLED=0
+		signed_by_state=1
+	#elif [ "$Certtype = "ca" ];then
+	else	
+		CONF_FILE=$CONF_FILE_CA
+		CERT_DIR=$CA_CERT_DIR
+		certificate_type=$CA_CERT
+		IS_CA_ENABLED=1
+		cert_name="$cert_name$CA_CERT_EXT"
+		signed_by_state=0
+	fi
+
+	subject="/C=$cert_country_name"
+	[ -n "$cert_state" ] && subject=${subject}"/ST=$cert_state"
+	[ -n "$cert_locality_name" ] && subject=${subject}"/L=$cert_locality_name"
+	[ -n "$cert_organization_name" ] && subject=${subject}"/O=$cert_organization_name"
+	subject=${subject}"/OU=$cert_organization_unit_name"
+	subject=${subject}"/CN=$cert_common_name"
+	[ -n "$cert_email_address" ] && subject=${subject}"/emailAddress=$cert_email_address"
+
+	if [ -n "$sub_alt_name" ];then
+		if [ "$sub_alt_type" = $SUB_ALT_IP ];then
+			sub_alt_string=IP:$sub_alt_name
+			sed -i "/#subjectAltName = IP:/c\subjectAltName = $sub_alt_string" $CONF_FILE
+		elif [ "$sub_alt_type" = $SUB_ALT_DNS ];then
+			sub_alt_string=DNS:$sub_alt_name
+			sed -i "/#subjectAltName = DNS:/c\subjectAltName = $sub_alt_string" $CONF_FILE
+		elif [ "$sub_alt_type" = $SUB_ALT_EMAIL ];then
+			sub_alt_string=email:$sub_alt_name
+			sed -i "/#subjectAltName = email:/c\subjectAltName = $sub_alt_string" $CONF_FILE
+		fi
+	fi
+	
+	# Generate Key without password
+	`openssl genrsa -out $KEY_DIR/$cert_name.$PEM_EXT $cert_key_encryption >/dev/null 2>&1`
+
+	# Check command status
+	if [ "$?" -ne 0 ];then
+		rm -rf $KEY_DIR/$cert_name.$PEM_EXT
+		echo "Key Generation Failed for $cert_name"
+		exit 1
+	fi
+		
+	# Generate Self Signed Certificate
+	`openssl req -new -x509 -config $CONF_FILE -days $cert_valid_duration -key $KEY_DIR/$cert_name.$PEM_EXT -out $CERT_DIR/$cert_name.$PEM_EXT -subj "$subject" >/dev/null 2>&1`
+	if [ "$signed_by_state" = "0" ]
+	then
+		# Creating the soft link
+		HASH=`openssl x509 -hash -noout -in $CERT_DIR/$cert_name.$PEM_EXT`;
+		ln -s $CERT_DIR/$cert_name.$PEM_EXT $CERT_DIR/$HASH.0
+	fi
+
+	# Check command status
+	if [ "$?" -ne 0 ];then
+		rm -rf $KEY_DIR/$cert_name.$PEM_EXT
+		rm -rf $CERT_DIR/$cert_name.$PEM_EXT
+		echo "Cert generation Failed for $cert_name"
+		exit 1
+	fi
+
+		
+	`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -startdate| cut -d= -f2 > /tmp/tmpCertStartTime`
+	`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -enddate| cut -d= -f2 > /tmp/tmpCertEndTime`
+	`sed -i "s/  */ /g" /tmp/tmpCertStartTime`
+	`sed -i "s/  */ /g" /tmp/tmpCertEndTime`
+	while read mon day time year
+	do
+		year=`echo $year | cut -d ' ' -f 1`
+		case "$mon" in
+			Jan) mon=01 ;;
+			Feb) mon=02 ;;
+			Mar) mon=03 ;;
+			Apr) mon=04 ;;
+			May) mon=05 ;;
+			Jun) mon=06 ;;
+			Jul) mon=07 ;;
+			Aug) mon=08 ;;
+			Sep) mon=09 ;;
+			Oct) mon=10 ;;
+			Nov) mon=11 ;;
+			Dec) mon=12 ;;
+		esac
+		day_len=`echo $day| wc -c`
+		if [ "$day_len" = 2 ];then
+			day=0$day
+		fi
+		start_time="$year-$mon-$day"
+	done < /tmp/tmpCertStartTime
+	
+	while read mon day time year
+	do
+		year=`echo $year | cut -d ' ' -f 1`
+		case "$mon" in
+			Jan) mon=01 ;;
+			Feb) mon=02 ;;
+			Mar) mon=03 ;;
+			Apr) mon=04 ;;
+			May) mon=05 ;;
+			Jun) mon=06 ;;
+			Jul) mon=07 ;;
+			Aug) mon=08 ;;
+			Sep) mon=09 ;;
+			Oct) mon=10 ;;
+			Nov) mon=11 ;;
+			Dec) mon=12 ;;
+		esac
+		day_len=`echo $day| wc -c`
+		if [ "$day_len" = 2 ];then
+			day=0$day
+		fi
+		end_time="$year-$mon-$day"
+	done < /tmp/tmpCertEndTime
+	rm -rf /tmp/tmpCertStartTime
+	rm -rf /tmp/tmpCertEndTime
+
+	# Add uci section
+	`uci set certificate.$cert_name=generated_certificate >/dev/null 2>&1`
+	`uci set certificate.$cert_name.cert_name=$cert_name >/dev/null 2>&1`
+	`uci set certificate.$cert_name.CertType=$certificate_type >/dev/null 2>&1`
+	`uci set certificate.$cert_name.type=$certificate_type >/dev/null 2>&1`
+	`uci set certificate.$cert_name.duration="From $start_time To $end_time" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.useby="-" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_country_name="$cert_country_name" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_state="$cert_state" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_locality_name="$cert_locality_name" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_organization_name="$cert_organization_name" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_organization_unit_name="$cert_organization_unit_name" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_common_name="$cert_common_name" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_email_address="$cert_email_address" >/dev/null 2>&1` 
+	`uci set certificate.$cert_name.issuer_country_name="$cert_country_name" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_state="$cert_state" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_locality_name="$cert_locality_name" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_organization_name="$cert_organization_name" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_organization_unit_name="$cert_organization_unit_name" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_common_name="$cert_common_name" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_email_address="$cert_email_address" >/dev/null 2>&1` 
+	`uci set certificate.$cert_name.key_encryption=$key_encryption_length >/dev/null 2>&1`
+	`uci set certificate.$cert_name.has_private_key=1 >/dev/null 2>&1`
+	`uci set certificate.$cert_name.is_imported=0 >/dev/null 2>&1`
+	`uci set certificate.$cert_name.is_ca_enabled="$IS_CA_ENABLED" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.key_encryption="$cert_key_encryption" >/dev/null 2>&1`
+	sha1sum=`openssl x509 -noout -in $CERT_DIR/$cert_name.$PEM_EXT -fingerprint -sha1 | cut -d = -f 2-`
+	`uci set certificate.$cert_name.sha1sum="$sha1sum" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.allow_export=1 > /dev/null 2>&1`
+	`uci set certificate.$cert_name.source=1 > /dev/null 2>&1`
+
+	if [ -n "$sub_alt_name" ] && [ -n "$sub_alt_type" ];then
+		`uci set certificate.$cert_name.sub_alt_name=$sub_alt_name >/dev/null 2>&1`
+		if [ "$sub_alt_type" = $SUB_ALT_EMAIL ];then
+			subject_alternative_type=0
+		elif [ "$sub_alt_type" = $SUB_ALT_DNS ];then
+			subject_alternative_type=1
+		else
+			subject_alternative_type=2
+		fi
+		`uci set certificate.$cert_name.sub_alt_name_type=$subject_alternative_type >/dev/null 2>&1`
+	fi
+	sub_hash=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -subject_hash`
+	`uci set certificate.$cert_name.sub_hash=$sub_hash > /dev/null 2>&1`
+	`uci set certificate.$cert_name.signed_by=$signed_by_state > /dev/null 2>&1`
+	
+	COMMA_SUBJECT=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -subject -nameopt -sep_comma_plus | cut -d " " -f 2-`				
+	if [ -n "$COMMA_SUBJECT" ];then
+		`uci set certificate.$cert_name.subject="$COMMA_SUBJECT"`
+	else
+		`uci set certificate.$cert_name.subject=-`
+	fi
+	COMMA_ISSUER=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -issuer -nameopt -sep_comma_plus | cut -d " " -f 2-`				
+	if [ -n "$COMMA_ISSUER" ];then
+		`uci set certificate.$cert_name.issuer="$COMMA_ISSUER"`
+	else
+		`uci set certificate.$cert_name.issuer=-`
+	fi
+	uci commit certificate
+	/usr/bin/certscript add $cert_name
+
+	#/* Update the certificate configuration */
+        cp -f $TMP_CERT_FILE $MNT_CERT_FILE
+
+
+	# Comment the conf file changes
+	if [ -n "$sub_alt_name" ];then
+		sed -i "/subjectAltName = $sub_alt_string/c\#subjectAltName = $sub_alt_string" $CONF_FILE
+	fi
+}
+
+sign_external_csr ()
+{
+	CONF_FILE="$CONF_FILE_CA"
+	CERT_DIR=$OTHER_CERT_DIR
+	cert_name=$(echo "$split_values" | grep "^name" | cut -d ' ' -f 2-)
+	cert_format=$(echo "$split_values" | grep "^format" | cut -d ' ' -f 2-)
+	cert_valid_duration=$(echo "$split_values" | grep "^valid-duration" | cut -d ' ' -f 2-)
+	ca_file=$(echo "$split_values" | grep "^ca-file" | cut -d ' ' -f 2-)
+	csr_name=`echo $OrigArguments | awk '{
+					for (I=1;I<=NF;I=I+2) 
+					{
+						if ($I == "csr") 
+						{
+							if ($(I+1) == "__BEGIN") {
+								for (J=I+2;J<=NF;J=J+2) {
+									if ($J == "csr-name") {
+										{print $(J+1)};
+										break;
+									}
+									if ($J == "csr") {
+										if ($(J+1) == "__END") {
+											break;
+										}
+									}
+								}
+							}
+						}
+					}
+				    }'`
+	#csr_absolute_path=$TMP_CERTS_IN"/"$csr_name.$PEM_EXT
+	csr_absolute_path=$TMP_CERTS_IN"/"$csr_name
+	ca_absolute_path=$CA_CERT_DIR"/"$ca_file.$PEM_EXT
+
+	# Check if mentioned CA certificate exists or not.
+	if [ ! -f "$ca_absolute_path" ];then
+		echo "$ca_absolute_path does not exists."
+		exit 1
+	fi
+
+	# Check if mentioned CSR certificate exists or not.
+	if [ ! -f "$csr_absolute_path" ];then
+		echo "$csr_absolute_path does not exists."
+		exit 1
+	fi
+
+	# Get the enc length
+	cert_key_encryption=`openssl req -in $csr_absolute_path -text -noout 2>&1 | grep "Public-Key:" | cut -d "(" -f 2- | cut -d " " -f 1`
+
+	# SIGN the CSR
+	`openssl ca -config $CONF_FILE -batch -policy policy_anything -cert $ca_absolute_path -days $cert_valid_duration -keyfile $KEY_DIR/$ca_file.$PEM_EXT -in $csr_absolute_path -outdir $TMP_CERT_DIR/ -out $CERT_DIR/$cert_name.$PEM_EXT >/dev/null 2>&1`
+
+	if [ "$?" -ne 0 ];then
+		rm -rf $TMP_CERT_DIR/$cert_name.$PEM_EXT
+		rm -rf $csr_absolute_path
+		echo "Certificate signing failed for $csr_name ."
+		exit 1
+	fi
+
+	# delete the csr file 	
+	rm -rf $csr_absolute_path
+	rm -rf $TMP_CERT_DIR/*
+
+	# Get the subject details
+	subjectOutput=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -subject`				
+	cert_split_values=`echo $subjectOutput | sed -r "s/(\/C|\/ST|\/L|\/O|\/OU|\/CN|\/emailAddress)/\n\1/g"`
+	sub_country=$(echo "$cert_split_values" | grep "C=" | cut -d = -f 2-)
+	sub_state=$(echo "$cert_split_values" | grep "ST=" | cut -d = -f 2-)
+	sub_Locality=$(echo "$cert_split_values" | grep "L=" | cut -d = -f 2-)
+	sub_Org=$(echo "$cert_split_values" | grep "O=" | cut -d = -f 2-)
+	sub_Orgu=$(echo "$cert_split_values" | grep "OU=" | cut -d = -f 2-)
+	sub_comm=$(echo "$cert_split_values" | grep "CN=" | cut -d = -f 2-)
+	sub_email=$(echo "$cert_split_values" | grep "emailAddress=" | cut -d = -f 2-)
+	
+	# Get the issuer details
+	issuerOutput=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -issuer`				
+	cert_split_values=`echo $issuerOutput | sed -r "s/(\/C|\/ST|\/L|\/O|\/OU|\/CN|\/emailAddress)/\n\1/g"`
+	issuer_country=$(echo "$cert_split_values" | grep "C=" | cut -d = -f 2-)
+	issuer_state=$(echo "$cert_split_values" | grep "ST=" | cut -d = -f 2-)
+	issuer_Locality=$(echo "$cert_split_values" | grep "L=" | cut -d = -f 2-)
+	issuer_Org=$(echo "$cert_split_values" | grep "O=" | cut -d = -f 2-)
+	issuer_Orgu=$(echo "$cert_split_values" | grep "OU=" | cut -d = -f 2-)
+	issuer_comm=$(echo "$cert_split_values" | grep "CN=" | cut -d = -f 2-)
+	issuer_email=$(echo "$cert_split_values" | grep "emailAddress=" | cut -d = -f 2-)
+
+	`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -startdate| cut -d= -f2 > /tmp/tmpCertStartTime`
+	`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -enddate| cut -d= -f2 > /tmp/tmpCertEndTime`
+	`sed -i "s/  */ /g" /tmp/tmpCertStartTime`
+	`sed -i "s/  */ /g" /tmp/tmpCertEndTime`
+	while read mon day time year
+	do
+		year=`echo $year | cut -d ' ' -f 1`
+		case "$mon" in
+			Jan) mon=01 ;;
+			Feb) mon=02 ;;
+			Mar) mon=03 ;;
+			Apr) mon=04 ;;
+			May) mon=05 ;;
+			Jun) mon=06 ;;
+			Jul) mon=07 ;;
+			Aug) mon=08 ;;
+			Sep) mon=09 ;;
+			Oct) mon=10 ;;
+			Nov) mon=11 ;;
+			Dec) mon=12 ;;
+		esac
+		day_len=`echo $day| wc -c`
+		if [ "$day_len" = 2 ];then
+			day=0$day
+		fi
+		start_time="$year-$mon-$day"
+	done < /tmp/tmpCertStartTime
+	
+	while read mon day time year
+	do
+		year=`echo $year | cut -d ' ' -f 1`
+		case "$mon" in
+			Jan) mon=01 ;;
+			Feb) mon=02 ;;
+			Mar) mon=03 ;;
+			Apr) mon=04 ;;
+			May) mon=05 ;;
+			Jun) mon=06 ;;
+			Jul) mon=07 ;;
+			Aug) mon=08 ;;
+			Sep) mon=09 ;;
+			Oct) mon=10 ;;
+			Nov) mon=11 ;;
+			Dec) mon=12 ;;
+		esac
+		day_len=`echo $day| wc -c`
+		if [ "$day_len" = 2 ];then
+			day=0$day
+		fi
+		end_time="$year-$mon-$day"
+	done < /tmp/tmpCertEndTime
+	rm -rf /tmp/tmpCertStartTime
+	rm -rf /tmp/tmpCertEndTime
+
+	# Add uci section
+	`uci set certificate.$cert_name=generated_certificate >/dev/null 2>&1`
+	`uci set certificate.$cert_name.cert_name=$cert_name >/dev/null 2>&1`
+	`uci set certificate.$cert_name.CertType=$LOCAL_CERT >/dev/null 2>&1`
+	`uci set certificate.$cert_name.type=$LOCAL_CERT >/dev/null 2>&1`
+	`uci set certificate.$cert_name.duration="From $start_time To $end_time" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.useby="-" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_country_name="$sub_country" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_state="$sub_state" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_locality_name="$sub_Locality" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_organization_name="$sub_Org" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_organization_unit_name="$sub_Orgu" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_common_name="$sub_comm" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_email_address="$sub_email" >/dev/null 2>&1` 
+	`uci set certificate.$cert_name.issuer_country_name="$issuer_country" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_state="$issuer_state" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_locality_name="$issuer_Locality" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_organization_name="$issuer_Org" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_organization_unit_name="$issuer_Orgu" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_common_name="$issuer_comm" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_email_address="$issuer_email" >/dev/null 2>&1` 
+	`uci set certificate.$cert_name.key_encryption=$key_encryption_length >/dev/null 2>&1`
+	`uci set certificate.$cert_name.has_private_key=0 >/dev/null 2>&1`
+	`uci set certificate.$cert_name.is_imported=0 >/dev/null 2>&1`
+	`uci set certificate.$cert_name.is_ca_enabled=0 >/dev/null 2>&1`
+	sha1sum=`openssl x509 -noout -in $CERT_DIR/$cert_name.$PEM_EXT -fingerprint -sha1 | cut -d = -f 2-`
+	`uci set certificate.$cert_name.sha1sum="$sha1sum" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.key_encryption="$cert_key_encryption" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.allow_export=1 > /dev/null 2>&1`
+	`uci set certificate.$cert_name.source=1 > /dev/null 2>&1`
+	
+	COMMA_SUBJECT=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -subject -nameopt -sep_comma_plus | cut -d " " -f 2-`				
+	if [ -n "$COMMA_SUBJECT" ];then
+		`uci set certificate.$cert_name.subject="$COMMA_SUBJECT"`
+	else
+		`uci set certificate.$cert_name.subject=-`
+	fi
+	COMMA_ISSUER=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -issuer -nameopt -sep_comma_plus | cut -d " " -f 2-`				
+	if [ -n "$COMMA_ISSUER" ];then
+		`uci set certificate.$cert_name.issuer="$COMMA_ISSUER"`
+	else
+		`uci set certificate.$cert_name.issuer=-`
+	fi
+	# get the valye of sub alt name & type
+	sub_alt=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -text -noout 2>&1 | awk '/Subject Alternative Name/{getline; print}'`
+	if [ -n "$sub_alt" ];then
+		sub_alt_name=`echo $sub_alt | cut -d : -f 2-`
+		sub_type=`echo $sub_alt | grep "IP Address"`
+		if [ -n "$sub_type" ];then
+			subject_alternative_type=2
+		else
+			sub_type=`echo $sub_alt | grep "email"`
+			if [ -n "$sub_type" ];then
+				subject_alternative_type=0
+			else
+				subject_alternative_type=1
+			fi
+		fi
+		`uci set certificate.$cert_name.sub_alt_name=$sub_alt_name >/dev/null 2>&1`
+		`uci set certificate.$cert_name.sub_alt_name_type=$subject_alternative_type >/dev/null 2>&1`
+	fi
+	uci commit certificate
+	/usr/bin/certscript add $cert_name
+
+	/* Update the certificate configuration */
+        cp -f $TMP_CERT_FILE $MNT_CERT_FILE
+}
+
+create_and_sign_csr ()
+{
+	# First Create the CSR
+	CONF_FILE="$CONF_FILE_SS"
+	CERT_DIR=$OTHER_CERT_DIR
+	cert_name=$(echo "$split_values" | grep "^name" | cut -d ' ' -f 2-)
+	cert_format=$(echo "$split_values" | grep "^format" | cut -d ' ' -f 2-)
+	cert_valid_duration=$(echo "$split_values" | grep "^valid-duration" | cut -d ' ' -f 2-)
+	cert_key_encryption=$(echo "$split_values" | grep "^key-encryption-length" | cut -d ' ' -f 2-)
+	sub_alt_name=$(echo "$split_values" | grep "^subject-alternative-name" | cut -d ' ' -f 2-)
+	sub_alt_type=$(echo "$split_values" | grep "^subject-alternative-type" | cut -d ' ' -f 2-)
+	cert_country_name=$(echo "$split_values" | grep "^country" | cut -d ' ' -f 2-)
+	cert_state=$(echo "$split_values" | grep "^state-province" | cut -d ' ' -f 2-)
+	cert_locality_name=$(echo "$split_values" | grep "^locality" | cut -d ' ' -f 2-)
+	cert_organization_name=$(echo "$split_values" | grep "^organization" | grep -v "organization-unit" | cut -d ' ' -f 2-)
+	cert_organization_unit_name=$(echo "$split_values" | grep "^organization-unit" | cut -d ' ' -f 2-)
+	cert_common_name=$(echo "$split_values" | grep "^common-name" | cut -d ' ' -f 2-)
+	cert_email_address=$(echo "$split_values" | grep "^email" | cut -d ' ' -f 2-)
+	ca_file=$(echo "$split_values" | grep "^ca-file" | cut -d ' ' -f 2-)
+	IS_CA_ENABLED=0
+
+	
+	subject="/C=$cert_country_name"
+	[ -n "$cert_state" ] && subject=${subject}"/ST=$cert_state"
+	[ -n "$cert_locality_name" ] && subject=${subject}"/L=$cert_locality_name"
+	[ -n "$cert_organization_name" ] && subject=${subject}"/O=$cert_organization_name"
+	subject=${subject}"/OU=$cert_organization_unit_name"
+	subject=${subject}"/CN=$cert_common_name"
+	[ -n "$cert_email_address" ] && subject=${subject}"/emailAddress=$cert_email_address"
+
+	if [ -n "$sub_alt_name" ];then
+		if [ "$sub_alt_type" = $SUB_ALT_IP ];then
+			sub_alt_string=IP:$sub_alt_name
+			sed -i "/#subjectAltName = IP:/c\subjectAltName = $sub_alt_string" $CONF_FILE
+		elif [ "$sub_alt_type" = $SUB_ALT_DNS ];then
+			sub_alt_string=DNS:$sub_alt_name
+			sed -i "/#subjectAltName = DNS:/c\subjectAltName = $sub_alt_string" $CONF_FILE
+		elif [ "$sub_alt_type" = $SUB_ALT_EMAIL ];then
+			sub_alt_string=email:$sub_alt_name
+			sed -i "/#subjectAltName = email:/c\subjectAltName = $sub_alt_string" $CONF_FILE
+		fi
+	fi
+	
+	# Create a CSR
+	# Generate Key without password
+	`openssl genrsa -out $KEY_DIR/$cert_name.$PEM_EXT $cert_key_encryption >/dev/null 2>&1`
+	
+	if [ "$?" -ne 0 ];then
+		rm -rf $KEY_DIR/$cert_name.$PEM_EXT
+		rm -rf $CERT_DIR/$cert_name.$PEM_EXT
+		echo "Key generation failed for certificate"
+		exit 1
+	fi
+
+	# Generate CSR Certificate
+	`openssl req -new -config $CONF_FILE -key $KEY_DIR/$cert_name.$PEM_EXT -out $CERT_DIR/$cert_name.$PEM_EXT -subj "$subject" >/dev/null 2>&1`
+	# Check command status
+	if [ "$?" -ne 0 ];then
+		rm -rf $KEY_DIR/$cert_name.$PEM_EXT
+		rm -rf $CERT_DIR/$cert_name.$PEM_EXT
+		echo "CSR generation failed for $cert_name"
+		exit 1
+	fi
+	
+	# Comment the conf file changes
+	if [ -n "$sub_alt_name" ];then
+		sed -i "/subjectAltName = $sub_alt_string/c\#subjectAltName = $sub_alt_string" $CONF_FILE
+	fi
+
+	# Now sign the CSR
+	csr_absolute_path=$CERT_DIR"/"$cert_name.$PEM_EXT
+	ca_absolute_path=$CA_CERT_DIR"/"$ca_file.$PEM_EXT
+
+	# Check if mentioned CA certificate exists or not.
+	if [ ! -f "$ca_absolute_path" ];then
+		echo "$ca_absolute_path does not exists."
+		exit 1
+	fi
+
+	# Check if mentioned CSR certificate exists or not.
+	if [ ! -f "$csr_absolute_path" ];then
+		echo "$csr_absolute_path does not exists."
+		exit 1
+	fi
+
+	# Sign the CSR
+	CONF_FILE="$CONF_FILE_CA"
+	`openssl ca -config $CONF_FILE -batch -policy policy_anything -cert $ca_absolute_path -days $cert_valid_duration -keyfile $KEY_DIR/$ca_file.$PEM_EXT -in $csr_absolute_path -outdir $TMP_CERT_DIR/ -out $TMP_CERT_DIR/$cert_name.$PEM_EXT >/dev/null 2>&1`
+
+	if [ "$?" -ne 0 ];then
+		#rm -rf $TMP_CERT_DIR/$cert_name.$PEM_EXT
+		#rm -rf $CERT_DIR/$cert_name.$PEM_EXT
+		#rm -rf $KEY_DIR/$cert_name.$PEM_EXT
+		#rm -rf $csr_absolute_path
+		#rm -rf $TMP_CERT_DIR/*
+		echo "Certificate signing failed for $cert_name ."
+		exit 1
+	fi
+
+	# delete file 	
+	rm -rf $csr_absolute_path
+	
+	# move the signed certificate
+	mv -f $TMP_CERT_DIR/$cert_name.$PEM_EXT $CERT_DIR/$cert_name.$PEM_EXT
+	
+	rm -rf $TMP_CERT_DIR/*
+
+	# Get the subject details
+	subjectOutput=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -subject`				
+	cert_split_values=`echo $subjectOutput | sed -r "s/(\/C|\/ST|\/L|\/O|\/OU|\/CN|\/emailAddress)/\n\1/g"`
+	sub_country=$(echo "$cert_split_values" | grep "C=" | cut -d = -f 2-)
+	sub_state=$(echo "$cert_split_values" | grep "ST=" | cut -d = -f 2-)
+	sub_Locality=$(echo "$cert_split_values" | grep "L=" | cut -d = -f 2-)
+	sub_Org=$(echo "$cert_split_values" | grep "O=" | cut -d = -f 2-)
+	sub_Orgu=$(echo "$cert_split_values" | grep "OU=" | cut -d = -f 2-)
+	sub_comm=$(echo "$cert_split_values" | grep "CN=" | cut -d = -f 2-)
+	sub_email=$(echo "$cert_split_values" | grep "emailAddress=" | cut -d = -f 2-)
+	
+	# Get the issuer details
+	issuerOutput=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -issuer`				
+	cert_split_values=`echo $issuerOutput | sed -r "s/(\/C|\/ST|\/L|\/O|\/OU|\/CN|\/emailAddress)/\n\1/g"`
+	issuer_country=$(echo "$cert_split_values" | grep "C=" | cut -d = -f 2-)
+	issuer_state=$(echo "$cert_split_values" | grep "ST=" | cut -d = -f 2-)
+	issuer_Locality=$(echo "$cert_split_values" | grep "L=" | cut -d = -f 2-)
+	issuer_Org=$(echo "$cert_split_values" | grep "O=" | cut -d = -f 2-)
+	issuer_Orgu=$(echo "$cert_split_values" | grep "OU=" | cut -d = -f 2-)
+	issuer_comm=$(echo "$cert_split_values" | grep "CN=" | cut -d = -f 2-)
+	issuer_email=$(echo "$cert_split_values" | grep "emailAddress=" | cut -d = -f 2-)
+
+	`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -startdate| cut -d= -f2 > /tmp/tmpCertStartTime`
+	`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -enddate| cut -d= -f2 > /tmp/tmpCertEndTime`
+	`sed -i "s/  */ /g" /tmp/tmpCertStartTime`
+	`sed -i "s/  */ /g" /tmp/tmpCertEndTime`
+	while read mon day time year
+	do
+		year=`echo $year | cut -d ' ' -f 1`
+		case "$mon" in
+			Jan) mon=01 ;;
+			Feb) mon=02 ;;
+			Mar) mon=03 ;;
+			Apr) mon=04 ;;
+			May) mon=05 ;;
+			Jun) mon=06 ;;
+			Jul) mon=07 ;;
+			Aug) mon=08 ;;
+			Sep) mon=09 ;;
+			Oct) mon=10 ;;
+			Nov) mon=11 ;;
+			Dec) mon=12 ;;
+		esac
+		day_len=`echo $day| wc -c`
+		if [ "$day_len" = 2 ];then
+			day=0$day
+		fi
+		start_time="$year-$mon-$day"
+	done < /tmp/tmpCertStartTime
+	
+	while read mon day time year
+	do
+		year=`echo $year | cut -d ' ' -f 1`
+		case "$mon" in
+			Jan) mon=01 ;;
+			Feb) mon=02 ;;
+			Mar) mon=03 ;;
+			Apr) mon=04 ;;
+			May) mon=05 ;;
+			Jun) mon=06 ;;
+			Jul) mon=07 ;;
+			Aug) mon=08 ;;
+			Sep) mon=09 ;;
+			Oct) mon=10 ;;
+			Nov) mon=11 ;;
+			Dec) mon=12 ;;
+		esac
+		day_len=`echo $day| wc -c`
+		if [ "$day_len" = 2 ];then
+			day=0$day
+		fi
+		end_time="$year-$mon-$day"
+	done < /tmp/tmpCertEndTime
+	rm -rf /tmp/tmpCertStartTime
+	rm -rf /tmp/tmpCertEndTime
+
+	# Add uci section
+	`uci set certificate.$cert_name=generated_certificate >/dev/null 2>&1`
+	`uci set certificate.$cert_name.cert_name=$cert_name >/dev/null 2>&1`
+	`uci set certificate.$cert_name.CertType=$LOCAL_CERT >/dev/null 2>&1`
+	`uci set certificate.$cert_name.type=$LOCAL_CERT >/dev/null 2>&1`
+	`uci set certificate.$cert_name.duration="From $start_time To $end_time" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.useby="-" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_country_name="$sub_country" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_state="$sub_state" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_locality_name="$sub_Locality" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_organization_name="$sub_Org" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_organization_unit_name="$sub_Orgu" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_common_name="$sub_comm" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.sub_email_address="$sub_email" >/dev/null 2>&1` 
+	`uci set certificate.$cert_name.issuer_country_name="$issuer_country" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_state="$issuer_state" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_locality_name="$issuer_Locality" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_organization_name="$issuer_Org" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_organization_unit_name="$issuer_Orgu" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_common_name="$issuer_comm" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.issuer_email_address="$issuer_email" >/dev/null 2>&1` 
+	`uci set certificate.$cert_name.key_encryption=$key_encryption_length >/dev/null 2>&1`
+	`uci set certificate.$cert_name.has_private_key=1 >/dev/null 2>&1`
+	`uci set certificate.$cert_name.is_imported=0 >/dev/null 2>&1`
+	`uci set certificate.$cert_name.is_ca_enabled=$IS_CA_ENABLED >/dev/null 2>&1`
+	sha1sum=`openssl x509 -noout -in $CERT_DIR/$cert_name.$PEM_EXT -fingerprint -sha1 | cut -d = -f 2-`
+	`uci set certificate.$cert_name.sha1sum="$sha1sum" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.key_encryption="$cert_key_encryption" >/dev/null 2>&1`
+	`uci set certificate.$cert_name.allow_export=1 > /dev/null 2>&1`
+	`uci set certificate.$cert_name.source=1 > /dev/null 2>&1`
+	
+	COMMA_SUBJECT=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -subject -nameopt -sep_comma_plus | cut -d " " -f 2-`				
+	if [ -n "$COMMA_SUBJECT" ];then
+		`uci set certificate.$cert_name.subject="$COMMA_SUBJECT"`
+	else
+		`uci set certificate.$cert_name.subject=-`
+	fi
+	COMMA_ISSUER=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -issuer -nameopt -sep_comma_plus | cut -d " " -f 2-`				
+	if [ -n "$COMMA_ISSUER" ];then
+		`uci set certificate.$cert_name.issuer="$COMMA_ISSUER"`
+	else
+		`uci set certificate.$cert_name.issuer=-`
+	fi
+	if [ -n "$sub_alt_name" ] && [ -n "$sub_alt_type" ];then
+		`uci set certificate.$cert_name.sub_alt_name=$sub_alt_name >/dev/null 2>&1`
+		if [ "$sub_alt_type" = $SUB_ALT_EMAIL ];then
+			subject_alternative_type=0
+		elif [ "$sub_alt_type" = $SUB_ALT_DNS ];then
+			subject_alternative_type=1
+		else
+			subject_alternative_type=2
+		fi
+		`uci set certificate.$cert_name.sub_alt_name_type=$subject_alternative_type >/dev/null 2>&1`
+	fi
+	
+	uci commit certificate
+	/usr/bin/certscript add $cert_name
+
+	/* Update the certificate configuration */
+        cp -f $TMP_CERT_FILE $MNT_CERT_FILE
+}
+
+if [ "$isSelfSigned" = "true" ];then
+	if [ "$isCaEnabled" = "true" ];then
+		generate_ss_or_ca_certificate "ca" 
+	else
+		generate_ss_or_ca_certificate "ss" 
+	fi
+elif [ "$isSelfSigned" = "false" ] && [ "$isCaEnabled" = "false" ];then
+	create_and_sign_csr
+elif [ -z "$isSelfSigned" ] && [ -z "$isCaEnabled" ];then
+	sign_external_csr
+fi

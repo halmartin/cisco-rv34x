@@ -1,0 +1,114 @@
+--- a/Makefile	2015-07-03 18:06:07.118889246 +0530
++++ b/Makefile	2015-07-03 18:05:52.079078323 +0530
+@@ -61,6 +61,7 @@ md5.o: src/md5.c src/md5.h
+ pam_radius_auth.so: pam_radius_auth.o md5.o
+ 	$(CC) $(LDFLAGS) pam_radius_auth.o md5.o -lpam -o pam_radius_auth.so
+ 
++install:
+ ######################################################################
+ #
+ #  Check a distribution out of the source tree, and make a tar file.
+--- a/src/pam_radius_auth.c	2015-07-03 18:07:44.901659951 +0530
++++ b/src/pam_radius_auth.c	2015-07-03 18:07:33.457803820 +0530
+@@ -350,6 +350,71 @@ static unsigned char * xor(unsigned char
+ 	return retval;
+ }
+ 
++
++/* This routine is introduced to extract the needed attributes from 
++   radius repsonse buffer, so that it can be conveyed to application 
++   via conversation function later.
++
++    resp_buf : radius response buffer. (input)
++    resp_buf_len : length of radius response buffer. (input)
++    attr_id  : needed attribute id      (input)
++    attr_len_p : pointer to store extracted attribute length
++    attr_val_p : pointer to store attribute data. data buffer is
++                 allocated by this routine. caller should free it
++                 using free().
++ */
++#define PAM_AUTH_RESP_ATTRIBUTES  0x1000
++static int pam_radius_extract_radresp_attrib(pam_handle_t *pamh, char* resp_buf,
++                                      int resp_buf_len,
++                                      int attr_id,
++                                      int* attr_len_p,
++                                      char** attr_val_pp)
++{
++   unsigned char atype;
++   unsigned char alen;
++   int rlen;
++   char* attr_val_p;
++   AUTH_HDR* phdr = ((AUTH_HDR*)resp_buf);
++   char* p = phdr->data;
++
++   phdr->length = ntohs(phdr->length);
++   /* verify the buffer overflow condition */
++   if(phdr->length > resp_buf_len)
++   {
++      return (-1);
++   }
++
++   rlen = phdr->length - 20;
++
++   while(rlen > 0)
++   {
++      atype = *((unsigned char*)p);
++      alen = *((unsigned char*)(p+1));
++      if(atype == attr_id)
++      {
++         /* got the needed attribute */
++         if(alen <= rlen)
++         {
++            attr_val_p = (char*) calloc(1, alen-1);
++            if(attr_val_p)
++            {
++               memcpy(attr_val_p, p+2, alen-2);
++               attr_val_p[alen-2] = '\0';
++               *attr_len_p = alen-2;
++               *attr_val_pp = attr_val_p;
++                char *dupvalue = strdup(attr_val_p);
++                pam_set_data( pamh, "groupattr", dupvalue , _int_free );
++                return (0);
++            }
++         }
++      }
++      rlen -= alen;
++      p += alen; /* alen includes type, len, and attribute */
++   }
++
++   return (-1);
++}
++
+ /**************************************************************************
+  * MID-LEVEL RADIUS CODE
+  **************************************************************************/
+@@ -1075,6 +1140,9 @@ PAM_EXTERN int pam_sm_authenticate(pam_h
+ 	AUTH_HDR *response = (AUTH_HDR *) recv_buffer;
+ 	radius_conf_t config;
+ 
++        int rad_attr_len = 0;
++        char* rad_attr_val = NULL;
++
+ 	ctrl = _pam_parse(argc, argv, &config);
+ 
+ 	/* grab the user name */
+@@ -1263,6 +1331,19 @@ error:
+ 
+ 	DPRINT(LOG_DEBUG, "authentication %s", retval==PAM_SUCCESS ? "succeeded":"failed");
+ 
++        if (response->code == PW_AUTHENTICATION_ACK)
++          {
++             if(pam_radius_extract_radresp_attrib(pamh ,recv_buffer,
++                                                 sizeof(recv_buffer),
++                                                 PW_VENDOR_SPECIFIC,
++                                                 &rad_attr_len,
++                                                 &rad_attr_val) == 0)
++               {
++                 rad_converse(pamh, PAM_AUTH_RESP_ATTRIBUTES, rad_attr_val, NULL);
++                 free(rad_attr_val);
++               }
++           }
++
+ 	close(config.sockfd);
+ 	cleanup(config.server);
+ 	_pam_forget(password);

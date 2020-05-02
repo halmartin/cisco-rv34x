@@ -1,0 +1,79 @@
+#!/bin/sh /etc/rc.common
+
+START=54
+
+CONF=/etc/config/fastforward
+OPTIONS="-f $CONF"
+if [ "`grep "LS1012A" /proc/device-tree/model`" ]; then
+	VWD_ENABLE_FASTPATH=/sys/devices/platform/90500000.pfe/vwd_fast_path_enable
+else
+	VWD_ENABLE_FASTPATH=/sys/devices/platform/pfe.0/vwd_fast_path_enable
+fi
+
+start() {
+        if [ -e /proc/fppmode ]; then
+	  if [ "`grep "0" /proc/fppmode`" ]; then
+            exit 0
+          fi
+        fi
+	
+	if [ "`grep "Comcerto 2000" /proc/cpuinfo`" -o "`grep "LS1012A" /proc/device-tree/model`" ]; then
+		major=`grep vwd /proc/devices | awk '{ print $1 }'`
+
+        	rm -f /dev/vwd0
+
+        	if [ -n "$major" ]; then
+                	mknod /dev/vwd0 c $major 0
+        	fi
+
+		echo 1 > $VWD_ENABLE_FASTPATH
+        fi
+    if ! lsmod | grep "nfnetlink" &> /dev/null; then
+        insmod nfnetlink 2> /dev/null
+    fi
+if [ "`uname -r`" \> "2.6.32" ]; then
+	if ! lsmod | grep "nf_defrag_ipv4" &> /dev/null; then
+		insmod nf_defrag_ipv4 2> /dev/null
+	fi
+fi
+	
+	if ! lsmod | grep "nf_conntrack" &> /dev/null; then
+		insmod nf_conntrack 2> /dev/null
+	fi
+	if ! lsmod | grep "nf_conntrack_ipv4" &> /dev/null; then
+		insmod nf_conntrack_ipv4 2> /dev/null
+	fi
+	if ! lsmod | grep "nf_conntrack_ipv6" &> /dev/null; then
+		insmod nf_conntrack_ipv6 2> /dev/null
+	fi
+	if ! lsmod | grep "nf_nat" &> /dev/null; then
+		insmod nf_nat  2> /dev/null
+	fi
+	if ! lsmod | grep "nf_conntrack_netlink" &> /dev/null; then
+		insmod nf_conntrack_netlink  2> /dev/null
+	fi
+
+	[ -d /var/run ] || mkdir -p /var/run
+        /usr/bin/cmm $OPTIONS
+        
+	#[ -e /etc/init.d/qos ] && sleep 1 && /etc/init.d/qos restart
+	[ -e /etc/ppp/ip-up.d/l2tp.sh ] && sleep 2 && /etc/ppp/ip-up.d/l2tp.sh
+}
+
+stop() {
+        if [ -e /proc/fppmode ]; then
+	  if [ "`grep "0" /proc/fppmode`" ]; then
+            exit 0
+          fi
+        fi
+        [ -f /var/run/cmm.pid ] && kill $(cat /var/run/cmm.pid) >/dev/null 2>&1
+	rmmod nf_conntrack_netlink 2> /dev/null
+	rmmod nf_nat 2> /dev/null
+	rmmod nf_conntrack_ipv6 2> /dev/null
+	rmmod nf_conntrack_ipv4 2> /dev/null
+	rmmod nfnetlink 2> /dev/null
+	
+	echo 0 > $VWD_ENABLE_FASTPATH
+        rm -f /dev/vwd0
+}
+

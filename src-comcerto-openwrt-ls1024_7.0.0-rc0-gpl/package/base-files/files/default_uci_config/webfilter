@@ -1,0 +1,4 @@
+
+config global 'globalconfig'
+	option enable '0'
+

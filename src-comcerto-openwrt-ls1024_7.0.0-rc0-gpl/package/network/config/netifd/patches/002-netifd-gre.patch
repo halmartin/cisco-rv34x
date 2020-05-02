@@ -1,0 +1,40 @@
+diff -aurN '--exclude-from=/projects/ciscosbr_nbk/b38513/files' netifd-2014-09-08.1-org/system-linux.c netifd-2014-09-08.1/system-linux.c
+--- netifd-2014-09-08.1-org/system-linux.c	2015-11-24 10:31:54.666093000 +0530
++++ netifd-2014-09-08.1/system-linux.c	2015-11-24 10:34:32.402236000 +0530
+@@ -1654,7 +1654,7 @@
+ 	return ioctl(sock_ioctl, cmd, &ifr);
+ }
+ 
+-#ifdef IFLA_IPTUN_MAX
++//#ifdef IFLA_IPTUN_MAX
+ static int system_add_gre_tunnel(const char *name, const char *kind,
+ 				 const unsigned int link, struct blob_attr **tb, bool v6)
+ {
+@@ -1797,7 +1797,7 @@
+ 	nlmsg_free(nlm);
+ 	return ret;
+ }
+-#endif
++//#endif
+ 
+ static int __system_del_ip_tunnel(const char *name, struct blob_attr **tb)
+ {
+@@ -2040,7 +2040,9 @@
+ failure:
+ 		nlmsg_free(nlm);
+ 		return ret;
+-	} else if (!strcmp(str, "greip")) {
++#endif
++	}
++	else if (!strcmp(str, "greip")) {
+ 		return system_add_gre_tunnel(name, "gre", link, tb, false);
+ 	} else if (!strcmp(str, "gretapip"))  {
+ 		return system_add_gre_tunnel(name, "gretap", link, tb, false);
+@@ -2048,7 +2050,6 @@
+ 		return system_add_gre_tunnel(name, "ip6gre", link, tb, true);
+ 	} else if (!strcmp(str, "gretapip6")) {
+ 		return system_add_gre_tunnel(name, "ip6gretap", link, tb, true);
+-#endif
+ 	}
+ 	else
+ 		return -EINVAL;

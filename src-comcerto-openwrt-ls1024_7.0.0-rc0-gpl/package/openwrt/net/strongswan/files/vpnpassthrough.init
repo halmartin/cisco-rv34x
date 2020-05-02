@@ -1,0 +1,88 @@
+#!/bin/sh /etc/rc.common
+
+START=94
+
+. /lib/functions.sh
+
+ru_check=`uci get systeminfo.sysinfo.region 2> /dev/null`
+
+start() {
+	reload
+}
+
+stop() {
+	reload
+}
+
+config_passthrough() {
+	local cfg="$1"
+	local ipsecPT pptpPT l2tpPT LogBuff
+
+	config_get_bool ipsecPT "$cfg" ipsec_passthrough 0
+	config_get_bool pptpPT "$cfg" pptp_passthrough 0
+	config_get_bool l2tpPT "$cfg" l2tp_passthrough 0
+
+        iptables -w -F vpn_passthrough -t filter #Flush all rules
+	
+	if [ $ipsecPT -eq 1 ]
+	then    # Pass-through rule that needs to be pushed.
+	#IPSec Pass-through: Need to bypass ESP, AH, ISAKMP (UDP/500), NAT-T (UDP/4500) protocols using any to any selectors.
+		LogBuff="$LogBuff IPSEC-Passthrough: Enabled"
+		iptables -w -A vpn_passthrough -t filter -p esp -j ACCEPT
+		iptables -w -A vpn_passthrough -t filter -p ah -j ACCEPT
+		iptables -w -A vpn_passthrough -t filter -p udp --dport 500 -j ACCEPT
+		iptables -w -A vpn_passthrough -t filter -p udp --dport 4500 -j ACCEPT
+	else
+		LogBuff="$LogBuff IPSEC-Passthrough: Disabled"
+		iptables -w -A vpn_passthrough -t filter -p esp -j DROP
+		iptables -w -A vpn_passthrough -t filter -p ah -j  DROP
+		iptables -w -A vpn_passthrough -t filter -p udp --dport 500 -j DROP
+		iptables -w -A vpn_passthrough -t filter -p udp --dport 4500 -j DROP
+
+		#clearing existing connections
+		conntrack -D -p udp --dport 500  >/dev/null 2>/dev/null
+		conntrack -D -p udp --dport 4500 >/dev/null 2>/dev/null
+		conntrack -D -p esp >/dev/null 2>/dev/null
+		conntrack -D -p ah >/dev/null 2>/dev/null
+	fi
+	
+	if [ $pptpPT -eq 1 ]
+	then    # Pass-through rule that needs to be pushed. 
+	#PPTP Pass-through: Need to bypass PPTP (TCP/1723) and GRE protocols using any to any selectors.
+		LogBuff="$LogBuff PPTP-Passthrough: Enabled"
+		iptables -w -A vpn_passthrough -t filter -p tcp --dport 1723 -j ACCEPT
+		iptables -w -A vpn_passthrough -t filter -p 47 -j ACCEPT
+	else
+		LogBuff="$LogBuff PPTP-Passthrough: Disabled"
+		iptables -w -A vpn_passthrough -t filter -p tcp --dport 1723 -j DROP
+		iptables -w -A vpn_passthrough -t filter -p 47 -j DROP
+	fi
+	
+	if [ $l2tpPT -eq 1 ]
+	then    # Pass-through rule that needs to be pushed.
+	#L2TP Pass-through: Need to bypass L2TP (UDP/1701) protocol using any to any selectors.
+		LogBuff="$LogBuff L2TP-Passthrough: Enabled"
+		iptables -w -A vpn_passthrough -t filter -p udp --dport 1701 -j ACCEPT
+	else
+		LogBuff="$LogBuff L2TP-Passthrough: Disabled"
+		iptables -w -A vpn_passthrough -t filter -p udp --dport 1701 -j DROP
+
+		#clearing existing connections
+		conntrack -D -p udp --dport 1701 >/dev/null 2>/dev/null
+	fi
+
+	logger -t VPN-passthrough "$LogBuff"
+}
+
+reload() {
+	if [ "$ru_check" = "RU" ]; then
+		exit 0
+	fi
+
+	config_load vpnpassthrough 
+        config_foreach config_passthrough passthrough
+}
+
+restart() {
+	reload
+}

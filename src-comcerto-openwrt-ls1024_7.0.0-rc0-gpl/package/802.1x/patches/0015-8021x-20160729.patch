@@ -1,0 +1,100 @@
+diff -ruaN a/src/source/eapol_sm.c b/src/source/eapol_sm.c
+--- a/src/source/eapol_sm.c	2016-07-29 12:12:07.042186877 +0530
++++ b/src/source/eapol_sm.c	2016-07-29 12:18:39.278186831 +0530
+@@ -626,9 +626,15 @@
+ 	{
+ 		fgets(status,2,fp);
+ 		if (strncmp(status,"1",1)==0)
++		{
++			pclose(fp);
+ 			return 1;
++		}
+ 		else if (strncmp(status,"0",1)==0)
++		{
++			pclose(fp);
+ 			return 0;
++		}
+ 	}
+ 	else
+ 		return -1;
+@@ -653,9 +659,15 @@
+ 		DBGPRINT("\n\t port control: %s ",status);
+ 
+ 		if (strncmp(status,"2",1)==0)
++		{
++			pclose(fp);
+ 			return 2;
++		}
+ 		else if (strncmp(status,"1",1)==0)
++		{
++			pclose(fp);
+ 			return 1;
++		}
+ 	}
+ 	else
+ 		return -1;
+diff -ruaN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-07-29 12:11:45.914186880 +0530
++++ b/src/source/ieee802_1x.c	2016-07-29 12:19:00.282186828 +0530
+@@ -363,7 +363,7 @@
+ {
+ 	struct eap_hdr eap;
+ 
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X
+ 	/* Don't send success or failure to group mac address */
+ 	u8	GroupMac[6] = {0x01, 0x80, 0xc2, 0x00, 0x00, 0x03};
+ 	if (memcmp(sta->addr, GroupMac, 6) == 0)
+diff -ruaN a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2016-07-29 12:11:55.686186879 +0530
++++ b/src/source/rtdot1x.c	2016-07-29 12:18:50.126186829 +0530
+@@ -728,6 +728,41 @@
+ 	}
+ }
+ 
++static void Handle_usr2(int sig, void *eloop_ctx, void *signal_ctx)
++{
++	u16 portid;
++	uint16_t portControl;	
++        struct sta_info *s;
++	rtapd *apd;
++
++	DBGPRINT(RT_DEBUG_TRACE,"Handle_usr2: Entry\n");
++	apd = (rtapd *)signal_ctx;
++	if(apd == NULL)
++	{
++        	DBGPRINT(RT_DEBUG_ERROR,"Handle_usr2: rtapd is NULL\n");
++		return;
++	}
++
++	for(portid = 1; portid <= 4; portid++)
++	{
++		portControl = rv_get_portControl(portid);
++		if((portControl >= 0 ) && (portControl <= 2))
++		{		 
++			s = apd->sta_list;
++			while (s)
++			{
++				if ((s->aid == portid) && (s->eapol_sm) && (s->eapol_sm->portControl != portControl))
++				{
++					DBGPRINT(RT_DEBUG_TRACE,"Handle_usr2: sm->portControl %d, portControl %d\n",s->eapol_sm->portControl ,portControl);
++					s->eapol_sm->portControl = portControl;
++				}
++				s = s->next;
++			}
++		}
++	}
++	return;
++}
++
+ #ifdef CONFIG_NK_802_1X
+ static void nk_Handle_usr1(int sig, void *eloop_ctx, void *signal_ctx)
+ {
+@@ -1038,6 +1073,7 @@
+         if (Apd_setup_interface(interfaces.rtapd[0]))
+             goto out;
+         
++        eloop_register_signal(SIGUSR2, Handle_usr2, interfaces.rtapd[0]);
+ #ifdef CONFIG_RV34X_8021X 
+ 		while (waiting > 0)
+ 		{

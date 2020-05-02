@@ -1,0 +1,25 @@
+#!/bin/sh
+
+PPP_IPPARAM=$1
+proto=$(uci get network.$PPP_IPPARAM.proto)
+IFNAME=$proto-$1
+if [ "$proto" = "pppoe" ]; then
+	IFNAME=ppoe-$1
+fi
+demand=$(uci get network.$PPP_IPPARAM.demand 2>/dev/null)
+ipv6=$(uci get network.$PPP_IPPARAM.ipv6)
+if [[ "$demand" != "" && "$ipv6" != "1" ]]; then
+	counter=0
+	while [ -z "$(ip -4 route list dev $IFNAME | grep "10.112.112.")" -a "$counter" -lt 60 ]; do
+		sleep 1
+		let counter++
+	done
+	route=$(ip route show | grep -w $IFNAME | grep default)
+	[ "$route" = "" ] && {
+		metric=`uci get network.$PPP_IPPARAM.metric`
+		[ "$metric" == "" ] && { metric=0; }
+		gateway=$(ifconfig $IFNAME | grep P-t-P | xargs | cut -f 3 -d ' '| cut -f 2 -d ':' )
+		route add default gw $gateway dev $IFNAME metric $metric
+	}
+	ACTION=ifup INTERFACE=$PPP_IPPARAM DEVICE=$IFNAME /sbin/hotplug-call iface
+fi

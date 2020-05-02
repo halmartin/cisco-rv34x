@@ -1,0 +1,91 @@
+From 219b7ac46c7e441a9e6eec0ece22932211a33ca3 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy K <ganeshreddy@freescale.com>
+Date: Thu, 4 Feb 2016 01:53:14 +0530
+Subject: [PATCH 33/60] SBR-705 CMD_CHKRESET and GPIO config options tune-up
+ and corrections
+
+Signed-off-by: Ganesh Reddy K <ganeshreddy@freescale.com>
+---
+ arch/arm/configs/comcerto-2k_rv340_diags_defconfig        | 8 ++++----
+ arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig | 2 ++
+ arch/arm/configs/comcerto-2k_rv340_uloader_defconfig      | 1 +
+ arch/arm/mach-comcerto/Kconfig                            | 2 +-
+ 4 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+index 59c1d3d..8795caf 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+@@ -53,7 +53,7 @@ CONFIG_COMCERTO_DIAG=y
+ CONFIG_COMCERTO_NAND=y
+ CONFIG_COMCERTO_SERDES=y
+ CONFIG_COMCERTO_I2C=y
+-CONFIG_COMCERTO_GPIO=y
++# CONFIG_COMCERTO_GPIO is not set
+ CONFIG_COMCERTO_SATA=y
+ CONFIG_COMCERTO_SECUREBOOT=y
+ # CONFIG_SECUREBOOT_TEST is not set
+@@ -142,7 +142,7 @@ CONFIG_HAS_KALLSYMS=y
+ CONFIG_HAS_MODULES=y
+ CONFIG_CMD_MEMORY=y
+ CONFIG_ENV_HANDLING=y
+-CONFIG_GENERIC_GPIO=y
++# CONFIG_GENERIC_GPIO is not set
+ 
+ #
+ # General Settings              
+@@ -291,11 +291,11 @@ CONFIG_CMD_TEST=y
+ CONFIG_CMD_VERSION=y
+ CONFIG_CMD_HELP=y
+ CONFIG_CMD_DEVINFO=y
+-CONFIG_CMD_GPIO=y
++# CONFIG_CMD_GPIO is not set
+ CONFIG_CMD_UNLZO=y
+ CONFIG_CMD_I2C=y
+ CONFIG_CMD_USB=y
+-CONFIG_CMD_CHKRESET=y
++# CONFIG_CMD_CHKRESET is not set
+ 
+ #
+ # c2000			
+diff --git a/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig b/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig
+index bf2c824..d319e2e 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig
+@@ -147,6 +147,8 @@ CONFIG_CONSOLE_ACTIVATE_FIRST=y
+ # CONFIG_DEFAULT_ENVIRONMENT is not set
+ # CONFIG_POLLER is not set
+ 
++# CONFIG_CMD_CHKRESET is not set
++
+ #
+ # Debugging                     
+ #
+diff --git a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+index f4e1ac8..c4f7556 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+@@ -232,6 +232,7 @@ CONFIG_CMD_BOOTB=y
+ # CONFIG_CMD_DEVINFO is not set
+ # CONFIG_CMD_UNLZO is not set
+ # CONFIG_CMD_CHKRESET is not set
++# CONFIG_CMD_GPIO is not set
+ 
+ #
+ # c2000			
+diff --git a/arch/arm/mach-comcerto/Kconfig b/arch/arm/mach-comcerto/Kconfig
+index 3430073..fce535b 100644
+--- a/arch/arm/mach-comcerto/Kconfig
++++ b/arch/arm/mach-comcerto/Kconfig
+@@ -38,7 +38,7 @@ config  MACH_COMCERTO_C2K_MFCNEVM
+ 
+ config  MACH_COMCERTO_C2K_RV340
+ 	bool "RV340"
+-  select GENERIC_GPIO
++	select GENERIC_GPIO
+ 	help
+ 
+ config  MACH_COMCERTO_C2K_ASIC
+-- 
+2.7.4
+

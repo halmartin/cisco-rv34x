@@ -1,0 +1,159 @@
+#!/bin/sh /etc/rc.common
+
+#/usr/lib/webif/functions.sh
+#/lib/config/uci.sh
+
+START=11
+POSTUPGRADE_SCRIPT="/usr/bin/postupgrade.sh"
+
+gpio_init() {
+
+  # Setup Input GPIOs
+  GPIO04=4 GPIO14=14
+  SYSTEM_RESET=$GPIO04 WIFI_ON_OFF=$GPIO14
+
+  for i in $WIFI_ON_OFF
+  do
+    [ ! -d "/sys/class/gpio/gpio${i}" ] && echo ${i} >/sys/class/gpio/export; echo in >/sys/class/gpio/gpio${i}/direction;
+  done
+
+  # Setup Ouput GPIOs
+  LED_OFF=1
+  GPIO44=44 GPIO50=50 GPIO51=51 GPIO52=52 GPIO53=53 GPIO54=54 GPIO55=55 GPIO56=56 GPIO57=57 GPIO58=58 GPIO59=59
+  WLAN5G_LED_GREEN=$GPIO44 DIAG_LED_RED=$GPIO50 WLAN2_4G_LED_GREEN=$GPIO51 POWER_LED_GREEN=$GPIO52
+  USB2_LED_AMBER=$GPIO53 USB2_LED_GREEN=$GPIO54
+  USB1_LED_AMBER=$GPIO55 USB1_LED_GREEN=$GPIO56
+  DMZ_LED_GREEN=$GPIO57
+  VPN_LED_AMBER=$GPIO58 VPN_LED_GREEN=$GPIO59
+
+  for i in $WLAN5G_LED_GREEN $DIAG_LED_RED $WLAN2_4G_LED_GREEN $POWER_LED_GREEN $USB2_LED_AMBER $USB2_LED_GREEN $USB1_LED_AMBER $USB1_LED_GREEN $DMZ_LED_GREEN $VPN_LED_AMBER $VPN_LED_GREEN
+  do
+    [ ! -d "/sys/class/gpio/gpio${i}" ] && echo ${i} >/sys/class/gpio/export; echo out >/sys/class/gpio/gpio${i}/direction; echo $LED_OFF >/sys/class/gpio/gpio${i}/value;
+  done
+}
+
+start() {
+  # Cannot use below method as PP uses leds-gpio driver
+  # Need to be updated as per PP method
+  # gpio_init
+  boardutil
+
+  # Create required directories at bootup time
+  mkdir -p /tmp/configuration
+  mkdir -p /tmp/language-pack
+  mkdir -p /tmp/3g-4g-driver
+  mkdir -p /tmp/signature
+  mkdir -p /tmp/firmware
+
+  # Set barebox_version
+  grep -o 'bareboxver_rv16x_26x=[^,]*' /proc/cmdline | awk -F'[=]' '{print $2}' | cut -d ' ' -f 1  > /mnt/configcert/barebox_version
+  if [ -f /mnt/configcert/barebox_version ]; then
+      uci set firmware.firminfo.barebox_version="`cat /mnt/configcert/barebox_version`"
+  fi
+
+  CURRENT_ROOTFS=`cat /proc/cmdline | awk -vRS=" " -vORS="\n" '1' | grep ubi.mtd`
+  MD5SUM_PART_IMAGE1=20
+  MD5SUM_PART_IMAGE2=21
+  if [ -f /mnt/configcert/image1/md5sum_fw-rv16x_26x-img ]; then
+      MD5SUM_LEN=`wc -c /mnt/configcert/image1/md5sum_fw-rv16x_26x-img | awk '{print $1}'`
+      FIRM_VERSION_LEN=`wc -c /mnt/configcert/image1/firmware_version | awk '{print $1}'`
+      if [ $MD5SUM_LEN -eq 0 ] || [ $FIRM_VERSION_LEN -eq 0 ]; then
+              dd if=/dev/mtd$MD5SUM_PART_IMAGE1 of=/tmp/img_default_info bs=60 count=1 > /dev/null 2>&1
+      	md5=`cat /tmp/img_default_info | head -n1 | cut -d , -f 1`
+      	ver=`cat /tmp/img_default_info | head -n1 | cut -d , -f 2`
+	echo "$md5" > /mnt/configcert/image1/md5sum_fw-rv16x_26x-img
+      	echo "$ver" > /mnt/configcert/image1/firmware_version
+      	rm -rf /tmp/img_default_info
+      fi
+  fi
+
+  if [ -f /mnt/configcert/image2/md5sum_fw-rv16x_26x-img ]; then
+      MD5SUM_LEN=`wc -c /mnt/configcert/image2/md5sum_fw-rv16x_26x-img | awk '{print $1}'`
+      FIRM_VERSION_LEN=`wc -c /mnt/configcert/image2/firmware_version | awk '{print $1}'`
+      if [ $MD5SUM_LEN -eq 0 ] || [ $FIRM_VERSION_LEN -eq 0 ]; then
+      	dd if=/dev/mtd$MD5SUM_PART_IMAGE2 of=/tmp/img_default_info bs=60 count=1 > /dev/null 2>&1
+      	md5=`cat /tmp/img_default_info | head -n1 | cut -d , -f 1`
+      	ver=`cat /tmp/img_default_info | head -n1 | cut -d , -f 2`
+	echo "$md5" > /mnt/configcert/image2/md5sum_fw-rv16x_26x-img
+      	echo "$ver" > /mnt/configcert/image2/firmware_version
+      	rm -rf /tmp/img_default_info
+      fi
+  fi
+
+  # Setup Active / Inactive Images
+  if [ x$CURRENT_ROOTFS = xubi.mtd=4 ]; then
+    cp /etc/firmware_version /mnt/configcert/image1/
+    
+    echo "1" > /tmp/active
+    uci set firmware.firminfo.active="image1"
+    if [ -f /mnt/configcert/image1/firmware_version ]; then
+      uci set firmware.firminfo.version="`cat /mnt/configcert/image1/firmware_version`"
+    fi
+    if [ -f /mnt/configcert/image1/md5sum_fw-rv16x_26x-img ]; then
+      uci set firmware.firminfo.md5sum="`cat /mnt/configcert/image1/md5sum_fw-rv16x_26x-img`"
+    fi
+    uci set firmware.firminfo.inactive="image2"
+    if [ -f /mnt/configcert/image2/firmware_version ]; then
+      uci set firmware.firminfo.inactive_version="`cat /mnt/configcert/image2/firmware_version`"
+    fi
+    if [ -f /mnt/configcert/image2/md5sum_fw-rv16x_26x-img ]; then
+      uci set firmware.firminfo.inactive_md5sum="`cat /mnt/configcert/image2/md5sum_fw-rv16x_26x-img`"
+    fi
+  elif [ x$CURRENT_ROOTFS = xubi.mtd=7 ]; then
+    cp /etc/firmware_version /mnt/configcert/image2/
+
+    echo "2" > /tmp/active
+    uci set firmware.firminfo.active="image2"
+    if [ -f /mnt/configcert/image2/firmware_version ]; then
+      uci set firmware.firminfo.version="`cat /mnt/configcert/image2/firmware_version`"
+    fi
+    if [ -f /mnt/configcert/image2/md5sum_fw-rv16x_26x-img ]; then
+      uci set firmware.firminfo.md5sum="`cat /mnt/configcert/image2/md5sum_fw-rv16x_26x-img`"
+    fi
+    uci set firmware.firminfo.inactive="image1"
+    if [ -f /mnt/configcert/image1/firmware_version ]; then
+      uci set firmware.firminfo.inactive_version="`cat /mnt/configcert/image1/firmware_version`"
+    fi
+    if [ -f /mnt/configcert/image1/md5sum_fw-rv16x_26x-img ]; then
+      uci set firmware.firminfo.inactive_md5sum="`cat /mnt/configcert/image1/md5sum_fw-rv16x_26x-img`"
+    fi
+  else
+    logger -t system -p local0.error "Error Incorrect Rootfs partition!"
+    echo "Error Incorrect Rootfs partition!"
+    exit 1
+  fi
+  uci commit firmware
+
+  ACTIVE_IMAGE="`uci get firmware.firminfo.active`" >/dev/null 2>&1
+  ACTIVE_VERSION="`uci get firmware.firminfo.version`" >/dev/null 2>&1
+  ACTIVE_MD5SUM="`uci get firmware.firminfo.md5sum`" >/dev/null 2>&1
+  INACTIVE_IMAGE="`uci get firmware.firminfo.inactive`" >/dev/null 2>&1
+  INACTIVE_VERSION="`uci get firmware.firminfo.inactive_version`" >/dev/null 2>&1
+  INACTIVE_MD5SUM="`uci get firmware.firminfo.inactive_md5sum`" >/dev/null 2>&1
+
+  echo "Active;$ACTIVE_IMAGE;$ACTIVE_VERSION;$ACTIVE_MD5SUM" > /tmp/image_stats
+  echo "Inactive;$INACTIVE_IMAGE;$INACTIVE_VERSION;$INACTIVE_MD5SUM" >> /tmp/image_stats
+
+  #set barebox version to uci                                  
+    line=`cat /proc/cmdline`                                    
+    barebox=                                                    
+    temp=                                                       
+    count=0                     
+    for word in $line;do
+        temp=`echo $word | grep "bareboxver"`
+        [ -n "$temp" ] && count=1
+        if [ "$count" = 1 ];then                           
+            barebox=${barebox}" "${word}
+            match=`echo $word | grep ".*)$"`
+            if [ -n "$match" ];then
+                break;
+            fi
+        fi
+    done
+    barebox=`echo $barebox | sed -e "s/^ *//g" | cut -d = -f 2-`
+    `uci set firmware.firminfo.bareboxver="$barebox"`
+    `uci commit firmware`
+
+    # Call the POSTUPGRADE_SCRIPT
+    $POSTUPGRADE_SCRIPT
+}

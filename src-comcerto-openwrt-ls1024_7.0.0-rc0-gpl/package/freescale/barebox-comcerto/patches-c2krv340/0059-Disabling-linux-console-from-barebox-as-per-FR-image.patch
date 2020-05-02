@@ -1,0 +1,24 @@
+From 13f1bafed6e4f98ec6947befdc13347d95ddb504 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy <ganesh.reddy@nxp.com>
+Date: Mon, 1 Oct 2018 15:52:48 +0530
+Subject: [PATCH] Disabling linux console from barebox as per FR image
+ preparation
+
+Signed-off-by: Ganesh Reddy <ganesh.reddy@nxp.com>
+---
+ arch/arm/boards/comcerto-rv340/env/config | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index 505cac8..81df8d5 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -71,4 +71,4 @@ loglevel=4
+ 
+ pci_data="pcie0_gen1_only=yes pcie1_gen1_only=no  pcie_external_clk=yes"
+ 
+-bootargs="console=ttyS0,115200n8, loglevel=$loglevel, panic=10"
++bootargs="loglevel=$loglevel, panic=10"
+-- 
+1.9.1
+

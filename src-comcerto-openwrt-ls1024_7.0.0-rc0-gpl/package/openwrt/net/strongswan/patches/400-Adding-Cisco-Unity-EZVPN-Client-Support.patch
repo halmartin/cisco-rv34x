@@ -1,0 +1,885 @@
+From 51d729eb25bc445901ead9a0fb99d42f3f8947be Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Date: Wed, 8 Feb 2017 08:43:54 -0600
+Subject: [PATCH] Adding Cisco Unity (EZVPN) Client Support
+
+Corrected attribute handler code to act only on ikev1 connections
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ configure.ac                                |   5 +
+ src/libcharon/Makefile.am                   |   7 +
+ src/libcharon/plugins/ezvpn/Makefile.am     |  19 +
+ src/libcharon/plugins/ezvpn/ezvpn_handler.c | 565 ++++++++++++++++++++++++++++
+ src/libcharon/plugins/ezvpn/ezvpn_handler.h |  47 +++
+ src/libcharon/plugins/ezvpn/ezvpn_plugin.c  | 105 ++++++
+ src/libcharon/plugins/ezvpn/ezvpn_plugin.h  |  37 ++
+ 7 files changed, 785 insertions(+)
+ create mode 100644 src/libcharon/plugins/ezvpn/Makefile.am
+ create mode 100644 src/libcharon/plugins/ezvpn/ezvpn_handler.c
+ create mode 100644 src/libcharon/plugins/ezvpn/ezvpn_handler.h
+ create mode 100644 src/libcharon/plugins/ezvpn/ezvpn_plugin.c
+ create mode 100644 src/libcharon/plugins/ezvpn/ezvpn_plugin.h
+
+diff --git a/configure.ac b/configure.ac
+index 622c79a..c92d68d 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -231,6 +231,7 @@ ARG_ENABL_SET([osx-attr],       [enable OS X SystemConfiguration attribute handl
+ ARG_ENABL_SET([p-cscf],         [enable plugin to request P-CSCF server addresses from an ePDG.])
+ ARG_DISBL_SET([resolve],        [disable resolve DNS handler plugin.])
+ ARG_ENABL_SET([unity],          [enables Cisco Unity extension plugin.])
++ARG_ENABL_SET([ezvpn],          [enables Cisco Unity Client extension plugin.])
+ # TNC modules/plugins
+ ARG_ENABL_SET([imc-test],       [enable IMC test module.])
+ ARG_ENABL_SET([imv-test],       [enable IMV test module.])
+@@ -1385,6 +1386,7 @@ ADD_PLUGIN([kernel-pfkey],         [c charon starter nm cmd])
+ ADD_PLUGIN([kernel-pfroute],       [c charon starter nm cmd])
+ ADD_PLUGIN([kernel-netlink],       [c charon starter nm cmd])
+ ADD_PLUGIN([resolve],              [c charon cmd])
++ADD_PLUGIN([ezvpn],                [c charon cmd])
+ ADD_PLUGIN([socket-default],       [c charon nm cmd])
+ ADD_PLUGIN([socket-dynamic],       [c charon cmd])
+ ADD_PLUGIN([socket-win],           [c charon])
+@@ -1614,6 +1616,8 @@ AM_CONDITIONAL(USE_FARP, test x$farp = xtrue)
+ AM_CONDITIONAL(USE_ADDRBLOCK, test x$addrblock = xtrue)
+ AM_CONDITIONAL(USE_UNITY, test x$unity = xtrue)
+ AM_CONDITIONAL(USE_RESOLVE, test x$resolve = xtrue)
++AM_CONDITIONAL(USE_EZVPN, test x$ezvpn = xtrue)
++
+ AM_CONDITIONAL(USE_ATTR, test x$attr = xtrue)
+ AM_CONDITIONAL(USE_ATTR_SQL, test x$attr_sql = xtrue)
+ 
+@@ -1897,6 +1901,7 @@ AC_CONFIG_FILES([
+ 	src/libcharon/plugins/dhcp/Makefile
+ 	src/libcharon/plugins/load_tester/Makefile
+ 	src/libcharon/plugins/resolve/Makefile
++	src/libcharon/plugins/ezvpn/Makefile
+ 	src/libcharon/plugins/attr/Makefile
+ 	src/libcharon/plugins/attr_sql/Makefile
+ 	src/libcharon/tests/Makefile
+diff --git a/src/libcharon/Makefile.am b/src/libcharon/Makefile.am
+index e530205..6b1b40e 100644
+--- a/src/libcharon/Makefile.am
++++ b/src/libcharon/Makefile.am
+@@ -681,6 +681,13 @@ if MONOLITHIC
+ endif
+ endif
+ 
++if USE_EZVPN
++  SUBDIRS += plugins/ezvpn
++if MONOLITHIC
++  libcharon_la_LIBADD += plugins/ezvpn/libstrongswan-ezvpn.la
++endif
++endif
++
+ if USE_ATTR
+   SUBDIRS += plugins/attr
+ if MONOLITHIC
+diff --git a/src/libcharon/plugins/ezvpn/Makefile.am b/src/libcharon/plugins/ezvpn/Makefile.am
+new file mode 100644
+index 0000000..85cd2de
+--- /dev/null
++++ b/src/libcharon/plugins/ezvpn/Makefile.am
+@@ -0,0 +1,19 @@
++AM_CPPFLAGS = \
++	-I$(top_srcdir)/src/libstrongswan \
++	-I$(top_srcdir)/src/libcharon \
++	-DEZVPN_CONF=\"${ezvpn_conf}\"
++
++AM_CFLAGS = \
++	$(PLUGIN_CFLAGS)
++
++if MONOLITHIC
++noinst_LTLIBRARIES = libstrongswan-ezvpn.la
++else
++plugin_LTLIBRARIES = libstrongswan-ezvpn.la
++endif
++
++libstrongswan_ezvpn_la_SOURCES = \
++	ezvpn_plugin.h ezvpn_plugin.c \
++	ezvpn_handler.h ezvpn_handler.c
++
++libstrongswan_ezvpn_la_LDFLAGS = -module -avoid-version
+diff --git a/src/libcharon/plugins/ezvpn/ezvpn_handler.c b/src/libcharon/plugins/ezvpn/ezvpn_handler.c
+new file mode 100644
+index 0000000..891de22
+--- /dev/null
++++ b/src/libcharon/plugins/ezvpn/ezvpn_handler.c
+@@ -0,0 +1,565 @@
++/*
++ * Copyright (C) 2013 Tobias Brunner
++ * Hochschule fuer Technik Rapperswil
++ *
++ * Copyright (C) 2017 Sridhar Pothuganti <sridhar.pothuganti@nxp.com> 
++ * 	Adding the Cisco unity (cisco ezvpn) client suppport
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++#include "ezvpn_handler.h"
++
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <unistd.h>
++#include <utils/debug.h>
++
++#include <daemon.h>
++#include <utils/process.h>
++#include <collections/array.h>
++#include <threading/mutex.h>
++
++#define BACKUP_SERVER_FILE "/etc/cisco_ezvpn_attr"
++#define DEF_DOMAIN_FILE "/etc/cisco_ezvpn_attr"
++#define SPLIT_DNS_FILE "/etc/cisco_ezvpn_attr"
++#define NBNS_FILE "/etc/cisco_ezvpn_attr"
++
++
++typedef struct private_ezvpn_handler_t private_ezvpn_handler_t;
++
++/**
++ * Private data of an ezvpn__handler_t object.
++ */
++struct private_ezvpn_handler_t {
++
++	/**
++	 * Public ezvpn_handler_t interface.
++	 */
++    ezvpn_handler_t public;
++
++	/**
++	 * ezvpn.conf file to use
++	 */
++    char *file;
++	/**
++	 * Mutex to access file exclusively
++	 */
++    mutex_t *mutex;
++};
++
++
++/* this function writes  backupserver attribute to a file  */
++static bool add_backup(private_ezvpn_handler_t * this,
++			identification_t * server, chunk_t data)
++{
++    FILE *in, *out;
++    char buf[1024];
++    size_t len;
++    bool handled = FALSE;
++
++    char backup_servers[256];
++
++    strncpy(backup_servers, data.ptr, data.len);
++    backup_servers[data.len] = '\0';
++
++    in = fopen(this->file, "r");
++    /* allows us to stream from in to out */
++    unlink(this->file);
++    out = fopen(this->file, "w");
++
++    if (out) {
++	fprintf(out, "backupserver %s\n", backup_servers);
++	DBG1(DBG_IKE, "installing backup server %s to %s", backup_servers,
++	     this->file);
++	handled = TRUE;
++
++	/* copy rest of the file */
++	if (in) {
++	    while ((len = fread(buf, 1, sizeof(buf), in))) {
++		ignore_result(fwrite(buf, 1, len, out));
++	    }
++	}
++	fclose(out);
++    }
++    if (in) {
++	fclose(in);
++    }
++    return handled;
++}
++
++/* this function removes  backupserver attribute from the  file when connection is down  */
++
++
++static bool remove_backup(private_ezvpn_handler_t * this,
++			identification_t * server, chunk_t data)
++{
++
++    FILE *in, *out;
++    char line[1024], matcher[512];
++    char backup_servers[256];
++
++    strncpy(backup_servers, data.ptr, data.len);
++    backup_servers[data.len] = '\0';
++
++    in = fopen(this->file, "r");
++    if (in) {
++	/* allows us to stream from in to out */
++	unlink(this->file);
++	out = fopen(this->file, "w");
++	if (out) {
++	    snprintf(matcher, sizeof(matcher), "backupserver %s\n", backup_servers);
++	    /* copy all, but matching line */
++	    while (fgets(line, sizeof(line), in)) {
++		if (strpfx(line, matcher)) {
++		    DBG1(DBG_IKE, "removing backup server %s from %s",
++			 backup_servers, this->file);
++		} else {
++		    fputs(line, out);
++		}
++	    }
++	    fclose(out);
++	}
++	fclose(in);
++    }
++
++}
++
++/* this function writes nbns attribute to a file  */
++
++
++static bool add_nbns(private_ezvpn_handler_t * this,
++		     identification_t * server, host_t * addr)
++{
++    FILE *in, *out;
++    char buf[1024];
++    size_t len;
++    bool handled = FALSE;
++
++    in = fopen(this->file, "r");
++    /* allows us to stream from in to out */
++    unlink(this->file);
++    out = fopen(this->file, "w");
++
++    if (out) {
++	fprintf(out, "NBNS %H\n", addr);
++	DBG1(DBG_IKE, "installing NBNS %H to %s", addr, this->file);
++	handled = TRUE;
++
++	/* copy rest of the file */
++	if (in) {
++	    while ((len = fread(buf, 1, sizeof(buf), in))) {
++		ignore_result(fwrite(buf, 1, len, out));
++	    }
++	}
++	fclose(out);
++    }
++    if (in) {
++	fclose(in);
++    }
++    return handled;
++}
++
++/* this function removes  nbns attribute from the file when connection is down  */
++
++
++static bool remove_nbns(private_ezvpn_handler_t * this,
++			identification_t * server, host_t * addr)
++{
++
++    FILE *in, *out;
++    char line[1024], matcher[512];
++
++    in = fopen(this->file, "r");
++    if (in) {
++	/* allows us to stream from in to out */
++	unlink(this->file);
++	out = fopen(this->file, "w");
++	if (out) {
++	    snprintf(matcher, sizeof(matcher), "NBNS %H\n", addr);
++
++	    /* copy all, but matching line */
++	    while (fgets(line, sizeof(line), in)) {
++		if (strpfx(line, matcher)) {
++		    DBG1(DBG_IKE, "removing NBNS %H from %s",
++			 addr, this->file);
++		} else {
++		    fputs(line, out);
++		}
++	    }
++	    fclose(out);
++	}
++	fclose(in);
++    }
++
++}
++
++/* this function writes default-domain attribute to a file  */
++
++
++static bool add_def_domain(private_ezvpn_handler_t * this,
++			   identification_t * server, chunk_t data)
++{
++
++    FILE *in, *out;
++    char buf[1024];
++    size_t len;
++    bool handled = FALSE;
++    char finaldata[256];
++
++    strncpy(finaldata, data.ptr, data.len);
++    finaldata[data.len] = '\0';
++    in = fopen(this->file, "r");
++    /* allows us to stream from in to out */
++    unlink(this->file);
++    out = fopen(this->file, "w");
++
++    if (out) {
++	fprintf(out, "search %s\n", finaldata);
++	DBG1(DBG_IKE, "installing default domain %s to file", finaldata);
++	handled = TRUE;
++
++	/* copy rest of the file */
++	if (in) {
++	    while ((len = fread(buf, 1, sizeof(buf), in))) {
++		ignore_result(fwrite(buf, 1, len, out));
++	    }
++	}
++	fclose(out);
++    }
++    if (in) {
++	fclose(in);
++    }
++    return handled;
++
++}
++
++/* this function removes default-domain attribute from the file when connection is down  */
++
++
++static bool remove_def_domain(private_ezvpn_handler_t * this,
++			      identification_t * server, chunk_t data)
++{
++
++    FILE *in, *out;
++    char line[1024], matcher[512];
++    char finaldata[256];
++
++    strncpy(finaldata, data.ptr, data.len);
++    finaldata[data.len] = '\0';
++    in = fopen(this->file, "r");
++
++    if (in) {
++
++	/* allows us to stream from in to out */
++	unlink(this->file);
++	out = fopen(this->file, "w");
++	if (out) {
++
++	    snprintf(matcher, sizeof(matcher), "search %s\n", finaldata);
++	    /* copy all, but matching line */
++	    while (fgets(line, sizeof(line), in)) {
++
++		if (strpfx(line, matcher)) {
++
++		    DBG1(DBG_IKE, "removing def_domain %s from %s",
++			 finaldata, this->file);
++		} else {
++
++		    fputs(line, out);
++		}
++	    }
++	    fclose(out);
++	}
++	fclose(in);
++    }
++
++
++}
++
++/* this function writes  split-dns  attribute to a file  */
++
++
++static bool add_splitdns(private_ezvpn_handler_t * this,
++			 identification_t * server, chunk_t data)
++{
++
++    FILE *in, *out;
++    char buf[1024];
++    size_t len;
++    bool handled = FALSE;
++    char finaldata[256];
++
++    strncpy(finaldata, data.ptr, data.len);
++    finaldata[data.len] = '\0';
++    in = fopen(this->file, "r");
++    /* allows us to stream from in to out */
++    unlink(this->file);
++    out = fopen(this->file, "w");
++
++    if (out) {
++	fprintf(out, "splitdns %s\n", finaldata);
++	DBG1(DBG_IKE, "installing splitdns %s to file", finaldata);
++	handled = TRUE;
++	/* copy rest of the file */
++	if (in) {
++	    while ((len = fread(buf, 1, sizeof(buf), in))) {
++		ignore_result(fwrite(buf, 1, len, out));
++	    }
++	}
++	fclose(out);
++    }
++    if (in) {
++	fclose(in);
++    }
++    return handled;
++
++}
++
++/* this function removes  split-dns attribute from the file when connection is down  */
++
++
++static bool remove_splitdns(private_ezvpn_handler_t * this,
++			    identification_t * server, chunk_t data)
++{
++
++    FILE *in, *out;
++    char line[1024], matcher[512];
++    char finaldata[256];
++
++    strncpy(finaldata, data.ptr, data.len);
++    finaldata[data.len] = '\0';
++    in = fopen(this->file, "r");
++
++    if (in) {
++	/* allows us to stream from in to out */
++	unlink(this->file);
++	out = fopen(this->file, "w");
++	if (out) {
++	    snprintf(matcher, sizeof(matcher), "splitdns %s\n", finaldata);
++	    /* copy all, but matching line */
++
++	    while (fgets(line, sizeof(line), in)) {
++
++		if (strpfx(line, matcher)) {
++
++		    DBG1(DBG_IKE, "removing splitdns %s from %s",
++			 finaldata, this->file);
++		} else {
++
++		    fputs(line, out);
++		}
++	    }
++	    fclose(out);
++	}
++	fclose(in);
++    }
++
++
++}
++
++/* Handles the matched attribute by writing them to a file   */
++
++METHOD(attribute_handler_t, handle, bool,
++       private_ezvpn_handler_t * this, identification_t * server,
++       configuration_attribute_type_t type, chunk_t data)
++{
++    host_t *addr;
++
++    DBG1(DBG_IKE, "ezvpn handle, type %d", type);
++    switch (type) {
++    case UNITY_BACKUP_SERVERS:
++	DBG1(DBG_IKE, "got UNITY_BACKUP_SERVERS attrib");
++	return add_backup(this, server, data);
++    case UNITY_DEF_DOMAIN:
++	DBG1(DBG_IKE, "got UNITY_DEF_DOMAIN attrib");
++	return add_def_domain(this, server, data);
++    case UNITY_SPLITDNS_NAME:
++	DBG1(DBG_IKE, "got UNITY_SPLITDNS_NAME attrib");
++	return add_splitdns(this, server, data);
++    case INTERNAL_IP4_NBNS:
++	addr = host_create_from_chunk(AF_INET, data, 0);
++	DBG1(DBG_IKE, "got INTERNAL_IP4_NBNS  attrib");
++	return add_nbns(this, server, addr);
++    default:
++	return FALSE;
++    }
++}
++
++/*  Removes the matched attribute from the file */
++
++METHOD(attribute_handler_t, release, void,
++       private_ezvpn_handler_t * this, identification_t * server,
++       configuration_attribute_type_t type, chunk_t data)
++{
++    host_t *addr;
++    //chunk_t data1;
++
++    DBG1(DBG_IKE, "ezvpn release");
++    switch (type) {
++    case UNITY_BACKUP_SERVERS:
++	DBG1(DBG_IKE, "remove UNITY_BACKUP_SERVERS  attrib");
++	remove_backup(this, server, data);
++	break;
++    case UNITY_DEF_DOMAIN:
++	DBG1(DBG_IKE, "remove UNITY_DEF_DOMAIN attrib");
++	remove_def_domain(this, server, data);
++	break;
++    case UNITY_SPLITDNS_NAME:
++	DBG1(DBG_IKE, "remove UNITY_SPLITDNS_NAME attrib");
++	remove_splitdns(this, server, data);
++	break;
++    case INTERNAL_IP4_NBNS:
++	DBG1(DBG_IKE, "INTERNAL_IP4_NBNS  attrib");
++	addr = host_create_from_chunk(AF_INET, data, 0);
++	remove_nbns(this, server, addr);
++	break;
++
++    default:
++	return;
++    }
++}
++
++/**
++ * Attribute enumerator implementation
++ */
++typedef struct {
++	/** implements enumerator_t interface */
++    enumerator_t public;
++	/** request BACKUP_SERVER? */
++    bool backupserver;
++	/** request Default domain? */
++    bool def_domain;
++	/** request split-dns? */
++    bool split_dns;
++	/** request nbns? */
++    bool nbns;
++	/** position of attribute **/
++    int i;
++} attribute_enumerator_t;
++
++static configuration_attribute_type_t attributesReq[] = {
++	UNITY_BACKUP_SERVERS,
++	UNITY_DEF_DOMAIN,
++	UNITY_SPLITDNS_NAME,
++	INTERNAL_IP4_NBNS,
++};
++
++static bool attribute_enumerate(attribute_enumerator_t * this,
++				configuration_attribute_type_t * type,
++				chunk_t * data)
++{
++    DBG1(DBG_IKE, "ezvpn  attribute_enumerator");
++	if (this->i < countof(attributesReq)){
++		*type = attributesReq[this->i++];
++		*data = chunk_empty;
++		return TRUE;
++	}
++#if 0
++    if (this->backupserver) {
++	*type = UNITY_BACKUP_SERVERS;
++	*data = chunk_empty;
++	this->def_domain = FALSE;
++	this->split_dns = FALSE;
++	this->nbns = FALSE;
++	return TRUE;
++    }
++
++    if (this->def_domain) {
++	*type = UNITY_DEF_DOMAIN;
++	*data = chunk_empty;
++	this->backupserver = FALSE;
++	this->split_dns = FALSE;
++	this->nbns = FALSE;
++	return TRUE;
++    }
++
++    if (this->split_dns) {
++	*type = UNITY_SPLITDNS_NAME;
++	*data = chunk_empty;
++	this->backupserver = FALSE;
++	this->def_domain = FALSE;
++	this->nbns = FALSE;
++	return TRUE;
++    }
++
++    if (this->nbns) {
++	*type = INTERNAL_IP4_NBNS;
++	*data = chunk_empty;
++	this->backupserver = FALSE;
++	this->def_domain = FALSE;
++	this->split_dns = FALSE;
++	return TRUE;
++    }
++#endif
++    return FALSE;
++}
++
++/* Attribute handler */
++
++METHOD(attribute_handler_t, create_attribute_enumerator, enumerator_t *,
++       private_ezvpn_handler_t * this, ike_sa_t *ike_sa,
++       linked_list_t * vips)
++{
++    attribute_enumerator_t *enumerator;
++    DBG1(DBG_IKE, "ezvpn  create_attribute_enumerator");
++
++    ike_sa = charon->bus->get_sa(charon->bus);
++    if (!ike_sa || ike_sa->get_version(ike_sa) != IKEV1)
++	return enumerator_create_empty();
++
++    INIT(enumerator,.public = {
++	 .enumerate = (void *) attribute_enumerate,
++	 .destroy = (void *) free,
++		},
++//              .v4 = has_host_family(vips, AF_INET),
++//              .v6 = has_host_family(vips, AF_INET6),
++	);
++    return &enumerator->public;
++}
++
++METHOD(ezvpn_handler_t, destroy, void, private_ezvpn_handler_t * this)
++{
++    this->mutex->destroy(this->mutex);
++    free(this);
++}
++
++/**
++ Create EZVPN handler
++ */
++ezvpn_handler_t *ezvpn_handler_create()
++{
++    private_ezvpn_handler_t *this;
++    struct stat st;
++
++    DBG1(DBG_IKE, "ezvpn ezvpn_handler_create");
++    INIT(this,
++	 .public = {
++		 .handler = {
++			 .handle = _handle,
++			 .release = _release,
++			 .create_attribute_enumerator = _create_attribute_enumerator,
++			},
++		.destroy = _destroy,
++		},
++	.mutex = mutex_create(MUTEX_TYPE_DEFAULT),
++	.file =
++	 lib->settings->get_str(lib->settings,
++				"%s.plugins.unity_backup_server.file",
++				BACKUP_SERVER_FILE, lib->ns),
++	);
++
++    DBG1(DBG_IKE, "ezvpn_handler_create: file name %s", this->file);
++    DBG1(DBG_IKE, "ezvpn_handler_create: file name %s", this->file);
++    DBG1(DBG_IKE, "ezvpn_handler_create: file name %s", this->file);
++    DBG1(DBG_IKE, "ezvpn_handler_create: file name %s", this->file);
++    return &this->public;
++}
+diff --git a/src/libcharon/plugins/ezvpn/ezvpn_handler.h b/src/libcharon/plugins/ezvpn/ezvpn_handler.h
+new file mode 100644
+index 0000000..6a20c37
+--- /dev/null
++++ b/src/libcharon/plugins/ezvpn/ezvpn_handler.h
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (C) 2013 Tobias Brunner
++ * Hochschule fuer Technik Rapperswil
++ *
++ * Copyright (C) 2017 Sridhar Pothuganti <sridhar.pothuganti@nxp.com> 
++ * 	Adding the Cisco unity (cisco ezvpn) client suppport
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++#ifndef EZVPN_HANDLER_H_
++#define EZVPN_HANDLER_H_
++
++#include <attributes/attribute_handler.h>
++
++typedef struct ezvpn_handler_t ezvpn_handler_t;
++
++/**
++ * Handle ezvpnserver configuration attributes by mangling a ezvpn.conf file.
++ */
++struct ezvpn_handler_t {
++
++	/**
++	 * Implements the attribute_handler_t interface
++	 */
++	attribute_handler_t handler;
++
++	/**
++	 * Destroy a ezvpn_handler_t.
++	 */
++	void (*destroy)(ezvpn_handler_t *this);
++};
++
++/**
++ * Create a ezvpn_handler instance.
++ */
++ezvpn_handler_t *ezvpn_handler_create();
++
++#endif /** EZVPN_HANDLER_H_ @}*/
+diff --git a/src/libcharon/plugins/ezvpn/ezvpn_plugin.c b/src/libcharon/plugins/ezvpn/ezvpn_plugin.c
+new file mode 100644
+index 0000000..023b5d7
+--- /dev/null
++++ b/src/libcharon/plugins/ezvpn/ezvpn_plugin.c
+@@ -0,0 +1,105 @@
++/*
++ * Copyright (C) 2013 Tobias Brunner
++ * Hochschule fuer Technik Rapperswil
++ *
++ * Copyright (C) 2017 Sridhar Pothuganti <sridhar.pothuganti@nxp.com> 
++ * 	Adding the Cisco unity (cisco ezvpn) client suppport
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++#include "ezvpn_plugin.h"
++#include "ezvpn_handler.h"
++
++#include <daemon.h>
++
++typedef struct private_ezvpn_plugin_t private_ezvpn_plugin_t;
++
++/**
++ * private data of ezvpn plugin
++ */
++struct private_ezvpn_plugin_t {
++
++	/**
++	 * implements plugin interface
++	 */
++	ezvpn_plugin_t public;
++
++	/**
++	 * The registered ezvpnserver attribute handler
++	 */
++	ezvpn_handler_t *handler;
++};
++
++METHOD(plugin_t, get_name, char*,
++	private_ezvpn_plugin_t *this)
++{
++	return "ezvpn";
++}
++
++/**
++ * Register handler
++ */
++static bool plugin_cb(private_ezvpn_plugin_t *this,
++					  plugin_feature_t *feature, bool reg, void *cb_data)
++{
++	if (reg)
++	{
++		charon->attributes->add_handler(charon->attributes,
++									   &this->handler->handler);
++	}
++	else
++	{
++		charon->attributes->remove_handler(charon->attributes,
++										  &this->handler->handler);
++	}
++	return TRUE;
++}
++
++METHOD(plugin_t, get_features, int,
++	private_ezvpn_plugin_t *this, plugin_feature_t *features[])
++{
++	static plugin_feature_t f[] = {
++		PLUGIN_CALLBACK((plugin_feature_callback_t)plugin_cb, NULL),
++			PLUGIN_PROVIDE(CUSTOM, "ezvpn"),
++	};
++	*features = f;
++	return countof(f);
++}
++
++METHOD(plugin_t, destroy, void,
++	private_ezvpn_plugin_t *this)
++{
++	this->handler->destroy(this->handler);
++	free(this);
++}
++
++/*
++ * see header file
++ */
++plugin_t *ezvpn_plugin_create()
++{
++	private_ezvpn_plugin_t *this;
++
++	INIT(this,
++		.public = {
++			.plugin = {
++				.get_name = _get_name,
++				.get_features = _get_features,
++				.destroy = _destroy,
++			},
++		},
++		.handler = ezvpn_handler_create(),
++	);
++
++	return &this->public.plugin;
++}
++
+diff --git a/src/libcharon/plugins/ezvpn/ezvpn_plugin.h b/src/libcharon/plugins/ezvpn/ezvpn_plugin.h
+new file mode 100644
+index 0000000..b3047f1
+--- /dev/null
++++ b/src/libcharon/plugins/ezvpn/ezvpn_plugin.h
+@@ -0,0 +1,37 @@
++/*
++ * Copyright (C) 2013 Tobias Brunner
++ * Hochschule fuer Technik Rapperswil
++ *
++ * Copyright (C) 2017 Sridhar Pothuganti <sridhar.pothuganti@nxp.com> 
++ * 	Adding the Cisco unity (cisco ezvpn) client suppport
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.  See <http://www.fsf.org/copyleft/gpl.txt>.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++#ifndef EZVPN_PLUGIN_H_
++#define EZVPN_PLUGIN_H_
++
++#include <plugins/plugin.h>
++
++typedef struct ezvpn_plugin_t ezvpn_plugin_t;
++
++/**
++ * Plugin that writes received ezvpnservers in a ezvpn.conf file.
++ */
++struct ezvpn_plugin_t {
++
++	/**
++	 * implements plugin interface
++	 */
++	plugin_t plugin;
++};
++
++#endif /** EZVPN_PLUGIN_H_ @}*/
+-- 
+1.9.1
+

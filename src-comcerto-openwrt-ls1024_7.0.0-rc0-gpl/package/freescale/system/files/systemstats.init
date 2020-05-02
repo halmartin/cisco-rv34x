@@ -1,0 +1,9 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+START=10
+start() {
+uci_set_state systemstats  system "" system_state
+}

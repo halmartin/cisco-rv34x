@@ -1,0 +1,66 @@
+#!/bin/sh
+
+LOG_DIR="/tmp/log"
+# input the TechReport file which was generated using exportReport.sh, since file name is 
+# appended with current time (hh+mm+ss) so better to input file name. 
+# Max 3 email addresses are supported and should be comma(,) seperated. EX:user@test.com,@user1@test.com,user3@test.com
+
+retval3=0
+retval2=0
+retval1=0
+TECH_REPORT_FILE="$1"
+email_address="$2"
+#TECH_REPORT_FILE=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "tech-report") {print $(I+1)};}'`
+#email_address=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "email-address") {print $(I+1)};}'`
+
+To1=`echo $email_address | awk -F ',' '{print $1}'`
+
+TECH_REPORT="$LOG_DIR/$TECH_REPORT_FILE"
+
+Subject="Diagnostics Report"
+
+To2=""
+To3=""
+To2=`echo $email_address | awk -F ',' '{print $2}'` >/dev/null 2>&1
+To3=`echo $email_address | awk -F ',' '{print $3}'` >/dev/null 2>&1
+
+if [ -n "$To3" ];then
+	mutt -a $TECH_REPORT -s "$Subject" -- $To3 &lt; >/dev/null 2>&1
+	retval3=$?
+	if [ "$retval3" = 0 ]; then
+		logger -t system -p local0.info "Technical report files are sent to mail $To3"
+	else
+		logger -t system -p local0.info "Failed to send technical report files to mail $To3"
+	fi
+fi
+
+if [ -n "$To2" ];then
+	mutt -a $TECH_REPORT -s "$Subject" -- $To2 &lt; >/dev/null 2>&1
+	retval2=$?
+	if [ "$retval2" = 0 ]; then
+		logger -t system -p local0.info "Technical report files are sent to mail $To2"
+	else
+		logger -t system -p local0.info "Failed to send technical report files to mail $To2"
+	fi
+fi
+
+if [ -n "$To1" ];then
+	mutt -a $TECH_REPORT -s "$Subject" -- $To1 &lt;>/dev/null 2>&1
+	retval1=$?
+	if [ "$retval1" = 0 ]; then
+		logger -t system -p local0.info "Technical report files are sent to mail $To1"
+	else
+		logger -t system -p local0.info "Failed to send technical report files to mail $To1"
+	fi
+fi
+
+rm -f $TECH_REPORT_FILE
+if [ "$retval3" -ne 0 ]; then
+	echo $retval3
+elif [ "$retval2" -ne 0 ]; then
+	echo $retval2
+elif [ "$retval1" -ne 0 ];then
+	echo $retval1
+else
+	echo $retval1
+fi

@@ -1,0 +1,278 @@
+#!/bin/sh
+# Copyright (C) 2009-2012 OpenWrt.org
+# Copyright (C) 2010 Vertical Communications
+# This is free software, licensed under the GNU General Public License v2.
+# See /LICENSE for more information.
+#
+# Format USBx:device:mountPoint:type:status
+USB_CONN_STATUS=/var/USBCONNSTATUS
+
+USB_PORT1=usb3
+USB_PORT2=usb1
+
+USBPATH="/media/USB/"
+USB1MOUNT="USB1"
+USB2MOUNT="USB2"
+CURRENTUSB=
+MOUNTPATH=
+
+blkdev=`dirname $DEVPATH`
+BaseName=`basename $blkdev`
+
+#echo "hotplug usb: action='$ACTION' devicename='$DEVICENAME' devname='$DEVNAME' devpath='$DEVPATH' product='$PRODUCT' type='$TYPE' idterface='$INTERFACE'" >> /tmp/debug
+
+if [ "$_this_board" = "RV160" -o "$_this_board" = "RV160W" -o "$_this_board" = "RV260" -o "$_this_board" = "RV260W" -o "$_this_board" = "RV260P" ];then
+platform_led_script="/usr/bin/rv16x_26x_led.sh"
+else
+platform_led_script="/usr/bin/rv340_led.sh"
+fi
+
+blockdevice=`echo $DEVPATH | grep "sd*"`
+if [ -n "$blockdevice" ];then
+	if [ "$BaseName" = "block" ];then
+		case "$ACTION" in
+			add)
+			# Check if the USB is partitioned or not
+			devPoint=$DEVNAME
+			partioned=`ls /sys/$DEVPATH | grep $DEVNAME` >/dev/null 2>&1
+			if [ -n "$partioned" ];then
+				return 0
+			fi
+
+			# Check which port the post is connected.
+			USB_PORT=`ls -l /sys/$DEVPATH | grep $USB_PORT1` >/dev/null 2>&1
+			if [ -n "$USB_PORT" ];then
+				MOUNTPATH=$USBPATH$USB1MOUNT
+				CURRENTUSB=$USB1MOUNT
+				
+				# Ignore if this event is with a 4g device
+				check4g=`cat /tmp/USBCONNSTATUS | grep "^USB1" | grep "4G\|3G"`
+				[ -n "$check4g" ] && return 0
+						
+			else
+				USB_PORT=`ls -l /sys/$DEVPATH | grep $USB_PORT2` >/dev/null 2>&1
+				if [ -n "$USB_PORT" ];then
+					MOUNTPATH=$USBPATH$USB2MOUNT
+					CURRENTUSB=$USB2MOUNT						
+					
+					# Ignore if this event is with a 4g device
+					check4g=`cat /tmp/USBCONNSTATUS | grep "^USB2" | grep "4G\|3G"`
+					[ -n "$check4g" ] && return 0
+				fi
+			fi
+
+			umount -fl $MOUNTPATH > /dev/null 2>&1
+			mkdir -p $MOUNTPATH
+			temp_var=${devPoint%[0-9]*}
+			isntfs=`fdisk -l /dev/$temp_var | grep NTFS` >/dev/null 2>&1
+			ntfs3g=`which ntfs-3g`
+			if [ "$isntfs" ];then
+				$ntfs3g /dev/$devPoint $MOUNTPATH
+			else
+				mount /dev/$devPoint $MOUNTPATH
+				# Observed that sometimes usb stick does not show NTFS even if it is in NTFS format.
+				tmp=`mount | grep "^/dev/$DEVNAME" | grep "ntfs"`
+				if [ -n "$tmp" ];then
+					# try ntfs
+					umount -fl $MOUNTPATH
+					$ntfs3g /dev/$devPoint $MOUNTPATH
+				fi
+			fi			
+			
+			# Get vendor
+			vendor=`cat /sys/$DEVPATH/device/vendor` >/dev/null 2>&1
+			
+	
+			# Update the Status
+			if [ "$CURRENTUSB" = $USB1MOUNT ];then
+				# Run the usb data montitor script
+				/usr/bin/blink_usb1.sh $devPoint &
+				sleep 2 #min delay of 2sec is required to settle down USB storage device
+				usbconnstatus=`cat $USB_CONN_STATUS | grep "^USB1"`
+				if [ -n "$usbconnstatus" ];then
+					`sed -i "/^USB1/c\USB1:$devPoint:$MOUNTPATH:storage:1" $USB_CONN_STATUS`
+				else
+					echo "USB1:$devPoint:$MOUNTPATH:storage:1" >> $USB_CONN_STATUS
+				fi
+				logger -t system -p local0.info "usb1: mass-storage device detected"			
+				logger -t system -p local0.info "usb1: vendor=$vendor"			
+				$platform_led_script usb1 green
+			elif [ "$CURRENTUSB" = $USB2MOUNT ];then
+				# Run the usb data montitor script
+				/usr/bin/blink_usb2.sh $devPoint &
+				sleep 2 #min delay of 2sec is required to settle down USB storage device
+				usbconnstatus=`cat $USB_CONN_STATUS | grep "^USB2"`
+				if [ -n "$usbconnstatus" ];then
+					`sed -i "/^USB2/c\USB2:$devPoint:$MOUNTPATH:storage:1" $USB_CONN_STATUS`
+				else
+					echo "USB2:$devPoint:$MOUNTPATH:storage:1" >> $USB_CONN_STATUS
+				fi				
+				logger -t system -p local0.info "usb2: mass-storage device detected"			
+				logger -t system -p local0.info "usb2: vendor=$vendor"			
+				$platform_led_script usb2 green
+			fi
+			# Enable syslog
+			syslog_check=`uci get syslog.log_server.log_save_to_usb` >/dev/null 2>&1
+			if [ "$syslog_check" = 1 ];then
+				`/etc/init.d/syslog reload "usb_plugin"`
+			fi
+			;;
+			remove)
+				devicePoint=`cat $USB_CONN_STATUS | grep ":$DEVNAME:" | cut -d : -f 2`
+				if [ -n "$devicePoint" ];then
+					umount -fl /dev/$devicePoint
+					Mountpoint=`cat $USB_CONN_STATUS | grep "$DEVNAME" | cut -d : -f 3`
+					usbport=`cat $USB_CONN_STATUS | grep "$DEVNAME" | cut -d : -f 1`
+					
+					# Disable syslog
+					syslog_check=`uci get syslog.log_server.log_save_to_usb` >/dev/null 2>&1
+					if [ "$syslog_check" = 1 ];then
+						`/etc/init.d/syslog reload "usb_plugout"`
+					fi
+					
+					if [ -n "$Mountpoint" ];then
+						umount -fl $Mountpoint
+						rm -rf $Mountpoint
+						usbport_removed=`echo $usbport | grep "USB1"`
+						if [ -n "$usbport_removed" ]; then
+							`sed -i "/^USB1:/d" $USB_CONN_STATUS`
+						else
+							`sed -i "/^USB2:/d" $USB_CONN_STATUS`
+						fi
+					fi
+					if [ "$usbport" = "USB1" ];then
+						# Remove the usb data montitor script
+						killall -9 blink_usb1.sh
+						sleep .2
+						$platform_led_script usb1 off
+						logger -t system -p local0.info "usb1: mass-storage device removed"			
+					elif [ "$usbport" = "USB2" ];then
+						# Remove the usb data montitor script
+						killall -9 blink_usb2.sh
+						sleep .2
+						$platform_led_script usb2 off
+						logger -t system -p local0.info "usb2: mass-storage device removed"			
+					fi
+					
+				fi
+			;;
+		esac
+	else
+		case "$ACTION" in
+			add)
+			# Check if the USB is partitioned or not
+			devPoint=$DEVNAME
+
+			# Check which port the port is connected.
+			USB_PORT=`ls -l /sys/$blkdev | grep $USB_PORT1` >/dev/null 2>&1
+			if [ -n "$USB_PORT" ];then
+				MOUNTPATH=$USBPATH$USB1MOUNT
+				CURRENTUSB=$USB1MOUNT						
+				
+				# Ignore if this event is with a 4g device
+				check4g=`cat /tmp/USBCONNSTATUS | grep "^USB1" | grep "4G\|3G"`
+				[ -n "$check4g" ] && return 0
+			else
+				USB_PORT=`ls -l /sys/$blkdev | grep $USB_PORT2` >/dev/null 2>&1
+				if [ -n "$USB_PORT" ];then
+					MOUNTPATH=$USBPATH$USB2MOUNT
+					CURRENTUSB=$USB2MOUNT						
+				fi
+				
+				# Ignore if this event is with a 4g device
+				check4g=`cat /tmp/USBCONNSTATUS | grep "^USB2" | grep "4G\|3G"`
+				[ -n "$check4g" ] && return 0
+			fi
+			umount -fl $MOUNTPATH > /dev/null 2>&1
+			mkdir -p $MOUNTPATH
+			
+			temp_var=${devPoint%[0-9]*}
+			isntfs=`fdisk -l /dev/$temp_var | grep NTFS` >/dev/null 2>&1
+			ntfs3g=`which ntfs-3g`
+			if [ "$isntfs" ];then
+				$ntfs3g /dev/$devPoint $MOUNTPATH
+			else
+				mount /dev/$devPoint $MOUNTPATH
+			fi			
+
+			# Get vendor
+			vendor=`cat /sys/$blkdev/device/vendor` >/dev/null 2>&1
+			
+			# Update the Status
+			if [ "$CURRENTUSB" = $USB1MOUNT ];then
+				# Run the usb data montitor script
+				/usr/bin/blink_usb1.sh $devPoint &
+				sleep 2 #min delay of 2sec is required to settle down USB storage device
+				usbconnstatus=`cat $USB_CONN_STATUS | grep "^USB1"`
+				if [ -n "$usbconnstatus" ];then
+					`sed -i "/^USB1/c\USB1:$devPoint:$MOUNTPATH:storage:1" $USB_CONN_STATUS`
+				else
+					echo "USB1:$devPoint:$MOUNTPATH:storage:1" >> $USB_CONN_STATUS
+				fi				
+				$platform_led_script usb1 green
+				logger -t system -p local0.info "usb1: mass-storage device detected"			
+				logger -t system -p local0.info "usb1: vendor=$vendor"			
+			elif [ "$CURRENTUSB" = $USB2MOUNT ];then
+				# Run the usb data montitor script
+				/usr/bin/blink_usb2.sh $devPoint &
+				sleep 2 #min delay of 2sec is required to settle down USB storage device
+				usbconnstatus=`cat $USB_CONN_STATUS | grep "^USB2"`
+				if [ -n "$usbconnstatus" ];then
+					`sed -i "/^USB2/c\USB2:$devPoint:$MOUNTPATH:storage:1" $USB_CONN_STATUS`
+				else
+					echo "USB2:$devPoint:$MOUNTPATH:storage:1" >> $USB_CONN_STATUS
+				fi				
+				logger -t system -p local0.info "usb2: mass-storage device detected"			
+				logger -t system -p local0.info "usb2: vendor=$vendor"			
+				$platform_led_script usb2 green
+			fi
+
+			# Enable syslog
+			syslog_check=`uci get syslog.log_server.log_save_to_usb` >/dev/null 2>&1
+			if [ "$syslog_check" = 1 ];then
+				`/etc/init.d/syslog reload "usb_plugin"`
+			fi
+
+			;;
+			remove)
+				devicePoint=`cat $USB_CONN_STATUS | grep ":$DEVNAME:" | cut -d : -f 2`
+				if [ -n "$devicePoint" ];then
+					umount -fl /dev/$devicePoint
+					Mountpoint=`cat $USB_CONN_STATUS | grep "$DEVNAME" | cut -d : -f 3`
+					usbport=`cat $USB_CONN_STATUS | grep "$DEVNAME" | cut -d : -f 1`
+					
+					# Disable syslog
+					syslog_check=`uci get syslog.log_server.log_save_to_usb` >/dev/null 2>&1
+					if [ "$syslog_check" = 1 ];then
+						`/etc/init.d/syslog reload "usb_plugout"`
+					fi
+					
+					if [ -n "$Mountpoint" ];then
+						umount -fl $Mountpoint
+						rm -rf $Mountpoint
+						usbport_removed=`echo $usbport | grep "USB1"`
+						if [ -n "$usbport_removed" ]; then
+							`sed -i "/^USB1:/d" $USB_CONN_STATUS`
+						else
+							`sed -i "/^USB2:/d" $USB_CONN_STATUS`
+						fi
+					fi
+					if [ "$usbport" = "USB1" ];then
+						# Remove the usb data montitor script
+						killall -9 blink_usb1.sh
+						sleep .2
+						$platform_led_script usb1 off
+						logger -t system -p local0.info "usb1: mass-storage device removed"			
+					elif [ "$usbport" = "USB2" ];then
+						# Remove the usb data montitor script
+						killall -9 blink_usb2.sh
+						sleep .2
+						$platform_led_script usb2 off
+						logger -t system -p local0.info "usb2: mass-storage device removed"			
+					fi
+				fi
+			;;
+		esac
+	fi
+fi
+

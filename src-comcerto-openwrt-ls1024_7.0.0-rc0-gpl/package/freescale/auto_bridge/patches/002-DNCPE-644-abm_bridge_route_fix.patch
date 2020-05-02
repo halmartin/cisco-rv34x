@@ -1,0 +1,126 @@
+diff --git a/auto_bridge.c b/auto_bridge.c
+index c6f19c4..91515c6 100644
+--- a/auto_bridge.c
++++ b/auto_bridge.c
+@@ -63,7 +63,10 @@ struct list_head			l2flow_table_by_dst_mac[L2FLOW_HASH_BY_MAC_TABLE_SIZE];
+ struct list_head			l2flow_list_wait_for_ack;
+ struct list_head			l2flow_list_msg_to_send;
+ 
++struct list_head			bridge_list_rtevent;
++
+ static struct kmem_cache		*l2flow_cache /*__read_mostly*/;
++static struct kmem_cache		*brroute_cache /*__read_mostly*/;
+ static struct sock			*abm_nl = NULL;
+ static char			abm_l3_filtering = 0;
+ static unsigned int			abm_max_entries = ABM_DEFAULT_MAX_ENTRIES;
+@@ -102,6 +105,7 @@ static void abm_do_work_send_msg(struct work_struct *work)
+ {
+ 	struct list_head *entry, *tmp;
+ 	struct l2flowTable *table_entry;
++	struct br_event_table *brtable_entry;
+ 	char action = 0;
+ 
+ 	if (!netlink_has_listeners(abm_nl, L2FLOW_NL_GRP)){
+@@ -133,6 +137,19 @@ static void abm_do_work_send_msg(struct work_struct *work)
+ 			}
+ 		}
+ 	}
++
++	list_for_each_safe(entry, tmp, &bridge_list_rtevent){
++		brtable_entry = container_of(entry, struct br_event_table, list_rtevent);
++		if (brtable_entry->brdev)
++		{
++			rtnl_lock();
++			rtmsg_ifinfo(RTM_NEWLINK, brtable_entry->brdev, 0, GFP_ATOMIC);
++			rtnl_unlock();
++		}
++		list_del(&brtable_entry->list_rtevent);
++		kmem_cache_free(brroute_cache, brtable_entry);
++	}
++
+ 	spin_unlock_bh(&abm_lock);
+ }
+ 
+@@ -183,6 +200,23 @@ resched:
+ 	spin_unlock_bh(&abm_lock);
+ 	queue_delayed_work(kabm_wq, &abm_work_retransmit, abm_retransmit_time);
+ }
++
++int add_brevent(struct brevent_fdb_update * fdb_update)
++{
++	struct br_event_table *brtable_entry;
++						
++	brtable_entry = kmem_cache_alloc(brroute_cache, GFP_ATOMIC); // called under soft_irq context
++	if(!brtable_entry){
++		printk(KERN_ERR "Automatic bridging module error brroute_cache OOM\n");
++		return -1;
++	}
++	memset(brtable_entry, 0, sizeof(*brtable_entry));
++	brtable_entry->brdev = fdb_update->brdev;
++	list_add(&brtable_entry->list_rtevent, &bridge_list_rtevent);
++
++	return 0;
++}
++
+ /***************************************************************************
+ *
+ * abm_br_event
+@@ -246,6 +280,12 @@ int abm_br_event(struct notifier_block *unused, unsigned long event, void *ptr){
+ 				}
+ 			}
+ 		}
++		if (fdb_update->brdev)
++		{
++			add_brevent(fdb_update);
++			work_to_do = 1;
++		}
++
+ 		spin_unlock_bh(&abm_lock);
+ 	}
+ 	if(work_to_do)
+@@ -1051,12 +1091,20 @@ static int abm_l2flow_table_init(void)
+ 	}
+ 	INIT_LIST_HEAD(&l2flow_list_msg_to_send);
+ 	INIT_LIST_HEAD(&l2flow_list_wait_for_ack);
++
++	INIT_LIST_HEAD(&bridge_list_rtevent);
+ 	
+ 	l2flow_cache = kmem_cache_create("l2flow_cache",
+ 					 sizeof(struct l2flowTable), 0, 0, NULL);
+ 	if (!l2flow_cache)
+ 		return -ENOMEM;
+ 
++	brroute_cache = kmem_cache_create("brroute_cache",
++					 sizeof(struct br_event_table), 0, 0, NULL);
++	if (!brroute_cache)
++		return -ENOMEM;
++	
++
+ 	return 0;
+ }
+ 
+@@ -1071,6 +1119,7 @@ static void abm_l2flow_table_exit(void)
+ 	abm_l2flow_table_flush();
+ 	abm_l2flow_table_wait_timers();
+ 	kmem_cache_destroy(l2flow_cache);
++	kmem_cache_destroy(brroute_cache);
+ }
+ 
+ #ifdef CONFIG_PROC_FS
+diff --git a/auto_bridge_private.h b/auto_bridge_private.h
+index 5522826..fe0a00f 100755
+--- a/auto_bridge_private.h
++++ b/auto_bridge_private.h
+@@ -91,6 +91,12 @@ struct l2flowTable
+ 	struct l2flow l2flow;
+ };
+ 
++struct br_event_table
++{
++	struct list_head list_rtevent;
++	struct net_device *brdev;
++};
++
+ #define ABM_PRINT(type, info, args...) do {printk(type "ABM :" info, ## args);} while(0)
+ 
+ static inline void print_l2flow(struct l2flow *l2flowtmp)

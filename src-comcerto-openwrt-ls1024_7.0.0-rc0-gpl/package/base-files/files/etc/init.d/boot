@@ -1,0 +1,426 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2011 OpenWrt.org
+. /etc/boardInfo
+
+START=10
+STOP=98
+
+UpdateUsebyField() {
+	local cfg="$1"
+	uci set certificate.$cfg.useby="-"
+}
+
+setUseByfield() {
+	config_load certificate
+	config_foreach UpdateUsebyField generated_certificate
+	config_foreach UpdateUsebyField imported_certificate
+	uci commit certificate
+}
+
+uci_apply_defaults() {
+	. /lib/functions/system.sh
+
+	cd /etc/uci-defaults || return 0
+	files="$(ls)"
+	[ -z "$files" ] && return 0
+	mkdir -p /tmp/.uci
+	for file in $files; do
+		( . "./$(basename $file)" ) && rm -f "$file"
+	done
+	uci commit
+}
+
+checkTime() {
+	local count
+	count=0
+	if [ $# -eq 1 ]; then
+		for var in $(echo ${1} | sed -e "s/[:.-]/ /g")
+               do
+                       var=$(echo "$var" | sed -e "s/^0*//g")
+                       [ -z "$var" ] && var=0
+			count=$(((${count} << 8) + ${var}))
+		done
+	fi
+	echo ${count};
+}
+
+is_newer_time () {
+        flashTime="$1"
+        clockTime=`date "+%Y.%m.%d-%H:%M:%S"`
+        if [ $(checkTime "$flashTime") -gt $(checkTime "$clockTime") ];then
+                return 0
+        fi
+        return 1
+}
+
+system_config() {
+	local cfg="$1"
+
+	local hostname timezone
+
+	#config_get hostname "$cfg" hostname 'OpenWrt'
+	hostname=`uci get systemconfig.system.hostname`
+	echo "$hostname" > /proc/sys/kernel/hostname
+
+	#config_get timezone "$cfg" timezone 'UTC'
+	[ ! -e /mnt/configcert/config/TZ ] && echo "GMT" > /mnt/configcert/config/TZ
+	rm -rf /etc/TZ
+	ln -sn /mnt/configcert/config/TZ /etc/TZ
+	
+	# Read time from hardware clock
+	hwclock -s
+
+	flashTime=`cat $TimeFile`>/dev/null 2>&1
+	[ -n "$flashTime" ] && {
+		if is_newer_time "$flashTime";then
+    			date -s "$flashTime"
+		fi
+	}
+
+	# apply timezone to kernel
+	date -k
+}
+
+openssldir_symbolic_link_test() {
+
+	CERTS_DIR=/etc/ssl/certs
+	KEYS_DIR=/etc/ssl/private
+	TEMP_CERTS_DIR=/tmp/.CERTS_DIR_TMP
+	TEMP_KEYS_DIR=/tmp/.KEYS_DIR_TMP
+	BASE_CERTS_DIR=$MNT_CERT_DIR
+	BASE_KEYS_DIR=$MNT_CERT_PRIVATE_DIR
+	PREINSTALLED_CERTFILE=/etc/ssl/certs/preinstalled_certificate
+
+
+	# If /etc/ssl/certs is not a symbolic link then create one.
+	if [ ! -L "$CERTS_DIR" ];then                              
+        	#Create temporary certs directory
+	        `rm -rf $TEMP_CERTS_DIR`           
+        	`mkdir  $TEMP_CERTS_DIR`
+                              
+	        #Backup existing contents to the newly created temporary certs directory
+		`cp -a $CERTS_DIR/* $TEMP_CERTS_DIR`
+                                        
+	        #Remove the existing non-symbolic certs directory
+        	`rm -rf  $CERTS_DIR`                             
+                        
+        	#Create a symbolic link to the certs directory located in $BASE_CERTS_DIR
+		`ln -s $BASE_CERTS_DIR $CERTS_DIR`
+                                             
+        	#Copy the backup contents.
+	        `cp -a $TEMP_CERTS_DIR/* $CERTS_DIR`
+
+		#Copy the preinstalled certificate to its destined location.
+		`mv $PREINSTALLED_CERTFILE $MNT_PREINSTALLED_CERT_FILE`
+			fi
+
+	# If /etc/ssl/private is not a symbolic link then create one.
+	if [ ! -L "$KEYS_DIR" ];then                                 
+        	#Create temporary  directory for storing private keys
+	        `rm -rf $TEMP_KEYS_DIR`                                
+        	`mkdir  $TEMP_KEYS_DIR`
+
+	        #Backup existing contents to the newly created temporary certs directory
+        	`cp  $KEYS_DIR/* $TEMP_KEYS_DIR`                                          
+
+	        #Remove the existing non-symbolic certs directory
+        	`rm -rf  $KEYS_DIR`                                
+                         
+	        #Create a symbolic link to the certs directory located in $BASE_KEYS_DIR
+		`ln -s $BASE_KEYS_DIR $KEYS_DIR`
+                                           
+	        #Copy the backup contents.
+        	`cp  $TEMP_KEYS_DIR/* $KEYS_DIR`
+		`rm -rf $TEMP_KEYS_DIR`
+			fi
+}
+
+apply_uci_config() {
+	sh -c '. /lib/functions.sh; include /lib/config; uci_apply_defaults'
+}
+
+#Note: if there is any change in usr/sbin/config_mgmt.sh, it has to be updated here
+update_webcache()
+{
+	rm /tmp/webcache/*
+	/usr/bin/jsoncmd -i
+}
+
+create_wf_meta_data() {
+	WFMETADATA_SCRIPT="webfilter-metadata.sh"
+	WFMETADATA_SCRIPTFULLPATH="/usr/bin/$WFMETADATA_SCRIPT"
+	WFMETADATA_XMLFILE="webfilter-meta-data_init.xml"
+
+	if [ -e "$WFMETADATA_SCRIPTFULLPATH" ]; then
+		chmod +x $WFMETADATA_SCRIPTFULLPATH
+		echo " WF $WFMETADATA_SCRIPTFULLPATH"
+		#Run below script to generate avc metadata xml file
+		$WFMETADATA_SCRIPT /tmp/$WFMETADATA_XMLFILE
+		if [ "$?" = 0 ];then
+			# command success case only, Update in CDB path in case of success only
+			# Check for weather both files are same or not  ?
+			m1=`md5sum /tmp/$WFMETADATA_XMLFILE`
+			m2=`md5sum /etc/confd/cdb/$WFMETADATA_XMLFILE`
+			if [ "$m1" != "$m2" ]; then
+				cp /tmp/$WFMETADATA_XMLFILE  /etc/confd/cdb/$WFMETADATA_XMLFILE
+				# update_webcache, if any change in metadata
+                                # As per GUI v0.45 release onwards, update cache is not needed
+				# update_webcache > /dev/null 2>&1
+			fi
+		fi
+	fi
+	echo "WF meta data done $?"
+}
+
+create_avc_meta_data() {
+	AVCMETADATA_SCRIPT="avc-metadata.sh"
+	AVCMETADATA_SCRIPTFULLPATH="/usr/bin/$AVCMETADATA_SCRIPT"
+	AVCMETADATA_XMLFILE="avc-meta-data_init.xml"
+
+	if [ -e "$AVCMETADATA_SCRIPTFULLPATH" ]; then
+		chmod +x $AVCMETADATA_SCRIPTFULLPATH
+		echo " AVC $AVCMETADATA_SCRIPTFULLPATH"
+		#Run below script to generate avc metadata xml file
+		$AVCMETADATA_SCRIPT /tmp/$AVCMETADATA_XMLFILE
+		if [ "$?" = 0 ];then
+			# command success case only, Update in CDB path in case of success only
+			# Check for weather both files are same or not  ?
+			m1=`md5sum /tmp/$AVCMETADATA_XMLFILE`
+			m2=`md5sum /etc/confd/cdb/$AVCMETADATA_XMLFILE`
+			if [ "$m1" != "$m2" ]; then
+				cp /tmp/$AVCMETADATA_XMLFILE  /etc/confd/cdb/$AVCMETADATA_XMLFILE
+				# update_webcache, if any change in metadata
+				# update_webcache > /dev/null 2>&1
+			fi
+		fi
+	fi
+	echo "AVC meta data done $?"
+}
+
+create_meta_data_xml() {
+	METADATA_GEN_STATE_FILE="/tmp/meta_data_gen_state"
+	echo " create_meta_data_xml begin"
+	echo 0 > $METADATA_GEN_STATE_FILE
+	echo " meta_data_gen_state: $(cat $METADATA_GEN_STATE_FILE)"
+        # Commenting, as metadata generation is not needed for every boot.Only needed when changed in application mapping.
+	#create_avc_meta_data
+	#create_wf_meta_data
+	echo 1 > $METADATA_GEN_STATE_FILE
+	echo " meta_data_gen_state: $(cat $METADATA_GEN_STATE_FILE)"
+	echo " create_meta_data_xml end"
+}
+
+creategpio () {
+	gpiopath="/sys/class/gpio"
+	gpiolist1="44 50 51 52 53 54 55 56 57 58 59"
+
+	## GPIO Identifiers Reference list
+	#GPIO44=44 GPIO50=50 GPIO51=51 GPIO52=52 GPIO53=53 GPIO54=54 GPIO55=55 GPIO56=56 GPIO57=57 GPIO58=58 GPIO59=59
+	## LED <> GPIO Mappings
+	#WLAN5G_LED_GREEN=$GPIO44 DIAG_LED_RED=$GPIO50 WLAN2_4G_LED_GREEN=$GPIO51 POWER_LED_GREEN=$GPIO52
+	#USB2_LED_AMBER=$GPIO53 USB2_LED_GREEN=$GPIO54
+	#USB1_LED_AMBER=$GPIO55 USB1_LED_GREEN=$GPIO56
+	#DMZ_LED_GREEN=$GPIO57
+	#VPN_LED_AMBER=$GPIO58 VPN_LED_GREEN=$GPIO59
+
+	for GPIO in $gpiolist1
+	do
+		echo "checking $GPIO "
+		[ ! -d "$gpiopath/gpio$GPIO" ] && {
+			echo "Creating $GPIO "
+			echo $GPIO >$gpiopath/export;
+			echo out > $gpiopath/gpio$GPIO/direction
+			echo 1 > $gpiopath/gpio$GPIO/value
+		}
+	done
+}
+
+boot() {
+	# Since LED's initialization is enabled in kernel, Calling gpio creation commented out
+	#creategpio
+
+	#Run in the background on core-2 to check for UBIFS  errors and reboot when error found. Terminated in zfinish script.
+	taskset 2 /bin/check_ubifs_error &
+
+	[ -f /proc/mounts ] || /sbin/mount_root
+	[ -f /proc/jffs2_bbc ] && echo "S" > /proc/jffs2_bbc
+	[ -f /proc/net/vlan/config ] && vconfig set_name_type DEV_PLUS_VID_NO_PAD
+
+	mkdir -p /var/run
+	mkdir -p /var/log
+	mkdir -p /var/lock
+	mkdir -p /var/lib
+	mkdir -p /var/state
+	mkdir -p /tmp/.uci
+	chmod 0700 /tmp/.uci
+	mkdir -p /tmp/.jail
+	touch /var/log/wtmp
+	touch /var/log/lastlog
+	touch /tmp/resolv.conf.auto
+	ln -sf /tmp/resolv.conf.auto /tmp/resolv.conf
+	grep -q debugfs /proc/filesystems && /bin/mount -o noatime -t debugfs debugfs /sys/kernel/debug
+	[ "$FAILSAFE" = "true" ] && touch /tmp/.failsafe
+
+	# 1. /root/default_uci_config: it means factory default config folder
+	#      if /root/factory_boot_cfg_mode file not exisit means image is booting first time with FACTORY config
+	# 2. /etc/config : it can be noted as a startup/saved configuration
+	# 3. /tmp/etc/config : it means, all the running configuration 
+
+	#if [ ! -f /root/factory_boot_cfg_mode ]; then
+	#	echo -n "Booting factory cfg or first boot !!!!"
+	#	cp /root/default_uci_config/* /etc/config/
+	#	touch /root/factory_boot_cfg_mode
+	#fi
+# Copying config files to running config path                               
+        mkdir -p /tmp/etc/config
+        cp /etc/config/* /tmp/etc/config/
+
+	echo -n "Mounting mnt partitions.."
+ 	mkdir -p /mnt/configcert /mnt/avcsign /mnt/webrootdb /mnt/license
+  	mount -t yaffs2 /dev/mtdblock9 /mnt/configcert
+  	mount -t yaffs2 /dev/mtdblock10 /mnt/avcsign
+  	mount -t yaffs2 /dev/mtdblock11 /mnt/webrootdb
+ 	mount -t yaffs2 /dev/mtdblock12 /mnt/license
+	echo "done."
+
+	# rm -f /etc/hotplug.d/iface/95-wanscript
+
+        # load nvram.txt to replace /sbin/nvram.txt
+        nvram_partition="`cat /proc/mtd | grep nvram | awk '{print $1}' | cut -d : -f 1`"
+        if [ -n "$nvram_partition" ]; then
+                dd if=/dev/$nvram_partition of=/tmp/nvram.txt bs=4096 count=1
+                dd_result=`echo $?`
+		if [ $dd_result -eq 0 ]
+		then
+			mkdir -p /mnt/packages/wifi
+			cp -rf /tmp/nvram.txt /mnt/packages/wifi/nvram.txt && rm -rf /tmp/nvram.txt
+		else
+			cp -rf /sbin/nvram.txt.bak /mnt/packages/wifi/nvram.txt
+		fi
+        fi
+
+	# Check and create partition layout
+	if [ ! -d "$MNT_CERT_DIR_PATH" ];then
+		mkdir -p $MNT_CERT_DIR
+		mkdir -p $MNT_CERT_PRIVATE_DIR
+		mkdir -p $MNT_CERT_CA_DIR
+	fi
+
+	if [ ! -d "/mnt/configcert/config" ];then
+                mkdir -p /mnt/configcert/config
+		touch /mnt/configcert/config/rv340.cfg
+		touch  $MNT_CERT_FILE
+	fi
+
+	if [ ! -d "$MNT_CERT_FILE_DIR" ];then
+                mkdir -p $MNT_CERT_FILE_DIR
+		touch  $MNT_CERT_FILE
+	fi
+
+	if [ ! -f "/mnt/configcert/config/swupdateinfo" ] || [ `wc -l /mnt/configcert/config/swupdateinfo | cut -d " " -f 1` -ne 20 ];then
+		cp /etc/swupdateinfo.rv340mr1 /mnt/configcert/config/swupdateinfo
+	elif [ `wc -l /mnt/configcert/config/swupdateinfo | cut -d " " -f 1` -lt 16 ]; then
+		# This case arises, Either factory upgrade including partion upgrade [This covers first time programmmin ]
+        echo "boot: create swupdateinfo file" >> /tmp/asdtest
+		SWUPDATEINFOFILE="/mnt/configcert/config/swupdateinfo"
+		touch $SWUPDATEINFOFILE
+		echo "frm_available_version=\"\"" >> $SWUPDATEINFOFILE
+		echo "frm_last_check_time=\"\"" >> $SWUPDATEINFOFILE
+		echo "frm_latest_version=\"0.0.0.1\"" >> $SWUPDATEINFOFILE
+		echo "frm_latest_update_time=\"\"" >> $SWUPDATEINFOFILE
+		echo "usb_available_version=\"\"" >> $SWUPDATEINFOFILE
+		echo "usb_last_check_time=\"\"" >> $SWUPDATEINFOFILE
+		echo "image1_usb_latest_version=\"0.0.0.1\"" >> $SWUPDATEINFOFILE
+		echo "image1_usb_latest_update_time=\"\"" >> $SWUPDATEINFOFILE
+		echo "image1_usb_latest_update_timezone=\"\"" >> $SWUPDATEINFOFILE
+		echo "image2_usb_latest_version=\"0.0.0.1\"" >> $SWUPDATEINFOFILE
+		echo "image2_usb_latest_update_time=\"\"" >> $SWUPDATEINFOFILE
+		echo "image2_usb_latest_update_timezone=\"\"" >> $SWUPDATEINFOFILE
+		echo "sig_available_version=\"\"" >> $SWUPDATEINFOFILE
+		echo "sig_last_check_time=\"\"" >> $SWUPDATEINFOFILE
+		echo "sig_latest_version=\"0.0.0.1\"" >> $SWUPDATEINFOFILE
+		echo "sig_latest_update_time=\"\"" >> $SWUPDATEINFOFILE
+		echo "sec_available_version=\"\"" >> $SWUPDATEINFOFILE
+		echo "sec_last_check_time=\"\"" >> $SWUPDATEINFOFILE
+		echo "sec_latest_version=\"0.0.0.1\"" >> $SWUPDATEINFOFILE
+		echo "sec_latest_update_time=\"\"" >> $SWUPDATEINFOFILE
+    else
+        echo "boot: swupdateinfo file exists" >> /tmp/asdtest
+	fi
+
+ 	if [ ! -d "/mnt/configcert/image1" ];then
+		mkdir -p /mnt/configcert/image1
+		touch /mnt/configcert/image1/firmware_time
+		touch /mnt/configcert/image1/firmware_version
+		touch /mnt/configcert/image1/img_version
+		touch /mnt/configcert/image1/md5sum_fw-rv340-img
+        fi
+
+        if [ ! -d "/mnt/configcert/image2" ];then
+		mkdir -p /mnt/configcert/image2
+		touch /mnt/configcert/image2/firmware_time
+		touch /mnt/configcert/image2/firmware_version
+		touch /mnt/configcert/image2/img_version
+		touch /mnt/configcert/image2/md5sum_fw-rv340-img
+        fi
+
+	# Certificate changes
+
+	openssldir_symbolic_link_test
+	
+	rm -rf /etc/swupdateinfo
+	ln -sn /mnt/configcert/config/swupdateinfo /etc/swupdateinfo
+
+	cp -f $MNT_CERT_FILE $TMP_CERT_FILE
+	cp -f $MNT_PREINSTALLED_CERT_FILE $TMP_PREINSTALLED_CERT_FILE
+
+	
+	#TODO:Temporary addition in PP. In BB2 , generate_default_cert is invoked by ucicfg daemon.
+	#/usr/bin/generate_default_cert
+
+
+	/sbin/kmodloader
+
+	# allow wifi modules time to settle
+	sleep 1
+	board=`uci get systeminfo.sysinfo.pid | cut -d'=' -f2 | cut -d'-' -f1`
+	if [ "$board" = "RV340W" ];then
+	/sbin/wifi detect > /tmp/wireless.tmp
+	[ -s /tmp/wireless.tmp ] && {
+		cat /tmp/wireless.tmp >> /etc/config/wireless
+	}
+	rm -f /tmp/wireless.tmp
+	fi
+
+	/bin/board_detect
+	uci_apply_defaults
+
+	# temporary hack until configd exists
+	/sbin/reload_config
+
+	# calling meta data creation in background
+	create_meta_data_xml &
+
+	config_load system
+	config_foreach system_config system
+
+	killall -q hotplug2
+	[ -x /sbin/hotplug2 ] && /sbin/hotplug2 --override --persistent \
+			--set-rules-file /etc/hotplug2.rules \
+			--set-coldplug-cmd /sbin/udevtrigger \
+			--max-children 1 >/dev/null 2>&1 &
+
+	# create /dev/root if it doesn't exist
+	[ -e /dev/root -o -h /dev/root ] || {
+		rootdev=$(awk 'BEGIN { RS=" "; FS="="; } $1 == "root" { print $2 }' < /proc/cmdline)
+		[ -n "$rootdev" ] && ln -s "$rootdev" /dev/root
+	}
+
+	# Set useby field of all the certificates to "-"
+	# setUseByfield
+}
+
+stop() {
+	# Write time to hardware clock
+	hwclock -w
+}

@@ -1,0 +1,40 @@
+From 42367e3b5558b5725ed4232d518b4d09e917ccc4 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Wed, 30 May 2018 13:54:16 +0530
+Subject: [PATCH 2/2] Increased prefix length of LOG message Signed-off-by:
+ nageshkoneti <b47094@freescale.com>
+
+---
+ ip6t_LOG.h |    2 +-
+ ipt_LOG.h  |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux/netfilter_ipv6/ip6t_LOG.h b/include/linux/netfilter_ipv6/ip6t_LOG.h
+index 9dd5579..2e9a7e4 100644
+--- a/include/linux/netfilter_ipv6/ip6t_LOG.h
++++ b/include/linux/netfilter_ipv6/ip6t_LOG.h
+@@ -13,7 +13,7 @@
+ struct ip6t_log_info {
+ 	unsigned char level;
+ 	unsigned char logflags;
+-	char prefix[30];
++	char prefix[80];
+ };
+ 
+ #endif /*_IPT_LOG_H*/
+diff --git a/include/linux/netfilter_ipv4/ipt_LOG.h b/include/linux/netfilter_ipv4/ipt_LOG.h
+index dcdbadf..b2827e4 100644
+--- a/include/linux/netfilter_ipv4/ipt_LOG.h
++++ b/include/linux/netfilter_ipv4/ipt_LOG.h
+@@ -13,7 +13,7 @@
+ struct ipt_log_info {
+ 	unsigned char level;
+ 	unsigned char logflags;
+-	char prefix[30];
++	char prefix[80];
+ };
+ 
+ #endif /*_IPT_LOG_H*/
+-- 
+1.7.9.5
+

@@ -1,0 +1,3 @@
+SOURCE:https://dev.openwrt.org/browser/trunk/package/utils/usbutils/Makefile?rev=37141
+
+Makefile directly copied from the above link

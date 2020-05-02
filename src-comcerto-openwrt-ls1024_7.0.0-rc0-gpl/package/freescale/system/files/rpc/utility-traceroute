@@ -1,0 +1,71 @@
+#!/bin/sh
+
+UTILITY_NAME="/tmp/utility-traceroute"
+TRACEROUTE_UTILITY=
+
+
+job_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "job-id") {print $(I+1)};}'`
+
+outfile="$UTILITY_NAME"_"$job_id"
+
+	curr_time=`date`
+        readline=$(head -n 1 $outfile );
+        target=`echo $readline | cut -d " " -f 3 | cut -d " " -f1`
+	echo "results-start-date-time \"$curr_time\" target $target"
+	echo "probe-results __BEGIN"
+	sed -i "1d" $outfile
+	sed -i "s/\*/EMPTY/g" $outfile
+	sed -i "s/  */ /g" $outfile
+	
+	while read line
+	do
+		# Remove any begening space
+		retry_id=0
+		temp=
+		hop_address=
+		line=`echo $line | sed -e "s/^ *//"`
+		unreachable=`cat $outfile |grep "Network is unreachable"`
+		if [ "$unreachable" != "" ];then
+			hop_id=1
+		else
+			hop_id=`echo $line | cut -d " " -f 1`
+		fi
+		echo "hop __BEGIN"
+		echo "hop_id $hop_id"
+		# Check for non response strings
+		temp=`echo $line | grep ":"`
+		[ -z "$temp" ] && {
+			temp=`echo $line | grep -E "[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"`
+		}
+		
+		if [ -z "$temp" ];then
+			echo "probes __BEGIN retry_id 1 probes __END"
+			echo "probes __BEGIN retry_id 2 probes __END"
+			echo "probes __BEGIN retry_id 3 probes __END"
+		else
+			for word in $line; do
+				v6addr=`echo $word | grep ":"`
+				if [ -n "$v6addr" ];then
+					hop_address=$word
+				else
+					v4addr=`echo $word | awk -F . '{ print NF - 1 }'`
+					if [ "$v4addr" = 3 ];then
+						hop_address=$word
+					fi
+				fi
+				tmp=`echo $word | grep -E "^[0-9]+\.[0-9]*$"`
+				if [ -n "$tmp" ];then
+					retry_id=`expr $retry_id + 1`
+					echo "probes __BEGIN hop-addr $hop_address retry_id $retry_id round-trip-time $word response-status OK probes __END"
+				elif [ "$word" = "EMPTY" ];then
+					retry_id=`expr $retry_id + 1`
+					echo "probes __BEGIN hop-addr $hop_address retry_id $retry_id round-trip-time 0.0 response-status FAILED probes __END"
+				else
+					echo "probes __BEGIN response-status \"Network Unreachable\" probes __END"
+				fi
+			done
+		fi	
+		echo "hop __END"
+	done < $outfile
+	echo "probe-results __END"
+	rm -f $outfile

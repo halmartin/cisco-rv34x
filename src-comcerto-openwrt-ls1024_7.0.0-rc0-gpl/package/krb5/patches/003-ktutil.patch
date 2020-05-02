@@ -1,0 +1,19 @@
+--- a/src/kadmin/ktutil/ktutil_funcs.c	2015-08-13 15:15:31.783197568 +0530
++++ b/src/kadmin/ktutil/ktutil_funcs.c	2015-08-13 15:11:28.095204602 +0530
+@@ -160,10 +160,14 @@ krb5_error_code ktutil_add(context, list
+ 
+         snprintf(promptstr, sizeof(promptstr), "Password for %.1000s",
+                  princ_str);
+-        retval = krb5_read_password(context, promptstr, NULL, password.data,
++        /*retval = krb5_read_password(context, promptstr, NULL, password.data,
+                                     &password.length);
+         if (retval)
+-            goto cleanup;
++            goto cleanup;*/
++        fgets(buf, BUFSIZ, stdin);
++        buf[strlen(buf) - 1] = '\0';
++        strcpy(password.data,buf);
++        password.length=strlen(password.data);
+         retval = krb5_principal2salt(context, princ, &salt);
+         if (retval)
+             goto cleanup;

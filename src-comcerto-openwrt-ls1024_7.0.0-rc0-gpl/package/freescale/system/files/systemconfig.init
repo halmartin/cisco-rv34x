@@ -1,0 +1,53 @@
+#!/bin/sh /etc/rc.common
+
+#/usr/lib/webif/functions.sh
+#/lib/config/uci.sh
+
+START=22
+
+start () {
+	uci commit systemconfig
+	hostName=`uci show systemconfig | grep hostname | cut -d = -f 2`
+	domainName=`uci show systemconfig | grep domainname | cut -d = -f 2`
+
+	if [ -z "$hostName" ];then
+		hostname ""
+	else
+		hostname $hostName
+	fi
+
+	defaultVlanIP=`uci get network.vlan1.ipaddr`
+
+	echo "127.0.0.1 localhost" > /etc/hosts
+	echo "$defaultVlanIP $hostName.$domainName $hostName" >> /etc/hosts
+	
+	#update the dnsmasq global options
+	`uci set dhcp.@dnsmasq[0].domain=$domainName`
+	logger -t system -p local0.alert "domain name=$domainName and hostname=$hostName configured"
+	exit 0
+}
+
+
+reload () {
+	hostName=`uci show systemconfig | grep hostname | cut -d = -f 2`
+	domainName=`uci show systemconfig | grep domainname | cut -d = -f 2`
+	
+	if [ -z "$hostName" ];then
+		hostname ""
+	else
+		hostname $hostName
+	fi
+	if [ $? -eq 0 ];then
+		uci commit systemconfig
+		defaultVlanIP=`uci get network.vlan1.ipaddr`
+		echo "127.0.0.1 localhost" > /etc/hosts
+		echo "$defaultVlanIP $hostName.$domainName $hostName" >> /etc/hosts
+		#update the dnsmasq global options
+		`uci set dhcp.@dnsmasq[0].domain=$domainName`
+		logger -t system -p local0.alert "domain name=$domainName and hostname=$hostName modified"
+		exit 0
+	else
+		echo "" > /tmp/.uci/systemconfig
+		exit 1
+	fi
+}

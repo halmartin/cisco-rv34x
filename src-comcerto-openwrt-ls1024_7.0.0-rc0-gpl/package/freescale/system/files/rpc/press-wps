@@ -1,0 +1,74 @@
+#!/bin/sh
+
+# Kill existing insance of press-wps script
+pid=$(cat /tmp/press-wps.pid)
+kill -9 $pid
+sleep 1
+ps | awk '/press-wps/ {print $1}' | head -1 > /tmp/press-wps.pid
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	"ssid" )
+		shift 1
+		ssid=$1
+	;;
+	"radio" )
+		shift 1
+		radio=$1
+	;;
+	* )
+		shift 1
+	;;
+	esac
+done
+
+RADIO=""
+
+board="$(/usr/bin/board_check.sh)"
+
+if [ "$board" = "RV160W" ];then
+	[ "$radio" = "WLAN0" ] && RADIO="wl1"
+	[ "$radio" = "WLAN1" ] && RADIO="wl0"
+	[ "$radio" = "BOTH" ] && RADIO="both"
+elif [ "$board" = "RV340W" ];then
+    [ "$radio" = "WLAN1" ] && RADIO="wl0"
+    [ "$radio" = "WLAN2" ] && RADIO="wl1"
+else
+	[ "$radio" = "WLAN0" ] && RADIO="wl0"
+	[ "$radio" = "WLAN1" ] && RADIO="wl1"
+	[ "$radio" = "BOTH" ] && RADIO="both"
+fi
+
+if [ -n "$ssid" ];then
+	wps_pbc "$ssid" $RADIO
+	if [ "$?" = "0" ];then
+		_cnt=0
+		while [ $_cnt -le 120 ]; do
+			sleep 1
+			_cnt=$(( $_cnt + 1 ))
+
+			wps_result="$(nvram get wps_proc_status)"
+			if [ "$wps_result" = "2" ];then
+#				echo "code 0 errstr Success"
+				return  0
+			elif [ "$wps_result" = "1" -o "$wps_result" = "5" -o "$wps_result" = "6" -o "$wps_result" = "7" ];then
+				continue
+			elif [ "$wps_result" = "0" ];then
+#				echo "code 2 errstr \"Time out\""
+				return 2
+			else
+#				echo "code 1 errstr \"\""
+				return 1
+			fi
+		done
+
+#		echo "code 2 errstr \"Time out\""
+		return 2
+	else
+#		echo "code 1 errstr \"\""
+		return 1
+	fi
+else
+#	echo "code 1 errstr \"No ssid provided\""
+	return 1
+fi

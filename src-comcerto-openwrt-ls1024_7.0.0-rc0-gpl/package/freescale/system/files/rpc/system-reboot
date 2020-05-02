@@ -1,0 +1,80 @@
+#!/bin/sh
+# 2017-12-06 jiangzhe.guo<jiangzhe.guo@deltaww.com>
+# DNI need to do preparatory work for config upgrade when switch image
+
+errcode=1
+errstring="Invalid Arguments"
+
+CONFIG_SCRIPT="config_mgmt.sh"
+DELETE_CERT="/usr/bin/delete_certificates"
+MTD_ENV=2
+TRIGGER_REBOOT=0
+
+firmware_state=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "firmware-state") {print $(I+1)};}'`
+option=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "option") {print $(I+1)};}'`
+
+
+reboot_to_image() {
+	img_selected="$1"
+	active_firmware=`uci get firmware.firminfo.version`
+	inactive_firmware=`uci get firmware.firminfo.inactive_version`
+	logger -t system -p local0.alert "Rebooting the system .."
+	if [ "$img_selected" = "inactive" ];then
+	        curr_img=`uci get firmware.firminfo.active`
+	        if [ "$curr_img" = "image1" ];then
+	                `uci set firmware.firminfo.active=image2`
+	                echo 2 > /tmp/active
+	                flash_erase -q /dev/mtd$MTD_ENV 0 0
+	                nandwrite -p -q /dev/mtd$MTD_ENV /tmp/active
+	        else
+	                `uci set firmware.firminfo.active=image1`
+	                echo 1 > /tmp/active
+	                flash_erase -q /dev/mtd$MTD_ENV 0 0
+	                nandwrite -p -q /dev/mtd$MTD_ENV /tmp/active
+	        fi
+	        uci commit firmware
+		logger -t system -p local0.alert "System will boot with inactive image (version $inactive_firmware) after reboot."
+	else
+		logger -t system -p local0.alert "System will boot with active image (version $active_firmware) after reboot."
+	fi
+	TRIGGER_REBOOT=1
+	errstring="Success"
+	errcode=0
+}
+
+if [ "$firmware_state" = "active" ] || [ "$firmware_state" = "inactive" ];then
+	if [ "$option" = "none" ];then
+		if [ "$firmware_state" = "inactive" ];then
+			$CONFIG_SCRIPT "upgrade" "startup"
+		fi
+                #user restarted
+                echo 2 > /mnt/configcert/config/rebootstate
+		reboot_to_image $firmware_state
+	elif [ "$option" = "factory-default-config" ];then
+                #factory default
+		rm -f /mnt/initial_setup_done
+		rm -f /mnt/configcert/b_count
+                echo 4 > /mnt/configcert/config/rebootstate
+		$CONFIG_SCRIPT "factory-default"
+		reboot_to_image $firmware_state		
+	elif [ "$option" = "factory-default-config-certificate" ];then
+                #factory default config certificate
+		rm -f /mnt/initial_setup_done
+		rm -f /mnt/configcert/b_count
+                echo 4 > /mnt/configcert/config/rebootstate
+		$CONFIG_SCRIPT "factory-default"
+		$DELETE_CERT "factory_default_with_cert"
+		reboot_to_image $firmware_state
+	fi
+fi
+
+[ "$TRIGGER_REBOOT" = 1 ] && {
+	reboot &
+}
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errstring\""
+	exit 1
+else
+	exit 0
+fi

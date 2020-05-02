@@ -1,0 +1,4 @@
+CHANGES:
+1. Config-ACTIVE_dev.in: Active development modules repo configuration.
+2. Config-images.in : ITB image configuration and UBIFS image generation
+3. config-ls*: LS1024/LS1012/LS1043 configurations.

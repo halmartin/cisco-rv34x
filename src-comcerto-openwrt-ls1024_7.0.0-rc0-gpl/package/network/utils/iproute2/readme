@@ -1,0 +1,25 @@
+CHANGES:
+1. 009-FSL-iproute2_etherip.patch : etheripV6  support.
+2. 121-FSL-iproute-4rd.patch	   : 4rd support : http://enog.jp/~masakazu/vyatta/4rd-linux-image.patch
+3. 211-FSL-iproute2_etheripv4.patch:etheripV4 support.
+4. 912-FSL-increase-bufsize-nlmessages-gre.patch  : 
+
+	From bde5baa5476cd8d7d33afc42170dc984f3717e14 Mon Sep 17 00:00:00 2001
+	From: Jetchko Jekov <jetchko.jekov@nokia.com>
+	Date: Thu, 21 May 2015 16:32:24 +0200
+	Subject: gre: raising the size of the buffer holding nl messages.
+
+	Now it matches the size for the answer defined in rtnl_talk()
+	and prevents stack corruption with answer > 1024 bytes.
+	---
+	FSL : The original commit is updated to include a change for grev6 as well.
+	      The following two patches would also need to be bought in the future to 
+	      prevent nl messages corruption problem in other cases. 
+	      Currently these patches don't apply well directly on 4.0.0
+
+	      https://git.kernel.org/cgit/linux/kernel/git/shemminger/iproute2.git/commit/?id=c079e121a73a		
+	      https://git.kernel.org/cgit/linux/kernel/git/shemminger/iproute2.git/commit/?id=ed108cfc0260b6b751647982b77d6363b1defb15 
+	---
+
+
+The patch 211-MSP-ipv6 which is present in the AA is not applied here as the changes were already present in the package

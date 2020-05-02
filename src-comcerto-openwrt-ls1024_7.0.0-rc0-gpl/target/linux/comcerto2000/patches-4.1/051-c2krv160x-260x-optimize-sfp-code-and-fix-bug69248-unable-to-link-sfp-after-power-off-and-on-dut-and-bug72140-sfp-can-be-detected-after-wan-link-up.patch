@@ -1,0 +1,108 @@
+# 2017-04-21: harry.lin <harry.lin@deltaww.com>
+# Fix bug69248: unable to link sfp after power off and on dut.
+# Fix bug72140: sfp can be detected after wan link up.
+--- linux-4.1.8/drivers/net/phy/broadcom.c.org	2017-04-19 10:42:07.130671237 +0800
++++ linux-4.1.8/drivers/net/phy/broadcom.c	2017-04-19 18:08:08.640670591 +0800
+@@ -261,8 +261,26 @@
+ 
+ static int bcm54210s_config_aneg(struct phy_device *phydev)
+ {
++	int reg;
+ 	int ret;
+ 
++	phy_write(phydev, 0x1e, 0x21);
++	reg = phy_read(phydev, 0x1f);
++	/* Fiber */
++	if ((reg & (1 << 6)) == (1 << 6)) {
++		phydev->autoneg = AUTONEG_DISABLE;
++		phydev->duplex = DUPLEX_FULL;
++
++		phy_write(phydev, 0x1e, 0x233);
++		reg = phy_read(phydev, 0x1f);
++		if ((reg & (1 << 0)) == 0) {
++			phydev->speed = SPEED_1000;
++		}
++		else {
++			phydev->speed = SPEED_100;
++		}
++	}
++
+ 	ret = genphy_config_aneg(phydev);
+ 	bcm54210s_config_init(phydev);
+ 
+@@ -306,6 +324,26 @@
+ 
+ 		phy_write(phydev, 0x1e, 0x21);
+ 		reg = phy_read(phydev, 0x1f);
++		if (((reg & (1 << 4)) == (1 << 4))) {
++			phy_write(phydev, 0x1e, 0x23e);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
++
++			phy_write(phydev, 0x1e, 0x21);
++			phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) & ~(2 << 1)) | (1 << 0));
++
++			phy_write(phydev, 0x1e, 0x23e);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
++		}
++		else {
++			phy_write(phydev, 0x1e, 0x23e);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
++
++			phy_write(phydev, 0x1e, 0x21);
++			phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) & ~(3 << 1)) & ~(1 << 0));
++		}
++
++		phy_write(phydev, 0x1e, 0x21);
++		reg = phy_read(phydev, 0x1f);
+ 		if (((reg & (1 << 4)) == (1 << 4)) && ((reg & (1 << 6)) != (1 << 6))) {
+ 			/* Only for such as LCP-1250R-J3SR-S */
+ 			phy_write(phydev, 0x1e, 0x235);
+@@ -337,21 +375,14 @@
+ 
+ 			phy_mode = 1;
+ 
+-			phy_write(phydev, 0x1e, 0x23e);
+-			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
+-
+-			phy_write(phydev, 0x1e, 0x21);
+-			phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) & ~(2 << 1)) | (1 << 0));
+-
+-			phy_write(phydev, 0x1e, 0x23e);
+-			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
+-
+ 			phydev->autoneg = AUTONEG_DISABLE;
++			phydev->duplex = DUPLEX_FULL;
+ 			phy_write(phydev, 0x1e, 0x233);
+ 			reg = phy_read(phydev, 0x1f);
+ 			if ((reg & (1 << 0)) == 0) {
+ 				/* speed 1000 duplex full */
+-				phy_write(phydev, 0x0, 0x140);
++				phydev->speed = SPEED_1000;
++				genphy_config_aneg(phydev);
+ 			}
+ 			else {
+ 				/* speed 100 duplex full */
+@@ -365,11 +396,13 @@
+ 					phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
+ 					msleep(500);
+ 					/* speed 100 duplex full */
+-					phy_write(phydev, 0x0, 0x2100);
++					phydev->speed = SPEED_100;
++					genphy_config_aneg(phydev);
+ 				}
+ 				else {
+ 					/* speed 1000 duplex full */
+-					phy_write(phydev, 0x0, 0x140);
++					phydev->speed = SPEED_1000;
++					genphy_config_aneg(phydev);
+ 				}
+ 			}
+ 		}
+@@ -387,6 +420,7 @@
+ 			phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) & ~(3 << 1)) & ~(1 << 0));
+ 
+ 			phydev->autoneg = AUTONEG_ENABLE;
++			genphy_config_aneg(phydev);
+ 		}
+ 		else {
+ 			phy_mode = 0;

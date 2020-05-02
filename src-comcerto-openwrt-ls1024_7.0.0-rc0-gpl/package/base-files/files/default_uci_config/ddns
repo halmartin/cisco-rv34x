@@ -1,0 +1,17 @@
+
+config service 'service_0'
+	option interface 'wan1'
+	option enabled '0'
+
+config service 'service_1'
+	option interface 'wan2'
+	option enabled '0'
+
+config service 'service_2'
+	option interface 'usb1'
+	option enabled '0'
+
+config service 'service_3'
+	option interface 'usb2'
+	option enabled '0'
+

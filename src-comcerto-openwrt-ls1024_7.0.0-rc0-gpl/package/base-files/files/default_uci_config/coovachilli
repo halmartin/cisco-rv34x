@@ -1,0 +1,7 @@
+
+config portal 'Default_Portal_Profile'
+	option profile 'Default_Portal_Profile'
+	option captiveauth '0'
+	option portal_redirect '0'
+	option timeout '1200'
+

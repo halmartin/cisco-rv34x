@@ -1,0 +1,22 @@
+diff --git a/drivers/net/usb/usbnet.c b/drivers/net/usb/usbnet.c
+index 4050535..6f39436 100755
+--- a/drivers/net/usb/usbnet.c
++++ b/drivers/net/usb/usbnet.c
+@@ -1682,7 +1682,7 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
+ 	dev->interrupt_count = 0;
+ 
+ 	dev->net = net;
+-	strcpy (net->name, "usb%d");
++	strcpy (net->name, "wwan%d");
+ 	memcpy (net->dev_addr, node_id, sizeof node_id);
+ 
+ 	/* rx and tx sides can use different message sizes;
+@@ -1707,7 +1707,7 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
+ 		if ((dev->driver_info->flags & FLAG_ETHER) != 0 &&
+ 		    ((dev->driver_info->flags & FLAG_POINTTOPOINT) == 0 ||
+ 		     (net->dev_addr [0] & 0x02) == 0))
+-			strcpy (net->name, "eth%d");
++			strcpy (net->name, "wwan%d");
+ 		/* WLAN devices should always be named "wlan%d" */
+ 		if ((dev->driver_info->flags & FLAG_WLAN) != 0)
+ 			strcpy(net->name, "wlan%d");

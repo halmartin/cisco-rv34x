@@ -1,0 +1,288 @@
+diff --git a/arch/arm/mach-comcerto/board-c2krv340.c b/arch/arm/mach-comcerto/board-c2krv340.c
+index 2fd47a2..af0e23a 100644
+--- a/arch/arm/mach-comcerto/board-c2krv340.c
++++ b/arch/arm/mach-comcerto/board-c2krv340.c
+@@ -663,6 +663,209 @@ static struct platform_device comcerto_pfe_device = {
+ 	.resource	= comcerto_pfe_resources,
+ };
+ 
++#define C2KRV340_GPIO_LED_WLAN5G_GREEN	44
++#define C2KRV340_GPIO_LED_DIAG_RED		50
++#define C2KRV340_GPIO_LED_WLAN2G_GREEN	51
++#define C2KRV340_GPIO_LED_POWER_GREEN	52
++#define C2KRV340_GPIO_LED_USB2_AMBER	53
++#define C2KRV340_GPIO_LED_USB2_GREEN	54
++#define C2KRV340_GPIO_LED_USB1_AMBER	55
++#define C2KRV340_GPIO_LED_USB1_GREEN	56
++#define C2KRV340_GPIO_LED_DMZ_GREEN		57
++#define C2KRV340_GPIO_LED_VPN_AMBER		58
++#define C2KRV340_GPIO_LED_VPN_GREEN		59
++
++static struct gpio_led comcerto_gpio_leds[] = {
++	{
++		.name			= "c2krv340:green:wlan5g",
++		.gpio			= C2KRV340_GPIO_LED_WLAN5G_GREEN,
++		.active_low		= 1,
++	},
++	{
++		.name			= "c2krv340:red:diag",
++		.gpio			= C2KRV340_GPIO_LED_DIAG_RED,
++		.active_low		= 1,
++	},
++	{
++		.name			= "c2krv340:green:wlan2g",
++		.gpio			= C2KRV340_GPIO_LED_WLAN2G_GREEN,
++		.active_low		= 1,
++	},
++	{
++		.name			= "c2krv340:green:power",
++		.gpio			= C2KRV340_GPIO_LED_POWER_GREEN,
++		.active_low		= 1,
++	},
++	{
++		.name			= "c2krv340:amber:usb2",
++		.gpio			= C2KRV340_GPIO_LED_USB2_AMBER,
++		.active_low		= 1,
++	},
++	{
++		.name			= "c2krv340:green:usb2",
++		.gpio			= C2KRV340_GPIO_LED_USB2_GREEN,
++		.active_low		= 1,
++	},
++	{
++		.name			= "c2krv340:amber:usb1",
++		.gpio			= C2KRV340_GPIO_LED_USB1_AMBER,
++		.active_low		= 1,
++	},
++	{
++		.name			= "c2krv340:green:usb1",
++		.gpio			= C2KRV340_GPIO_LED_USB1_GREEN,
++		.active_low		= 1,
++	},
++	{
++		.name			= "c2krv340:green:dmz",
++		.gpio			= C2KRV340_GPIO_LED_DMZ_GREEN,
++		.active_low		= 1,
++	},
++	{
++		.name			= "c2krv340:amber:vpn",
++		.gpio			= C2KRV340_GPIO_LED_VPN_AMBER,
++		.active_low		= 1,
++	},
++	{
++		.name			= "c2krv340:green:vpn",
++		.gpio			= C2KRV340_GPIO_LED_VPN_GREEN,
++		.active_low		= 1,
++	},
++};
++
++static struct gpio_led_platform_data comcerto_gpio_led_platform_data = {
++	.num_leds	= sizeof(comcerto_gpio_leds) / sizeof(struct gpio_led),
++	.leds		= comcerto_gpio_leds,
++};
++
++static struct platform_device comcerto_gpio_leds_device = {
++	.name		= "leds-gpio",
++	.id			= -1,
++	.dev		= {
++		.platform_data = &comcerto_gpio_led_platform_data,
++	},
++};
++
++static struct c2k_led_platdata led_c2krv340_green_wlan2g_0_data = {
++	.name			= "c2krv340:green:wlan2g_0",
++	.gpio			= C2KRV340_GPIO_LED_WLAN2G_GREEN,
++	.default_state	= LEDS_GPIO_DEFSTATE_ON,
++	.active_low		= 0,
++};
++
++static struct c2k_led_platdata led_c2krv340_green_wlan2g_1_data = {
++	.name			= "c2krv340:green:wlan2g_1",
++	.gpio			= C2KRV340_GPIO_LED_WLAN2G_GREEN,
++	.default_state	= LEDS_GPIO_DEFSTATE_ON,
++	.active_low		= 0,
++};
++
++static struct c2k_led_platdata led_c2krv340_green_wlan2g_2_data = {
++	.name			= "c2krv340:green:wlan2g_2",
++	.gpio			= C2KRV340_GPIO_LED_WLAN2G_GREEN,
++	.default_state	= LEDS_GPIO_DEFSTATE_ON,
++	.active_low		= 0,
++};
++
++static struct c2k_led_platdata led_c2krv340_green_wlan2g_3_data = {
++	.name			= "c2krv340:green:wlan2g_3",
++	.gpio			= C2KRV340_GPIO_LED_WLAN2G_GREEN,
++	.default_state	= LEDS_GPIO_DEFSTATE_ON,
++	.active_low		= 0,
++};
++
++static struct platform_device led_c2krv340_green_wlan2g_0_device = {
++	.name			= "leds-c2k",
++	.id			= 1,
++	.dev		= {
++		.platform_data	= &led_c2krv340_green_wlan2g_0_data,
++	},
++};
++
++static struct platform_device led_c2krv340_green_wlan2g_1_device = {
++	.name			= "leds-c2k",
++	.id			= 2,
++	.dev		= {
++		.platform_data	= &led_c2krv340_green_wlan2g_1_data,
++	},
++};
++
++static struct platform_device led_c2krv340_green_wlan2g_2_device = {
++	.name			= "leds-c2k",
++	.id			= 3,
++	.dev		= {
++		.platform_data	= &led_c2krv340_green_wlan2g_2_data,
++	},
++};
++
++static struct platform_device led_c2krv340_green_wlan2g_3_device = {
++	.name			= "leds-c2k",
++	.id			= 4,
++	.dev		= {
++		.platform_data	= &led_c2krv340_green_wlan2g_3_data,
++	},
++};
++
++static struct c2k_led_platdata led_c2krv340_green_wlan5g_0_data = {
++	.name			= "c2krv340:green:wlan5g_0",
++	.gpio			= C2KRV340_GPIO_LED_WLAN5G_GREEN,
++	.default_state	= LEDS_GPIO_DEFSTATE_ON,
++	.active_low		= 0,
++};
++
++static struct c2k_led_platdata led_c2krv340_green_wlan5g_1_data = {
++	.name			= "c2krv340:green:wlan5g_1",
++	.gpio			= C2KRV340_GPIO_LED_WLAN5G_GREEN,
++	.default_state	= LEDS_GPIO_DEFSTATE_ON,
++	.active_low		= 0,
++};
++
++static struct c2k_led_platdata led_c2krv340_green_wlan5g_2_data = {
++	.name			= "c2krv340:green:wlan5g_2",
++	.gpio			= C2KRV340_GPIO_LED_WLAN5G_GREEN,
++	.default_state	= LEDS_GPIO_DEFSTATE_ON,
++	.active_low		= 0,
++};
++
++static struct c2k_led_platdata led_c2krv340_green_wlan5g_3_data = {
++	.name			= "c2krv340:green:wlan5g_3",
++	.gpio			= C2KRV340_GPIO_LED_WLAN5G_GREEN,
++	.default_state	= LEDS_GPIO_DEFSTATE_ON,
++	.active_low		= 0,
++};
++
++static struct platform_device led_c2krv340_green_wlan5g_0_device = {
++	.name			= "leds-c2k",
++	.id			= 5,
++	.dev		= {
++		.platform_data	= &led_c2krv340_green_wlan5g_0_data,
++	},
++};
++
++static struct platform_device led_c2krv340_green_wlan5g_1_device = {
++	.name			= "leds-c2k",
++	.id			= 6,
++	.dev		= {
++		.platform_data	= &led_c2krv340_green_wlan5g_1_data,
++	},
++};
++
++static struct platform_device led_c2krv340_green_wlan5g_2_device = {
++	.name			= "leds-c2k",
++	.id			= 7,
++	.dev		= {
++		.platform_data	= &led_c2krv340_green_wlan5g_2_data,
++	},
++};
++
++static struct platform_device led_c2krv340_green_wlan5g_3_device = {
++	.name			= "leds-c2k",
++	.id			= 8,
++	.dev		= {
++		.platform_data	= &led_c2krv340_green_wlan5g_3_data,
++	},
++};
++
+ static struct platform_device *comcerto_devices[] __initdata = {
+ #if defined(CONFIG_MTD_NAND_COMCERTO) || defined(CONFIG_MTD_NAND_COMCERTO_MODULE)
+ 		&comcerto_nand,
+@@ -700,6 +903,15 @@ static struct platform_device *comcerto_devices[] __initdata = {
+ #if defined(CONFIG_COMCERTO_ELP_SUPPORT)
+ 	&comcerto_elp_device,
+ #endif
++	&comcerto_gpio_leds_device,
++	&led_c2krv340_green_wlan2g_0_device,
++	&led_c2krv340_green_wlan2g_1_device,
++	&led_c2krv340_green_wlan2g_2_device,
++	&led_c2krv340_green_wlan2g_3_device,
++	&led_c2krv340_green_wlan5g_0_device,
++	&led_c2krv340_green_wlan5g_1_device,
++	&led_c2krv340_green_wlan5g_2_device,
++	&led_c2krv340_green_wlan5g_3_device,
+ };
+ 
+ 
+diff --git a/arch/arm/mach-comcerto/include/mach/comcerto-common.h b/arch/arm/mach-comcerto/include/mach/comcerto-common.h
+index b07dd39..a7f18d0 100644
+--- a/arch/arm/mach-comcerto/include/mach/comcerto-common.h
++++ b/arch/arm/mach-comcerto/include/mach/comcerto-common.h
+@@ -139,6 +139,8 @@ struct comcerto_pfe_platform_data
+ struct c2k_led_platdata {
+ 	unsigned int		 gpio;
+ 	unsigned int		 flags;
++	unsigned int		 active_low : 1;
++	unsigned int		 default_state : 2;
+ 
+ 	char			*name;
+ 	char			*def_trigger;
+diff --git a/drivers/leds/leds-c2k.c b/drivers/leds/leds-c2k.c
+index dfd9029..9d93ff8 100644
+--- a/drivers/leds/leds-c2k.c
++++ b/drivers/leds/leds-c2k.c
+@@ -30,14 +30,16 @@ static void c2k_led_set(struct led_classdev *led_cdev,
+ 	spin_lock_irqsave(&c2k_gpio_lock, flags);
+ 	if (offset < 32) {
+ 		data = __raw_readl(COMCERTO_GPIO_OUTPUT_REG);
+-		if (value)
++		if ((pd->active_low > 0 && value > 0) ||
++			(pd->active_low <= 0 && value <= 0))
+ 			data &= ~(1 << offset);
+ 		else
+ 			data |= (1 << offset);
+ 		__raw_writel(data, COMCERTO_GPIO_OUTPUT_REG);
+ 	} else {
+ 		data = __raw_readl(COMCERTO_GPIO_63_32_PIN_OUTPUT);
+-		if (value)
++		if ((pd->active_low > 0 && value > 0) ||
++			(pd->active_low <= 0 && value <= 0))
+ 			data &= ~(1 << (offset - 32));
+ 		else
+ 			data |= (1 << (offset - 32));
+@@ -60,7 +62,8 @@ static int c2k_led_probe(struct platform_device *dev)
+ {
+ 	struct c2k_led_platdata *pdata = dev->dev.platform_data;
+ 	struct c2k_gpio_led *led;
+-	int ret;
++	int ret, state;
++	unsigned long flags = 0;
+ 
+ 	led = kzalloc(sizeof(struct c2k_gpio_led), GFP_KERNEL);
+ 	if (led == NULL) {
+@@ -73,6 +76,11 @@ static int c2k_led_probe(struct platform_device *dev)
+ 	led->cdev.brightness_set = c2k_led_set;
+ 	led->cdev.default_trigger = pdata->def_trigger;
+ 	led->cdev.name = pdata->name;
++	if (pdata->default_state == LEDS_GPIO_DEFSTATE_ON ||
++		pdata->default_state == LEDS_GPIO_DEFSTATE_OFF) {
++		state = (pdata->default_state == LEDS_GPIO_DEFSTATE_ON);
++		led->cdev.brightness = state ? LED_FULL : LED_OFF;
++	}
+ 	led->cdev.flags |= LED_CORE_SUSPENDRESUME;
+ 
+ 	led->pdata = pdata;

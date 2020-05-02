@@ -1,0 +1,54 @@
+#!/bin/sh /etc/rc.common
+START=95
+. /usr/lib/ddns/dynamic_dns_functions.sh
+start() {
+	. /usr/lib/ddns/dynamic_dns_functions.sh
+	start_daemon_for_all_ddns_sections
+	sleep 2
+	/etc/hotplug.d/iface/95-wanscript
+}
+
+stop() {
+	killall -9 dynamic_dns_updater.sh
+}
+
+reload() {
+
+	local ddns_pid=`pgrep -f -o ddns-cert-check.sh`
+        [ "$ddns_pid" == "" ] && {
+		ddns-cert-check.sh &
+        }
+	ddns_diff=$( cat /tmp/ddns | sed s/"'"//g | grep -E "=service|-ddns" | awk -F '=' '{print $1}' | awk -F '.' '{print $1"."$2}' | uniq)
+	for serv in $ddns_diff
+	do
+
+		case $serv in
+
+		-ddns*)
+			service_id=$(echo $serv | awk -F '.' '{print $2}')
+			if [ -e "/var/run/dynamic_dns/$service_id.pid" ]
+			then
+				old_pid=$(cat /var/run/dynamic_dns/$service_id.pid)
+				kill -9 $old_pid
+			fi
+		;;
+
+		ddns*)
+			section=$(echo $serv | awk -F '.' '{print $2}')
+			/usr/lib/ddns/dynamic_dns_updater.sh $section 1 &
+		;;
+
+		esac
+
+	done
+	rm /tmp/ddns
+}
+
+boot() {
+	iptables -w -A OUTPUT -t mangle -p tcp --dport 80 -j MARK --set-mark 0x20
+	rm /etc/ssl/certs/ChangeIP.pem
+	rm /etc/ssl/certs/DynDNS.pem
+	rm /etc/ssl/certs/No-ip.pem
+	ddns-cert-check.sh &
+	start
+}

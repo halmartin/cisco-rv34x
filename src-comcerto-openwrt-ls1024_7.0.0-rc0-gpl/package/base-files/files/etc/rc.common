@@ -1,0 +1,171 @@
+#!/bin/sh
+# 03-03-2017: harry.lin <harry.lin@deltaww.com>
+# Judge support more for RV160W, RV260W and RV260P
+# Copyright (C) 2006-2012 OpenWrt.org
+
+. $IPKG_INSTROOT/lib/functions.sh
+. $IPKG_INSTROOT/lib/functions/service.sh
+
+initscript=$1
+action=${2:-help}
+shift 2
+
+start() {
+	return 0
+}
+
+stop() {
+	return 0
+}
+
+reload() {
+	return 1
+}
+
+restart() {
+	trap '' TERM
+	stop "$@"
+	start "$@"
+}
+
+boot() {
+	start "$@"
+}
+
+shutdown() {
+	stop
+}
+
+disable() {
+	name="$(basename "${initscript}")"
+	rm -f "$IPKG_INSTROOT"/etc/rc.d/S??$name
+	rm -f "$IPKG_INSTROOT"/etc/rc.d/K??$name
+}
+
+enable() {
+	name="$(basename "${initscript}")"
+	disable
+	[ -n "$START" -o -n "$STOP" ] || {
+		echo "/etc/init.d/$name does not have a START or STOP value"
+		return 1
+	}
+	[ "$START" ] && ln -s "../init.d/$name" "$IPKG_INSTROOT/etc/rc.d/S${START}${name##S[0-9][0-9]}"
+	[ "$STOP"  ] && ln -s "../init.d/$name" "$IPKG_INSTROOT/etc/rc.d/K${STOP}${name##K[0-9][0-9]}"
+}
+
+enabled() {
+	name="$(basename "${initscript}")"
+	[ -x "$IPKG_INSTROOT/etc/rc.d/S${START}${name##S[0-9][0-9]}" ]
+}
+
+depends() {
+	return 0
+}
+
+help() {
+	cat <<EOF
+Syntax: $initscript [command]
+
+Available commands:
+	start	Start the service
+	stop	Stop the service
+	restart	Restart the service
+	reload	Reload configuration files (or restart if that fails)
+	enable	Enable service autostart
+	disable	Disable service autostart
+$EXTRA_HELP
+EOF
+}
+
+# for procd
+start_service() {
+	return 0
+}
+
+stop_service() {
+	return 0
+}
+
+service_triggers() {
+	return 0
+}
+
+service_running() {
+	return 0
+}
+
+${INIT_TRACE:+set -x}
+
+## Interface Name Configuration ## 
+
+_this_board=$(uci get systeminfo.sysinfo.pid | awk -F '-' '{print $1}')
+export __this_device=$_this_board
+if [ "$_this_board" = "RV160" -o "$_this_board" = "RV160W" ];then
+	export __lan_ifname="eth2"
+	export __wan1_ifname="eth0"
+	export __this_dev="pp"
+elif [ "$_this_board" = "RV260" -o "$_this_board" = "RV260W" -o "$_this_board" = "RV260P" ];then
+	export __lan_ifname="eth2"
+	export __wan1_ifname="eth0"
+	export __this_dev="pp"
+elif [ "$_this_board" = "RV340W" -o "$_this_board" = "RV340" -o "$_this_board" = "RV345" -o "$_this_board" = "RV345P" ];then
+	export __lan_ifname="eth3"
+	export __wan1_ifname="eth2"
+	export __wan2_ifname="eth0"
+	export __this_dev="bb2"
+fi
+
+## Interface Name Configuration Ends ##
+
+[ -e /proc/sys/kernel/core_pattern ] && {
+	ulimit -c unlimited
+	echo '/tmp/%e.%p.%s.%t.core' > /proc/sys/kernel/core_pattern
+}
+
+. "$initscript"
+
+[ -n "$USE_PROCD" ] && {
+	EXTRA_COMMANDS="${EXTRA_COMMANDS} running trace"
+
+	. $IPKG_INSTROOT/lib/functions/procd.sh
+	basescript=$(readlink "$initscript")
+	rc_procd() {
+		procd_open_service "$(basename ${basescript:-$initscript})" "$initscript"
+		"$@"
+		procd_close_service
+	}
+
+	start() {
+		rc_procd start_service "$@"
+		if eval "type service_started" 2>/dev/null >/dev/null; then
+			service_started
+		fi
+	}
+
+	trace() {
+		TRACE_SYSCALLS=1
+		start "$@"
+	}
+
+	stop() {
+		stop_service "$@"
+		procd_kill "$(basename ${basescript:-$initscript})" "$1"
+	}
+
+	reload() {
+		if eval "type reload_service" 2>/dev/null >/dev/null; then
+			reload_service "$@"
+		else
+			start
+		fi
+	}
+
+	running() {
+		service_running "$@"
+	}
+}
+
+ALL_COMMANDS="start stop reload restart boot shutdown enable disable enabled depends ${EXTRA_COMMANDS}"
+list_contains ALL_COMMANDS "$action" || action=help
+[ "$action" = "reload" ] && action='eval reload "$@" || restart "$@" && :'
+$action "$@"

@@ -1,0 +1,21 @@
+--- a/pppd/session.c	2016-03-31 17:20:22.906361788 +0530
++++ b/pppd/session.c	2016-03-31 17:20:09.782361896 +0530
+@@ -275,7 +275,8 @@ session_start(flags, user, passwd, ttyNa
+             }
+         }
+     }
+-
++/*As the open sessiong verification is not required for present pam module commenting it out */
++#if 0
+     if (ok && try_session && (SESS_ACCT & flags)) {
+         /* Only open a session if the user's account was found */
+         pam_error = pam_open_session (pamh, PAM_SILENT);
+@@ -288,7 +289,7 @@ session_start(flags, user, passwd, ttyNa
+             ok = 0;
+         }
+     }
+-
++#endif
+     /* This is needed because apparently the PAM stuff closes the log */
+     reopen_log();
+ 

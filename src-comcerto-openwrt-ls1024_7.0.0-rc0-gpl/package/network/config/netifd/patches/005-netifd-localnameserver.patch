@@ -1,0 +1,12 @@
+--- netifd-2014-09-08.1_Orig/interface-ip.c	2016-06-13 12:19:59.509593144 +0530
++++ netifd-2014-09-08.1/interface-ip.c	2016-06-13 12:24:35.569593144 +0530
+@@ -1126,6 +1126,9 @@ interface_write_resolv_conf(void)
+ 		return;
+ 	}
+ 
++	/* Adding local address as 1st nameserver */
++	fprintf(f, "nameserver 127.0.0.1\n");
++
+ 	vlist_for_each_element(&interfaces, iface, node) {
+ 		if (iface->state != IFS_UP)
+ 			continue;

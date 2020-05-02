@@ -1,0 +1,37 @@
+# 2017-11-03: Ganesh Reddy <ganesh.redd@nxp.com>
+# IP conntrack enum review corrections as per ASK 7.0.0 and fast path MACRO usage correction
+diff -aurN '--exclude-from=/tmp/fi' linux-4.1.8-orig/include/uapi/linux/netfilter/nf_conntrack_common.h linux-4.1.8/include/uapi/linux/netfilter/nf_conntrack_common.h
+--- linux-4.1.8-orig/include/uapi/linux/netfilter/nf_conntrack_common.h	2017-11-01 11:57:47.433580006 +0530
++++ linux-4.1.8/include/uapi/linux/netfilter/nf_conntrack_common.h	2017-11-01 12:02:17.753574866 +0530
+@@ -108,14 +108,17 @@
+ 	/* Connection is assured by DPI application */
+ 	IPS_DPI_ALLOWED_BIT = 15,
+ 	IPS_DPI_ALLOWED = (1 << IPS_DPI_ALLOWED_BIT),
+-    IPS_DROP_CONN_BIT = 15,
+-    IPS_DROP_CONN = (1 << IPS_DROP_CONN_BIT),
+ #endif
+ 	/* Trigger, not included in offical kernel.
+ 	* Make sure bit number is not overlapped with anyone above.
+ 	*/
+ 	IPS_TRIGGER_BIT = 16,
+ 	IPS_TRIGGER = (1 << IPS_TRIGGER_BIT),
++
++#ifdef CONFIG_CPE_FAST_PATH
++	IPS_DROP_CONN_BIT = 17,
++	IPS_DROP_CONN = (1 << IPS_DROP_CONN_BIT),
++#endif
+ };
+ 
+ /* Connection tracking event types */
+diff -aurN '--exclude-from=/tmp/fi' linux-4.1.8-orig/net/netfilter/nf_conntrack_core.c linux-4.1.8/net/netfilter/nf_conntrack_core.c
+--- linux-4.1.8-orig/net/netfilter/nf_conntrack_core.c	2017-11-01 16:26:08.857273880 +0530
++++ linux-4.1.8/net/netfilter/nf_conntrack_core.c	2017-11-01 16:27:43.265272085 +0530
+@@ -1700,7 +1700,7 @@
+     set_bit(IPS_DPI_ALLOWED_BIT, &ct->status);
+     nf_conntrack_event_cache(IPCT_PROTOINFO, ct);
+         
+-#if defined(CONFIG_COMCERTO_FP)
++#ifdef CONFIG_CPE_FAST_PATH
+     new_mark = (ct->qosconnmark & ~mask) | mark ;
+         
+     if (new_mark != ct->qosconnmark)

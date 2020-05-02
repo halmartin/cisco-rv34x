@@ -1,0 +1,40 @@
+diff -rauN a/public.c b/public.c
+--- a/public.c	2016-10-07 13:00:13.967434985 +0530
++++ b/public.c	2016-10-07 18:07:57.601471336 +0530
+@@ -97,10 +97,10 @@
+     char *dn=NULL;
+     char *attrs[]       = {"memberOf", NULL};
+     char **values;
+-    int i;
++    int i, ii=0;
+     char *attribute     = "";
+     BerElement *ber;
+-    char *group=NULL;
++    char *group=NULL, *data_module=NULL;
+     FILE *file = NULL;
+     char tmpdn[256] = {'\0'};
+     char *token = NULL;
+@@ -182,10 +182,20 @@
+                      group = strtok(group,"=");
+                      group = strtok(NULL,"\0");
+ 
+-                 }
+                  if (group != NULL)
+-                     (void) pam_set_data (pamh, "groupattr0",(void *) strdup (group),
+-                                                                     free_data);
++                 {
++                    data_module = (char*) calloc(1, strlen("groupattr")+2);
++                    if (data_module != NULL)
++                    {
++                       sprintf(data_module,"groupattr%d",ii++);
++
++                       char *dupvalue = strdup(group);
++                       (void *) pam_set_data( pamh, data_module, dupvalue , free_data);
++ 
++                       free(data_module);
++                    }
++                 }
++               }
+                  ldap_value_free(values);
+              }
+           }

@@ -1,0 +1,62 @@
+#!/bin/sh
+. /etc/boardInfo
+if [ "$#" -ne 3 ];then
+	echo "Usage:/usr/bin/updateCertUsage add|del CERT_NAME APPLICATION_NAME"
+	exit 1
+fi
+
+CERT_UCI_FILE="/tmp/.uci/certificate"
+CERTS_STATS_COMMAND="/usr/bin/certscript"
+action=$1
+certname="$2"
+
+tmp=`echo $certname | grep ".pem$"`
+if [ -n "$tmp" ];then
+	certname=`echo $certname | cut -d . -f 1` >/dev/null 2>&1
+fi
+
+application_name="$3"
+cert_type=`uci get certificate.$certname.type`
+useby=`uci get certificate.$certname.useby` >/dev/null 2>&1
+[ -z "$useby" ] && {
+	useby="-"
+}
+
+application_name=`echo "$application_name" | awk '{print substr($0,0,127)}'`
+
+if [ "$action" = "add" ];then
+	if [ "$useby" = "-" ];then
+		`uci set certificate.$certname.useby=$application_name`
+	else
+		# check for duplication
+		dup=`echo $useby | grep -w "${application_name}"`
+		if [ -z "$dup" ];then
+			`uci set certificate.$certname.useby="$useby"" ""$application_name"`
+		else
+			echo "" > $CERT_UCI_FILE
+		fi
+	fi
+	uci commit certificate
+elif [ "$action" = "del" ];then
+	temp=`echo $useby | grep " "`
+	cert_exists=`echo $useby | grep $application_name`
+	if [ -n "$cert_exists" ];then
+		if [ -z "$temp"  ];then
+			`uci set certificate.$certname.useby="-"`
+		else
+			newuseby=`echo $useby | sed -e "s/\<$application_name\>//"`
+			newuseby=`echo $newuseby | sed -e "s/  */ /"`
+			#remove spaces from begining of line (if any)
+			newuseby=`echo $newuseby | sed -e "s/^ *//"`
+			newuseby=`echo $newuseby | sed -e "s/$ *//"`
+			`uci set certificate.$certname.useby="$newuseby"`
+		fi
+
+	else
+		echo "" > $CERT_UCI_FILE
+	fi
+	uci commit certificate
+fi
+
+$CERTS_STATS_COMMAND update $certname
+#uci show certificate

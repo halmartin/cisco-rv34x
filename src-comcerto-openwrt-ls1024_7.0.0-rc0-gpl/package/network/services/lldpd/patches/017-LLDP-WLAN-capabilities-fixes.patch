@@ -1,0 +1,32 @@
+diff -ruaN a/src/lldpd.c b/src/lldpd.c
+--- a/src/lldpd.c	2017-11-21 17:59:03.515076225 +0530
++++ b/src/lldpd.c	2017-11-21 18:01:47.991076205 +0530
+@@ -886,7 +886,8 @@
+ 	char *hp;
+ 	int f;
+ 	char status;
+-
++	FILE *fp = NULL;
++	char ch;
+ 	/* Set system name and description */
+ 	if (uname(&un) != 0)
+ 		fatal("failed to get system information");
+@@ -922,6 +923,18 @@
+ 			LOCAL_CHASSIS(cfg)->c_cap_enabled &= ~LLDP_CAP_ROUTER;
+ 		close(f);
+ 	}
++       	/* check wireless */
++       	if ((strncmp(PID_RV34X,"RV260W",6) == 0) || (strncmp(PID_RV34X,"RV160W",6) == 0))
++	{
++
++		fp = fopen("/sys/class/gpio/gpio6/value", "r");
++		ch = fgetc(fp);
++		if((ch == '0') || (ch == "0"))
++			LOCAL_CHASSIS(cfg)->c_cap_enabled |= LLDP_CAP_WLAN;
++		
++		pclose(fp);
++	}
++
+ #ifdef ENABLE_LLDPMED
+ 	if (LOCAL_CHASSIS(cfg)->c_cap_available & LLDP_CAP_TELEPHONE)
+ 		LOCAL_CHASSIS(cfg)->c_cap_enabled |= LLDP_CAP_TELEPHONE;

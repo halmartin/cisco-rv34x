@@ -1,0 +1,59 @@
+#!/bin/sh
+# This script is executed as part of the hotplug event with
+# HOTPLUG_TYPE=iface, triggered by various scripts when an interface
+# is configured (ACTION=ifup) or deconfigured (ACTION=ifdown).  The
+# interface is available as INTERFACE, the real devicie as DEVICE.
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+[ "$ACTION" == "rtupd" ] && exit 0
+[ "$DEVICE" == "lo" ] && exit 0
+
+#logger -t button-hotplug-openvpn Device: $DEVICE   $INTERFACE/ Action: $ACTION
+
+INTERFACENAME=`echo $INTERFACE | sed 's/p//g'`
+
+#No Handling is needed for GRE.
+#No Handling needed for LAN
+case "$INTERFACE" in *vlan*) exit 0 ;; gre*) exit 0 ;; esac
+
+############+PLUTO_CONNECTION=`echo "$PLUTO_CONNECTION"|sed 's/-[0-9][0-9]*$//g'`
+#Removing digit from Interface (From WAN1), as we have interface name like WAN instead of WAN1
+INTERFACENAME=`echo $INTERFACENAME | sed 's/[1-9]$//g'`
+
+case "$ACTION" in
+	ifup)
+		local status=$(uci get openvpn.global.enable)
+		[ "$status" = "0" ] && exit 0
+
+		local wan_interface=$(uci get openvpn.global.interface)
+
+		#Converting interface names to local
+		wan_iface=`{ echo "$wan_interface"; }|tr [A-Z] [a-z]`
+		hotplg_iface=`{ echo "$INTERFACENAME"; }|tr [A-Z] [a-z]`
+
+		[ "$wan_iface" = "$hotplg_iface" ] && {
+			if [ "$INTERFACENAME" = "wan" ]; then
+				network_get_wanip_cached local_addr "wan1"
+			elif [ "$INTERFACENAME" = "usb" ]; then
+				network_get_wanip_cached local_addr "usb1"
+			fi
+
+
+#		if [ "$wan_interface" = "WAN" -o "$wan_interface" = "USB" ]; then
+			if [ "$local_addr" = "" ]
+			then
+				uci commit openvpn
+				/etc/init.d/openvpn stop &
+			else
+				uci set openvpn.global.local=$local_addr
+				uci commit openvpn
+				/etc/init.d/openvpn reload &
+			fi
+#		fi
+		}
+	;;
+	ifdown)
+	;;
+esac

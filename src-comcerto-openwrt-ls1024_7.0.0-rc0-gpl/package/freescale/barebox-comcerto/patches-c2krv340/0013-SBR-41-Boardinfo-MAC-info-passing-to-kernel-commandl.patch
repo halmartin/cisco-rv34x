@@ -1,0 +1,221 @@
+From 118850569d5bc65a3074d82cecf071c583de76b1 Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Sat, 22 Aug 2015 18:19:31 +0530
+Subject: [PATCH 13/60] SBR-41 Boardinfo MAC info passing to kernel commandline
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/env/bin/boot | 24 +++++++++
+ arch/arm/boards/comcerto-rv340/env/config   |  9 ++--
+ commands/boardinfo.c                        | 81 +++++++++++++++++++++++------
+ 3 files changed, 92 insertions(+), 22 deletions(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/boot b/arch/arm/boards/comcerto-rv340/env/bin/boot
+index 0602a39..cceeb41 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/boot
++++ b/arch/arm/boards/comcerto-rv340/env/bin/boot
+@@ -66,6 +66,30 @@ elif [ x$rootfs = xrootfs2 ]; then
+   rootfs_mtdblock_nand=5
+ fi
+ 
++echo "Setting env LAN, WAN1, WAN2..."
++boardinfo -m
++echo "done"
++echo "Exporting env LAN, WAN1, WAN2..."
++export LAN="$LAN" WAN1="$WAN1" WAN2="$WAN2"
++echo "done"
++
++if [  "X$LAN" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN1" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN2" != "XFF:FF:FF:FF:FF:FF" ]; then
++  echo "FOUND MACs from Boardinfo using same in bootargs"
++  export eth0_ethaddr="$WAN2" eth1_ethaddr="$WAN1" eth2_ethaddr="$LAN"
++  echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr, eth2mac = $eth2_ethaddr"
++  bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr,$eth2_ethaddr"
++elif [ "X$eth0_ethaddr" != "X" ] && [ "X$eth1_ethaddr" != "X" ] && [ "X$eth2_ethaddr" != "X" ]; then
++  echo "One or More MACs from Boardinfo are INVALID!!! Using defaults from /env/config ..."
++  echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr, eth2mac = $eth2_ethaddr"
++  bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr,$eth2_ethaddr"
++else
++  echo "One or more MACs either from boardinfo OR default config are INVALID!!!"
++  echo "Can not pass INVALID MAC IDs in bootargs!!!"
++  echo "Please update manually required LAN, WAN1, WAN2 MACs either in flash boardinfo OR in default /env/config file!!!"
++  exit 1
++fi
++echo "done"
++
+ if [ x$ip = xdhcp ]; then
+ 	bootargs="$bootargs ip=dhcp"
+ elif [ x$ip = xnone ]; then
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index 091075d..ad364b5 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -9,9 +9,9 @@ ip=none
+ #eth0.netmask=255.255.255.0
+ #eth0.serverip=192.168.1.101
+ #eth0.gateway=192.168.1.254
+-eth0.ethaddr=00:0A:0B:0C:0D:0E
+-eth1.ethaddr=00:1A:1B:1C:1D:1E
+-eth2.ethaddr=00:2A:2B:2C:2D:2E
++eth0_ethaddr="00:0A:0B:0C:0D:0E"
++eth1_ethaddr="00:1A:1B:1C:1D:1E"
++eth2_ethaddr="00:2A:2B:2C:2D:2E"
+ 
+ # can be either 'nfs', 'tftp' , 'nor' , 'nand' and 'sata'
+ kernel_loc=nand
+@@ -44,7 +44,6 @@ autoboot_timeout=3
+ 
+ usb3_internal_clk="yes"
+ 
+-loglevel=3
++loglevel=4
+ 
+ bootargs="console=ttyS0,115200n8, loglevel=$loglevel, init=/etc/preinit"
+-bootargs="$bootargs mac_addr=$eth0.ethaddr,$eth1.ethaddr,$eth2.ethaddr"
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+index 044928b..249ef62 100644
+--- a/commands/boardinfo.c
++++ b/commands/boardinfo.c
+@@ -59,6 +59,53 @@ typedef struct c2krv340_board_info {
+ char *help_string = "Check Usage: boardinfo <Enter>\n";
+ char *filename = "/dev/spi1.board-info" ;
+ 
++static int command_boardinfo_mac(int argc, char *argv[])
++{
++  int fd = -1, n_read = 0, i = 0;
++  char out_str[18] = {0}, ifname[6] = {0};
++  c2krv340 *board_data = NULL;
++
++  fd = open(filename, O_RDONLY, 0);
++  if (fd < 0) {
++    printf("could not open %s!\n", filename);
++    return COMMAND_ERROR;
++  }
++
++  board_data = (c2krv340 *)xmalloc(sizeof(c2krv340));
++  if ( board_data == NULL )
++  {
++    printf("Error %d! : %s\n", errno, errno_str());
++    close(fd);
++    printf("\n");
++    return COMMAND_ERROR;
++  }
++
++  memset((char *)board_data, 0x00, sizeof(c2krv340));
++  n_read = read(fd, (char *)board_data, sizeof(c2krv340));
++  close(fd);
++  flush(stdout);
++
++  for (i = 0; i < COUNT_MAC; i++)
++  {
++    memset(ifname, 0x00, sizeof(ifname));
++    memset(out_str, 0x00, sizeof(out_str));
++    sprintf(out_str,"%02X:%02X:%02X:%02X:%02X:%02X",\
++                      (unsigned char)board_data->mac[i][0],\
++                      (unsigned char)board_data->mac[i][1],\
++                      (unsigned char)board_data->mac[i][2],\
++                      (unsigned char)board_data->mac[i][3],\
++                      (unsigned char)board_data->mac[i][4],\
++                      (unsigned char)board_data->mac[i][5]);
++    sprintf(ifname,"%s", i == 0 ? "LAN" : (i == 1 ? "WAN1" : "WAN2"));
++    printf("\n%-4s MAC : %s", ifname, out_str);
++    setenv(ifname, out_str);
++  }
++
++  free(board_data);
++  printf("\n");
++  return COMMAND_SUCCESS;
++}
++
+ static int command_boardinfo_update(int argc, char *argv[])
+ {
+   int ret = 0, fd = -1, n_written = 0;
+@@ -145,7 +192,7 @@ static int command_boardinfo_update(int argc, char *argv[])
+   {
+     isOctetFull = empty;
+     n_mac_octet = 0;
+-    printf("\nEnter %-5s MAC : ",  i == 0 ? "LAN" : (i == 1 ? "WAN-1" : "WAN-2"));
++    printf("\nEnter %-5s MAC : ",  i == 0 ? "LAN" : (i == 1 ? "WAN1" : "WAN2"));
+     while (n_mac_octet < TOTAL_MAC_OCTET)
+     {
+       c = toupper(getc());
+@@ -184,14 +231,6 @@ static int command_boardinfo_update(int argc, char *argv[])
+     return COMMAND_ERROR;
+   }
+ 
+-  /* ENOSYS is no error here, many devices do not need it */
+-  if (ret && errno != -ENOSYS) {
+-    printf("could not unprotect %s: %s\n", filename, errno_str());
+-    close(fd);
+-    printf("\n");
+-    return COMMAND_ERROR;
+-  }
+-
+   /* Erase Board Info Partition */
+   ret = erase(fd, ~0, 0);
+ 
+@@ -213,7 +252,7 @@ static int command_boardinfo_update(int argc, char *argv[])
+ static int command_boardinfo_show(int argc, char *argv[])
+ {
+   int fd = -1, n_read = 0, i = 0;
+-  char out_str[18] = {0};
++  char out_str[18] = {0}, ifname[6] = {0};
+   c2krv340 *board_data = NULL;
+ 
+   fd = open(filename, O_RDONLY, 0);
+@@ -267,6 +306,7 @@ static int command_boardinfo_show(int argc, char *argv[])
+ 
+   for (i = 0; i < COUNT_MAC; i++)
+   {
++    memset(ifname, 0x00, sizeof(ifname));
+     memset(out_str, 0x00, sizeof(out_str));
+     sprintf(out_str,"%02X:%02X:%02X:%02X:%02X:%02X",\
+                       (unsigned char)board_data->mac[i][0],\
+@@ -275,7 +315,9 @@ static int command_boardinfo_show(int argc, char *argv[])
+                       (unsigned char)board_data->mac[i][3],\
+                       (unsigned char)board_data->mac[i][4],\
+                       (unsigned char)board_data->mac[i][5]);
+-    printf("\n%-5s MAC : %s", i == 0 ? "LAN" : i == 1 ? "WAN-1" : "WAN-2", out_str);
++    sprintf(ifname,"%s", i == 0 ? "LAN" : (i == 1 ? "WAN1" : "WAN2"));
++    printf("\n%-4s MAC : %s", ifname, out_str);
++    setenv(ifname, out_str);
+   }
+ 
+   free(board_data);
+@@ -285,7 +327,11 @@ static int command_boardinfo_show(int argc, char *argv[])
+ 
+ static int do_boardinfo(struct command *cmdtp, int argc, char *argv[])
+ {
+-  if (strcmp(argv[1], "-u") == 0)
++  if (strcmp(argv[1], "-m") == 0)
++  {
++    command_boardinfo_mac(argc, argv);
++  }
++  else if (strcmp(argv[1], "-u") == 0)
+   {
+     command_boardinfo_update(argc, argv);
+   }
+@@ -304,15 +350,16 @@ static const __maybe_unused char cmd_boardinfo_help[] =
+ "Usage: boardinfo [OPTIONS]\n"
+ "\n"
+ "options:\n"
+-" -u      update board-info (default updates info to /dev/spi1.board-info)\n"
+-" -s      lists boardinfo contents from /dev/spi1.board-info\n"
++" -m  lists boardinfo MAC ID contents from /dev/spi1.board-info\n"
++" -u  update board-info (default updates info to /dev/spi1.board-info)\n"
++" -s  lists boardinfo contents from /dev/spi1.board-info\n"
+ " e.g.    boardinfo -u\n"
+ "Enter PID : <MAX 11 char>\n"
+ "Enter VID : <MAX  3 char>\n"
+ "Enter S/N : <MAX 11 char>\n"
+-"Enter LAN MAC   : <6 octects of MAC address with : separator e.g. aa:bb:cc:dd:ee:f0 >\n"
+-"Enter WAN-1 MAC : <6 octects of MAC address with : separator e.g. aa:bb:cc:dd:ee:f1 >\n"
+-"Enter WAN-2 MAC : <6 octects of MAC address with : separator e.g. aa:bb:cc:dd:ee:f2 >\n"
++"Enter LAN MAC   : <6 octets of MAC address with : separator e.g. aa:bb:cc:dd:ee:f0 >\n"
++"Enter WAN-1 MAC : <6 octets of MAC address with : separator e.g. aa:bb:cc:dd:ee:f1 >\n"
++"Enter WAN-2 MAC : <6 octets of MAC address with : separator e.g. aa:bb:cc:dd:ee:f2 >\n"
+ ;
+ 
+ BAREBOX_CMD_START(boardinfo)
+-- 
+2.7.4
+

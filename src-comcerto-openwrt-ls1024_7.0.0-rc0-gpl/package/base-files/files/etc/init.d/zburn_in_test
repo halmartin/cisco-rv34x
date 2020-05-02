@@ -1,0 +1,8 @@
+#!/bin/sh /etc/rc.common
+# 03-03-2017: harry.lin <harry.lin@deltaww.com>
+# Add burn in test for facotry test require
+
+START=99
+boot() {
+	[ -f /mnt/packages/burn_in/burn_in_test ] && /mnt/packages/burn_in/burn-in-init start
+}

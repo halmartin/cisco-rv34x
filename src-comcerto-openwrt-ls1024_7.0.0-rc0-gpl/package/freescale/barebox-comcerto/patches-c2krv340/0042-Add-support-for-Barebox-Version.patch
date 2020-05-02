@@ -1,0 +1,146 @@
+From c3c5de38a1c7cacfe5ab5397fc523d5cfedb5dc6 Mon Sep 17 00:00:00 2001
+From: user <user@user-VirtualBox.(none)>
+Date: Wed, 30 Mar 2016 12:06:46 +0530
+Subject: [PATCH 42/60] Add support for Barebox Version Signed-off-by: user
+ <user@user-VirtualBox.(none)>
+
+---
+ arch/arm/boards/comcerto-rv340/env/bin/boot        |  5 +++
+ arch/arm/configs/comcerto-2k_rv340_defconfig       |  1 +
+ arch/arm/configs/comcerto-2k_rv340_diags_defconfig |  1 +
+ .../configs/comcerto-2k_rv340_uloader_defconfig    |  1 +
+ commands/Kconfig                                   |  5 +++
+ commands/Makefile                                  |  1 +
+ commands/version_rv340.c                           | 40 ++++++++++++++++++++++
+ 7 files changed, 54 insertions(+)
+ create mode 100644 commands/version_rv340.c
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/boot b/arch/arm/boards/comcerto-rv340/env/bin/boot
+index d6eef74..adf19bb 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/boot
++++ b/arch/arm/boards/comcerto-rv340/env/bin/boot
+@@ -236,6 +236,11 @@ if [ -n $bootver ]; then
+   bootargs="$bootargs bareboxver="$bootver""
+ fi
+ 
++version_rv340
++if [ -n $bootver_rv340 ]; then
++  bootargs="$bootargs bareboxver_rv340="$bootver_rv340""
++fi
++
+ #POWER_LED ON
+ gpio_direction_output $GPIO_LED_POWER $ON
+ gpio_set_value $GPIO_LED_POWER $ON
+diff --git a/arch/arm/configs/comcerto-2k_rv340_defconfig b/arch/arm/configs/comcerto-2k_rv340_defconfig
+index 2ffc691..da4878f 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_defconfig
+@@ -249,6 +249,7 @@ CONFIG_CMD_TIMEOUT=y
+ CONFIG_CMD_PARTITION=y
+ CONFIG_CMD_TEST=y
+ CONFIG_CMD_VERSION=y
++CONFIG_CMD_VERSION_RV340=y
+ CONFIG_CMD_HELP=y
+ CONFIG_CMD_DEVINFO=y
+ CONFIG_CMD_GPIO=y
+diff --git a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+index 8795caf..0df31b0 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+@@ -289,6 +289,7 @@ CONFIG_CMD_TIMEOUT=y
+ CONFIG_CMD_PARTITION=y
+ CONFIG_CMD_TEST=y
+ CONFIG_CMD_VERSION=y
++CONFIG_CMD_VERSION_RV340=y
+ CONFIG_CMD_HELP=y
+ CONFIG_CMD_DEVINFO=y
+ # CONFIG_CMD_GPIO is not set
+diff --git a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+index c4f7556..3c53997 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+@@ -228,6 +228,7 @@ CONFIG_CMD_BOOTB=y
+ # CONFIG_CMD_TIMEOUT is not set
+ # CONFIG_CMD_PARTITION is not set
+ # CONFIG_CMD_VERSION is not set
++# CONFIG_CMD_VERSION_RV340 is not set
+ # CONFIG_CMD_HELP is not set
+ # CONFIG_CMD_DEVINFO is not set
+ # CONFIG_CMD_UNLZO is not set
+diff --git a/commands/Kconfig b/commands/Kconfig
+index 12d5936..6a5a7bb 100644
+--- a/commands/Kconfig
++++ b/commands/Kconfig
+@@ -369,6 +369,11 @@ config CMD_VERSION
+ 	default y
+ 	prompt "version"
+ 
++config CMD_VERSION_RV340
++        tristate
++        default y
++        prompt "rv340 version"
++
+ config CMD_HELP
+ 	tristate
+ 	default y
+diff --git a/commands/Makefile b/commands/Makefile
+index 88518d2..ef41e31 100755
+--- a/commands/Makefile
++++ b/commands/Makefile
+@@ -43,6 +43,7 @@ obj-$(CONFIG_CMD_NAND)		+= comcerto_nand.o
+ obj-$(CONFIG_CMD_TRUE)		+= true.o
+ obj-$(CONFIG_CMD_FALSE)		+= false.o
+ obj-$(CONFIG_CMD_VERSION)	+= version.o
++obj-$(CONFIG_CMD_VERSION_RV340)	+= version_rv340.o				
+ obj-$(CONFIG_CMD_SOCINFO)	+= socinfo.o
+ obj-$(CONFIG_CMD_HELP)		+= help.o
+ obj-$(CONFIG_CMD_LSMOD)		+= lsmod.o
+diff --git a/commands/version_rv340.c b/commands/version_rv340.c
+new file mode 100644
+index 0000000..148107c
+--- /dev/null
++++ b/commands/version_rv340.c
+@@ -0,0 +1,40 @@
++/*
++ * (C) Copyright 2000-2003
++ * Wolfgang Denk, DENX Software Engineering, wd@denx.de.
++ *
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of
++ * the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ * MA 02111-1307 USA
++ */
++
++#include <common.h>
++#include <command.h>
++
++const char version_string_rv340[] = "1.0.00.00";
++
++static int do_version_rv340(struct command *cmdtp, int argc, char *argv[])
++{
++	printf ("\n%s\n", version_string_rv340);
++	setenv("bootver_rv340",version_string_rv340);
++	return 0;
++}
++
++BAREBOX_CMD_START(version_rv340)
++	.cmd		= do_version_rv340,
++	.usage		= "print rv340 barebox version",
++BAREBOX_CMD_END
++
+-- 
+2.7.4
+

@@ -1,0 +1,22 @@
+--- a/scripts/netifd-proto.sh	2018-02-05 12:17:16.224626882 +0530
++++ b/scripts/netifd-proto.sh	2018-02-06 11:02:31.576623562 +0530
+@@ -124,6 +125,19 @@
+ 	append PROTO_ROUTE "$target/$mask/$gw//"
+ }
+ 
++proto_get_metric() {
++	local metrics
++	metrics=$(uci -P/var/state show network | grep metric | awk -F '=' '{print $2}')
++	for i in `seq 4 2 100`
++	do
++		metric=$(echo $metrics | grep $i)
++		if [ "$metric" = "" ];then
++			eval "export -- \"$1=\$i\""
++			break
++		fi
++	done
++}
++
+ proto_add_ipv6_route() {
+ 	local target="$1"
+ 	local mask="$2"

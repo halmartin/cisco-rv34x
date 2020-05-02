@@ -1,0 +1,101 @@
+From ca10aaef9da42f784a95da7cd504678c9e97c0be Mon Sep 17 00:00:00 2001
+From: user <user@user-VirtualBox.(none)>
+Date: Thu, 4 Feb 2016 12:12:20 +0530
+Subject: [PATCH 34/60] Add support for yaffs2 partitions Signed-off-by: user
+ <user@user-VirtualBox.(none)>
+
+---
+ arch/arm/boards/comcerto-rv340/env/bin/_update_help  | 10 +++++-----
+ arch/arm/boards/comcerto-rv340/env/bin/update_jffs2  | 16 ----------------
+ arch/arm/boards/comcerto-rv340/env/bin/update_yaffs2 | 16 ++++++++++++++++
+ arch/arm/boards/comcerto-rv340/env/config            | 10 +++++-----
+ 4 files changed, 26 insertions(+), 26 deletions(-)
+ delete mode 100644 arch/arm/boards/comcerto-rv340/env/bin/update_jffs2
+ create mode 100755 arch/arm/boards/comcerto-rv340/env/bin/update_yaffs2
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/_update_help b/arch/arm/boards/comcerto-rv340/env/bin/_update_help
+index 4dd358b..95103de 100644
+--- a/arch/arm/boards/comcerto-rv340/env/bin/_update_help
++++ b/arch/arm/boards/comcerto-rv340/env/bin/_update_help
+@@ -12,8 +12,8 @@ echo "type update -t barebox -d nand [-m tftp|xmodem|ddr] [-f imagename|-a addre
+ echo "type update -t <kernel1 | kernel2> -d nand [-m tftp|xmodem|ddr] [-f imagename| -a address] to update kernel into flash"
+ echo "type update -t <rootfs1 | rootfs2> -d nand [-m tftp|xmodem|ddr] [-f imagename| -a address] to update rootfs into flash"
+ echo "type update_firmware <image1 | image2> to update kernel, rootfs on image1 OR image2"
+-echo "type update -t configcert -d nand to update jffs2 partition : config "
+-echo "type update -t avcsign -d nand to update jffs2 partition : avcsign"
+-echo "type update -t webrootdb -d nand to update jffs2 partition : webrootdb"
+-echo "type update -t license -d nand to update jffs2 partition : license"
+-echo "type update_jffs2 to update all jffs2 partitions config, avcsign, webrootdb, license"
++echo "type update -t configcert -d nand to update yaffs2 partition : config "
++echo "type update -t avcsign -d nand to update yaffs2 partition : avcsign"
++echo "type update -t webrootdb -d nand to update yaffs2 partition : webrootdb"
++echo "type update -t license -d nand to update yaffs2 partition : license"
++echo "type update_yaffs2 to update all yaffs2 partitions config, avcsign, webrootdb, license"
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/update_jffs2 b/arch/arm/boards/comcerto-rv340/env/bin/update_jffs2
+deleted file mode 100644
+index 9619bb3..0000000
+--- a/arch/arm/boards/comcerto-rv340/env/bin/update_jffs2
++++ /dev/null
+@@ -1,16 +0,0 @@
+-#!/bin/sh
+-
+-. /env/config
+-
+-echo "Updating configcert with Image : $imageconfig ..."
+-update -t configcert -d nand
+-echo "done."
+-echo "Updating avcsign with Image : $imageavc ..."
+-update -t avcsign -d nand
+-echo "done."
+-echo "Updating webrootdb with Image : $imageweb ..."
+-update -t webrootdb -d nand
+-echo "done."
+-echo "Updating license with Image : $imagelic ... "
+-update -t license -d nand
+-echo "done."
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/update_yaffs2 b/arch/arm/boards/comcerto-rv340/env/bin/update_yaffs2
+new file mode 100755
+index 0000000..9619bb3
+--- /dev/null
++++ b/arch/arm/boards/comcerto-rv340/env/bin/update_yaffs2
+@@ -0,0 +1,16 @@
++#!/bin/sh
++
++. /env/config
++
++echo "Updating configcert with Image : $imageconfig ..."
++update -t configcert -d nand
++echo "done."
++echo "Updating avcsign with Image : $imageavc ..."
++update -t avcsign -d nand
++echo "done."
++echo "Updating webrootdb with Image : $imageweb ..."
++update -t webrootdb -d nand
++echo "done."
++echo "Updating license with Image : $imagelic ... "
++update -t license -d nand
++echo "done."
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index 4276658..e5740ff 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -31,11 +31,11 @@ rootfsimage=openwrt-comcerto2000-hgw-rootfs-ubi_nand.img
+ kernelimage_type=uimage
+ kernelimage=openwrt-comcerto2000-hgw-uImage.img
+ 
+-# jffs2 custom images
+-imageconfig=root_configcert.jffs2
+-imageavc=root_avcsign.jffs2
+-imageweb=root_webrootdb.jffs2
+-imagelic=root_license.jffs2
++# yaffs2 custom images
++imageconfig=root_configcert.yaffs2
++imageavc=root_avcsign.yaffs2
++imageweb=root_webrootdb.yaffs2
++imagelic=root_license.yaffs2
+ 
+ # active inactive image identifiers
+ active=image1
+-- 
+2.7.4
+

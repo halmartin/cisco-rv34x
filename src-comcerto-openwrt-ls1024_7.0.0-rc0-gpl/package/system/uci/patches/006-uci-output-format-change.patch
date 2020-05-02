@@ -1,0 +1,24 @@
+--- uci-2015-08-27.1-orig/cli.c	2017-02-13 04:05:59.034813297 -0600
++++ uci-2015-08-27.1/cli.c	2017-03-06 22:43:34.813846043 -0600
+@@ -10,6 +10,11 @@
+  * but WITHOUT ANY WARRANTY; without even the implied warranty of
+  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  * GNU General Public License for more details.
++ *
++ * Changes:
++ *     07/03/2017      NXP     Changed output format for uci show <module> command.
++ *
++ *
+  */
+ #include <strings.h>
+ #include <string.h>
+@@ -246,7 +251,8 @@ static void uci_show_section(struct uci_
+ 	sname = (cur_section_ref ? cur_section_ref : s->e.name);
+ 	printf("%s.%s=%s\n", cname, sname, s->type);
+ 	uci_foreach_element(&s->options, e) {
+-		uci_show_option(uci_to_option(e), true);
++		//uci_show_option(uci_to_option(e), true);
++		uci_show_option(uci_to_option(e), false);
+ 	}
+ }
+ 

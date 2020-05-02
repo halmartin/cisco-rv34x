@@ -1,0 +1,709 @@
+#!/bin/sh /etc/rc.common
+START=99
+STOP=98
+
+. /etc/boardInfo
+
+SWDOWNLOAD_STATUS_TMP_FILE="/mnt/configcert/config/downloadstatus"
+BOOTUP_JOB_TMP_FILE="/tmp/swupdatejob"
+
+check_asdclient_status () {
+	ASDFILE="/tmp/asd_email_content"
+	ASDSTATUS="/mnt/configcert/config/asdstatus"
+	SWTYP=""
+	BODYTXT=""
+	SUBJECT=""
+	if [ -e "$ASDSTATUS" ];then
+	    SWTYP=`grep "update started" $ASDSTATUS  | awk '{ print $1 }'`
+	    if [ "$SWTYP" = "firmware" ];then
+	        SUBJECT="Update firmware fail"
+	        BODYTXT="Firmware upgrade process has been terminated due to device reboot."
+	    elif [ "$SWTYP" = "signatures" ];then
+	        SUBJECT="Update signature fail"
+	        BODYTXT="Signature upgrade process has been terminated due to device reboot."
+	    elif [ "$SWTYP" = "drivers" ];then
+	        SUBJECT="Update USB dongle driver fail"
+	        BODYTXT="USB dongle driver upgrade process has been terminated due to device reboot."
+	    fi
+	    echo $BODYTXT > $ASDFILE
+	    sh /usr/bin/sendAsdmail "$SUBJECT"
+	    rm $ASDSTATUS
+	fi
+}
+
+start() {
+
+	if [ -e "$SWDOWNLOAD_STATUS_TMP_FILE" ];then
+	    check_status=`grep -e "Status:1" $SWDOWNLOAD_STATUS_TMP_FILE`
+	    if [ -n "$check_status" ];
+	    then
+		rm $SWDOWNLOAD_STATUS_TMP_FILE
+	    fi
+	fi
+	if [ ! -f "$BOOTUP_JOB_TMP_FILE" ]; then
+	    MYCMD="/bin/sh /usr/bin/swupdate_chk.sh"
+	    OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +10*60 ))")"
+	    #echo "start output=$OUTPUT"
+	    MM=$(echo $OUTPUT | cut -f1 -d ' ')
+	    HH=$(echo $OUTPUT | cut -f2 -d ' ')
+	    DAYDD=$(echo $OUTPUT | cut -f3 -d ' ')
+	    MONMM=$(echo $OUTPUT | cut -f4 -d ' ')
+	    TWKDAY=$(echo $OUTPUT | cut -f5 -d ' ')
+        if [ "$TWKDAY" -eq "7" ]; then
+            WKDAY=0
+        else
+            WKDAY=$TWKDAY
+        fi
+	    uci del crontabs.sysbootasdchk >/dev/null 2>&1
+        uci set crontabs.sysbootasdchk=crontab
+        uci set crontabs.sysbootasdchk.minutes=$MM
+        uci set crontabs.sysbootasdchk.hours=$HH
+        uci set crontabs.sysbootasdchk.days=$DAYDD
+        uci set crontabs.sysbootasdchk.months=$MONMM
+        uci set crontabs.sysbootasdchk.weekdays=$WKDAY
+        uci set crontabs.sysbootasdchk.command="$MYCMD"
+        uci set crontabs.sysbootasdchk.enabled=1
+        uci commit crontabs
+        uci show crontabs.sysbootasdchk > $BOOTUP_JOB_TMP_FILE
+
+    fi
+
+	config_load swupdate
+	
+	args=""
+	config_foreach autoupdate autoupdate
+	config_foreach firmware firmware
+	config_foreach dongle dongle
+	config_foreach signature signature
+	check_asdclient_status
+	/etc/init.d/cron reload
+}
+
+stop() {
+
+	return 0;
+}
+
+update_swconf() {
+
+    cp /tmp/.uci/swupdate /tmp/swupdate
+    autoupdateconf=`cat /tmp/swupdate | grep -E "=swupdate|-swupdate.autoupdate" | sed s/swupdate.// | sed s/=swupdate// | sort -u | sed s/-//`
+    firmwareconf=`cat /tmp/swupdate | grep -E "=swupdate|-swupdate.firmware" | sed s/swupdate.// | sed s/=swupdate// | sort -u | sed s/-//`
+    dongledrvconf=`cat /tmp/swupdate | grep -E "=swupdate|-swupdate.dongle" | sed s/swupdate.// | sed s/=swupdate// | sort -u | sed s/-//`
+    signatureconf=`cat /tmp/swupdate | grep -E "=swupdate|-swupdate.signature" | sed s/swupdate.// | sed s/=swupdate// | sort -u | sed s/-//`
+
+    firmware_option=`uci get swupdate.firmware.update_option`
+    dongle_option=`uci get swupdate.dongle.update_option`
+    signature_option=`uci get swupdate.signature.update_option`
+
+    chkfreq=""
+    if [ -n "$autoupdateconf" ];
+    then
+        notiftyp=""
+        notifemail=""
+        entries=`cat /tmp/swupdate | grep -v "\-swupdate" | grep "autoupdate" | grep -v "=autoupdate"`
+        for opt in $entries
+        do
+            tmpstr=`echo $opt | cut -d'.' -f3`
+            optname=`echo $tmpstr | cut -d'=' -f1`
+            optval=`echo $tmpstr | cut -d'=' -f2`
+
+            case $optname in
+            check_frequency)
+                chkfreq=$optval
+            ;;
+            notify_type)
+                notifemail=$optval
+            ;;
+            notify_emailid)
+               notifemail=$optval
+            ;;
+            *)
+            ;;
+            esac
+        done
+        if [ -z "$chkfreq" ];
+        then
+            chkfreq=`uci get swupdate.autoupdate.check_frequency`
+        fi
+        autoupdate_conf $chkfreq $notiftyp $notifemail
+	if [ "$chkfreq" != "never" ];then
+		if [ "$firmware_option" != "never" ];then
+			bnotify=`uci get swupdate.firmware.notify`
+			updateopt=`uci get swupdate.firmware.update_option`
+			updateopttime=`uci get swupdate.firmware.update_optiontime`
+			firmware_conf $chkfreq $bnotify $updateopt $updateopttime
+		fi
+		if [ "$dongle_option" != "never" ];then
+			bnotify=`uci get swupdate.dongle.notify`
+			updateopt=`uci get swupdate.dongle.update_option`
+			updateopttime=`uci get swupdate.dongle.update_optiontime`
+			dongle_conf $chkfreq $bnotify $updateopt $updateopttime
+		fi
+		if [ "$signature_option" != "never" ];then
+			bnotify=`uci get swupdate.signature.notify`
+			updateopt=`uci get swupdate.signature.update_option`
+			updateopttime=`uci get swupdate.signature.update_optiontime`
+			signature_conf $chkfreq $bnotify $updateopt $updateopttime
+		fi
+	fi
+
+    fi
+
+    if [ -n "$firmwareconf" ];
+    then
+        bnotify=""
+        updateopt=""
+        updateopttime=""
+        entries=`cat /tmp/swupdate | grep -v "\-swupdate" | grep "firmware" | grep -v "=firmware"`
+        for opt in $entries
+        do
+            tmpstr=`echo $opt | cut -d'.' -f3`
+            optname=`echo $tmpstr | cut -d'=' -f1`
+            optval=`echo $tmpstr | cut -d'=' -f2`
+
+            case $optname in
+            notify)
+                bnotify=$optval
+            ;;
+            update_option)
+                updateopt=$optval
+            ;;
+            update_optiontime)
+               updateopttime=$optval
+            ;;
+            *)
+            ;;
+            esac
+        done
+        if [ -z "$chkfreq" ];
+        then
+            chkfreq=`uci get swupdate.autoupdate.check_frequency`
+            autoupdate_conf $chkfreq "" ""
+        fi
+        firmware_conf $chkfreq $bnotify $updateopt $updateopttime
+    fi
+    if [ -n "$dongledrvconf" ];
+    then
+        bnotify=""
+        updateopt=""
+        updateopttime=""
+        entries=`cat /tmp/swupdate | grep -v "\-swupdate" | grep "dongle" | grep -v "=dongle"`
+        for opt in $entries
+        do
+            tmpstr=`echo $opt | cut -d'.' -f3`
+            optname=`echo $tmpstr | cut -d'=' -f1`
+            optval=`echo $tmpstr | cut -d'=' -f2`
+
+            case $optname in
+            notify)
+                bnotify=$optval
+            ;;
+            update_option)
+                updateopt=$optval
+            ;;
+            update_optiontime)
+               updateopttime=$optval
+            ;;
+            *)
+            ;;
+            esac
+        done
+        if [ -z "$chkfreq" ];
+        then
+            chkfreq=`uci get swupdate.autoupdate.check_frequency`
+            autoupdate_conf $chkfreq "" ""
+        fi
+        dongle_conf $chkfreq $bnotify $updateopt $updateopttime
+    fi
+    if [ -n "$signatureconf" ];
+    then
+        bnotify=""
+        updateopt=""
+        updateopttime=""
+        entries=`cat /tmp/swupdate | grep -v "\-swupdate" | grep "signature" | grep -v "=signature"`
+        for opt in $entries
+        do
+            tmpstr=`echo $opt | cut -d'.' -f3`
+            optname=`echo $tmpstr | cut -d'=' -f1`
+            optval=`echo $tmpstr | cut -d'=' -f2`
+
+            case $optname in
+            notify)
+                bnotify=$optval
+            ;;
+            update_option)
+                updateopt=$optval
+            ;;
+            update_optiontime)
+               updateopttime=$optval
+            ;;
+            *)
+            ;;
+            esac
+        done
+        if [ -z "$chkfreq" ];
+        then
+            chkfreq=`uci get swupdate.autoupdate.check_frequency`
+            autoupdate_conf $chkfreq "" ""
+        fi
+        signature_conf $chkfreq $bnotify $updateopt $updateopttime
+    fi
+
+    uci commit swupdate
+    /etc/init.d/cron reload
+    #rm /tmp/swupdate
+}
+
+reload() {
+   update_swconf
+}
+
+
+autoupdate_conf() {
+    check_frequency=$1
+    notify_type=$2
+    notify_emailid=$3
+    if [ -n "$check_frequency" ];
+    then
+        if [ "$check_frequency" = "never" ] || [ "$check_frequency" = "none" ];
+        then
+            deletecron "none"
+        elif [ "$check_frequency" = "weekly" ]
+        then
+            weeklyCheck
+        elif [ "$check_frequency" = "monthly" ]
+        then
+            monthlyCheck
+        fi 
+    fi
+}
+
+autoupdate() {
+    local cfg=$1
+
+    config_get check_frequency "$cfg" check_frequency
+    config_get notify_type "$cfg" notify_type
+    config_get notify_emailid "$cfg" notify_emailid
+
+    autoupdate_conf $check_frequency $notify_type $notify_emailid
+}
+
+
+weeklyCheck() {
+  # weeklyCheck action
+
+  #minute(0-59) hour(0-23) day(1-31) month(1-12) weekday(0-6) command
+  HH=`uci get crontabs.sysbootasdchk.hours`
+  MM=`uci get crontabs.sysbootasdchk.minutes`
+  #echo " in weekly check $HH $MM"
+  updateJobs "none" "$HH:$MM" "weekly" "check"
+  
+}
+
+monthlyCheck() {
+  # monthlyCheck action
+  #echo "Monthly: $MM 0 1 * * $CMD "
+  HH=`uci get crontabs.sysbootasdchk.hours`
+  MM=`uci get crontabs.sysbootasdchk.minutes`
+  #echo "in monthly check $HH $MM"
+  updateJobs "none" "$HH:$MM" "monthly" "check"
+}
+
+firmware_conf() {
+    local check_frequency=$1
+    local notify=$2
+    local update_option=$3
+    local update_optiontime=$4
+    #echo "$cfg check_frequency = $check_frequency"
+    #echo "$cfg update_option = $update_option"
+    #echo "$cfg update_optiontime = $update_optiontime"
+             
+    #minute(0-59) hour(0-23) day(1-31) month(1-12) weekday(0-6) command
+             
+    if [ -n "$check_frequency" ];
+    then
+        if [ "$update_option" = "never" ];
+        then
+            deletecron "firmware"
+        elif [ "$check_frequency" = "weekly" ] && [ "$update_option" = "time" ]
+        then
+            updateJobs "firmware" $update_optiontime "weekly" "download"
+        elif [ "$check_frequency" = "monthly" ] && [ "$update_option" = "time" ]
+        then
+            updateJobs "firmware" $update_optiontime "monthly" "download"
+        fi 
+    fi
+}
+
+firmware() {
+    local cfg=$1
+
+    #echo "updates...cfg= $cfg"
+
+    config_get check_frequency "autoupdate" check_frequency
+    config_get notify  "$cfg" notify
+    config_get update_option  "$cfg" update_option
+    config_get update_optiontime "$cfg" update_optiontime
+    #version=`grep frm_latest_version "/etc/swupdateinfo" | awk -F'=' '{ print $2 }' |  sed 's/"//g'`
+
+    firmware_conf $check_frequency $notify $update_option $update_optiontime
+}
+
+dongle_conf() {
+    local check_frequency=$1
+    local notify=$2
+    local update_option=$3
+    local update_optiontime=$4
+    #version=`grep usb_latest_version "/etc/swupdateinfo" | awk -F'=' '{ print $2 }' |  sed 's/"//g'`
+    #echo "$cfg check_frequency = $check_frequency"
+    #echo "$cfg update_option = $update_option"
+    #echo "$cfg update_optiontime = $update_optiontime"
+    #echo "$cfg version = $version"
+             
+    #minute(0-59) hour(0-23) day(1-31) month(1-12) weekday(0-6) command
+             
+    if [ -n "$check_frequency" ];
+    then
+        if [ "$update_option" = "never" ];
+        then
+            deletecron "drivers"
+        elif [ "$check_frequency" = "weekly" ] && [ "$update_option" = "time" ]
+        then
+            updateJobs "drivers" $update_optiontime "weekly" "download"
+        elif [ "$check_frequency" = "monthly" ] && [ "$update_option" = "time" ]
+        then
+            updateJobs "drivers" $update_optiontime "monthly" "download"
+        fi 
+    fi
+}
+
+dongle() {
+    local cfg=$1
+
+    #echo "updates...cfg= $cfg"
+
+    config_get check_frequency "autoupdate" check_frequency
+    config_get notify  "$cfg" notify
+    config_get update_option  "$cfg" update_option
+    config_get update_optiontime "$cfg" update_optiontime
+	
+    dongle_conf $check_frequency $notify $update_option $update_optiontime
+}
+
+signature_conf() {
+    local check_frequency=$1
+    local notify=$2
+    local update_option=$3
+    local update_optiontime=$4
+    #version=`grep sig_latest_version "/etc/swupdateinfo" | awk -F'=' '{ print $2 }' |  sed 's/"//g'`
+	
+    #echo "$cfg check_frequency = $check_frequency"
+    #echo "$cfg update_option = $update_option"
+    #echo "$cfg update_optiontime = $update_optiontime"
+    #echo "$cfg version = $version"
+
+    #minute(0-59) hour(0-23) day(1-31) month(1-12) weekday(0-6) command
+             
+    if [ -n "$check_frequency" ];
+    then
+        if [ "$update_option" = "never" ];
+        then
+            deletecron "signatures"
+        elif [ "$check_frequency" = "weekly" ] && [ "$update_option" = "immediate" ]
+        then
+            updateJobs "signatures" "00:00" "weekly" "download"
+        elif [ "$check_frequency" = "monthly" ] && [ "$update_option" = "immediate" ]
+        then
+            updateJobs "signatures" "00:00" "monthly" "download"
+        elif [ "$check_frequency" = "weekly" ] && [ "$update_option" = "time" ]
+        then
+            updateJobs "signatures" $update_optiontime "weekly" "download"
+        elif [ "$check_frequency" = "monthly" ] && [ "$update_option" = "time" ]
+        then
+            updateJobs "signatures" $update_optiontime "monthly" "download"
+        fi 
+    fi
+}
+
+signature() {
+    local cfg=$1
+
+    #echo "updates...cfg= $cfg"
+
+    config_get check_frequency "autoupdate" check_frequency
+    config_get notify  "$cfg" notify
+    config_get update_option  "$cfg" update_option
+    config_get update_optiontime "$cfg" update_optiontime
+	
+    signature_conf $check_frequency $notify $update_option $update_optiontime
+}
+
+
+deletecron() {
+
+  local SWT=$1
+
+  if [ "$SWT" = "none" ];
+  then
+      uci del crontabs.checkfreq >/dev/null 2>&1
+      uci del crontabs.firmware >/dev/null 2>&1
+      uci del crontabs.signatures >/dev/null 2>&1
+      uci del crontabs.drivers >/dev/null 2>&1
+  elif [ "$SWT" = "firmware" ]
+  then
+      uci del crontabs.firmware >/dev/null 2>&1
+  elif [ "$SWT" = "signatures" ]
+  then
+      uci del crontabs.signatures >/dev/null 2>&1
+  elif [ "$SWT" = "drivers" ]
+  then
+      uci del crontabs.drivers >/dev/null 2>&1
+  fi
+  uci commit crontabs
+  /etc/init.d/cron reload
+}
+
+updateJobs() {
+
+local SWT=$1
+local update_optiontime=$2
+local frequency=$3
+local CMD=$4
+  #echo "SWT=$SWT  update_optiontime=$update_optiontime frequency=$frequency CMD=$CMD"
+  HR=`echo $update_optiontime | awk -F: '{ print $1 }'`
+  MN=`echo $update_optiontime | awk -F: '{ print $2 }'`
+  HH=`expr $HR + 0`
+  MM=`expr $MN + 0`
+
+  if [ $MM -eq 0 ]; then
+    RMM=`awk -vmin=0 -vmax=59 'BEGIN{srand(); print int(min+rand()*(max-min+1))}'`
+    MM=$RMM
+  fi
+
+  #echo "HH=$HH MM=$MM"
+  #echo "CMD= $MM $HH $CMD"
+
+  #minute(0-59) hour(0-23) day(1-31) month(1-12) weekday(0-6) command
+
+DAYDD=*
+MONMM=*
+WKDAY=*
+  if [ "$frequency" = "weekly" ];
+  then
+      DAYDD=*
+      MONMM=*
+      WKDAY=1
+  elif [ "$frequency" = "monthly" ]
+  then
+      DAYDD=1
+      MONMM=*
+      WKDAY=*
+  fi
+
+  if [ "$CMD" = "download" ];
+  then
+      a=`uci get crontabs.checkfreq.hours`
+      b=$HH
+
+      if [ "$frequency" = "weekly" ];
+      then
+        if [ "$a" -gt "$b" ];
+        then
+          OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +7*86400 +1*86400))")"
+          TWKDAY=$(echo $OUTPUT | cut -f5 -d ' ')
+          if [ "$TWKDAY" -eq "7" ]; then
+              WKDAY=0
+          else
+              WKDAY=$TWKDAY
+          fi
+        elif [ "$a" -lt "$b" ]
+        then
+          OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +7*86400))")"
+          TWKDAY=$(echo $OUTPUT | cut -f5 -d ' ')
+          if [ "$TWKDAY" -eq "7" ]; then
+              WKDAY=0
+          else
+              WKDAY=$TWKDAY
+          fi
+        else
+          THH=`uci get crontabs.checkfreq.hours`
+	  TMINS=`uci get crontabs.checkfreq.minutes`
+	  TTIME=$HH:$TMINS
+	  var=$(date -D '%s' +"%H:%M" -d "$(( `date --date=$TTIME +%s` +5*60 ))")
+	  HH=`echo $var | awk -F: '{ print $1 }'`
+	  MM=`echo $var | awk -F: '{ print $2 }'`
+          chh=`expr $HH + 0`
+          cthh=`expr $THH + 0`
+              WDAY=`uci get crontabs.checkfreq.weekdays`
+              if [ "$chh" -lt "$cthh" ]; then
+                  tday=`expr $WDAY + 1`
+                  stday=`expr $tday % 7`
+                  #echo "stday = $stday"
+                  WKDAY=$stday
+              else
+                  OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +7*86400))")"
+                  TWKDAY=$(echo $OUTPUT | cut -f5 -d ' ')
+                  if [ "$TWKDAY" -eq "7" ]; then
+                       WKDAY=0
+                  else
+                       WKDAY=$TWKDAY
+                  fi
+              fi
+        fi
+
+      elif [ "$frequency" = "monthly" ]
+      then
+        if [ "$a" -gt "$b" ];
+        then
+          OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +30*86400 +1*86400))")"
+          DAYDD=$(echo $OUTPUT | cut -f3 -d ' ')
+        elif [ "$a" -lt "$b" ]
+        then
+          OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +30*86400))")"
+          DAYDD=$(echo $OUTPUT | cut -f3 -d ' ')
+        else
+          THH=`uci get crontabs.checkfreq.hours`
+	  TMINS=`uci get crontabs.checkfreq.minutes`
+	  TTIME=$HH:$TMINS
+	  var=$(date -D '%s' +"%H:%M" -d "$(( `date --date=$TTIME +%s` +5*60 ))")
+	  HH=`echo $var | awk -F: '{ print $1 }'`
+	  MM=`echo $var | awk -F: '{ print $2 }'`
+          chh=`expr $HH + 0`
+          cthh=`expr $THH + 0`
+          if [ "$chh" -lt "$cthh" ]; then
+              OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +30*86400 + 1*86400))")"
+              DAYDD=$(echo $OUTPUT | cut -f3 -d ' ')
+          else
+             OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +30*86400 ))")"
+             DAYDD=$(echo $OUTPUT | cut -f3 -d ' ')
+          fi
+
+        fi
+      fi
+  fi
+#  uci set crontabs.firmware
+  if [ "$SWT" = "firmware" ];
+  then
+
+      version=`cat /etc/firmware_version`
+      MYCMD="/bin/sh /usr/bin/sw_dwnlod_apply.sh firmware $version download /tmp cron"
+      uci del crontabs.firmware >/dev/null 2>&1
+      uci set crontabs.firmware=crontab
+      uci set crontabs.firmware.minutes=$MM
+      uci set crontabs.firmware.hours=$HH
+      uci set crontabs.firmware.days=$DAYDD
+      uci set crontabs.firmware.months=$MONMM
+      uci set crontabs.firmware.weekdays=$WKDAY
+      uci set crontabs.firmware.command="$MYCMD"
+      uci set crontabs.firmware.enabled=1
+      uci commit crontabs
+
+  elif [ "$SWT" = "signatures" ]
+  then
+
+      if [ "$update_option" = "immediate" ] ;
+      then
+          THH=`uci get crontabs.checkfreq.hours`
+	  TMINS=`uci get crontabs.checkfreq.minutes`
+	  TTIME=$THH:$TMINS
+	  var=$(date -D '%s' +"%H:%M" -d "$(( `date --date=$TTIME +%s` +5*60 ))")
+	  HH=`echo $var | awk -F: '{ print $1 }'`
+	  MM=`echo $var | awk -F: '{ print $2 }'`
+          chh=`expr $HH + 0`
+          cthh=`expr $THH + 0`
+
+          if [ "$frequency" = "weekly" ];
+          then
+              WDAY=`uci get crontabs.checkfreq.weekdays`
+              #if [ "$chh" -lt "$cthh" ] || [ "$chh" -eq "$cthh" ]; then
+              if [ "$chh" -lt "$cthh" ]; then
+                  tday=`expr $WDAY + 1`
+                  stday=`expr $tday % 7`
+                  #echo "stday = $stday"
+                  WKDAY=$stday
+              else
+                  OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +7*86400 ))")"
+                  TWKDAY=$(echo $OUTPUT | cut -f5 -d ' ')
+                  if [ "$TWKDAY" -eq "7" ]; then
+                       WKDAY=0
+                  else
+                       WKDAY=$TWKDAY
+                  fi
+              fi
+
+          elif [ "$frequency" = "monthly" ]
+          then
+              if [ "$chh" -lt "$cthh" ]; then
+                  OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +30*86400 + 1*86400))")"
+                  DAYDD=$(echo $OUTPUT | cut -f3 -d ' ')
+              else
+                  OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +30*86400 ))")"
+                  DAYDD=$(echo $OUTPUT | cut -f3 -d ' ')
+              fi
+          fi
+      fi
+      version=`grep sig_latest_version "/etc/swupdateinfo" | awk -F'=' '{ print $2 }' |  sed 's/"//g'`
+      MYCMD="/bin/sh /usr/bin/sw_dwnlod_apply.sh signatures $version download /tmp cron"
+      uci del crontabs.signatures >/dev/null 2>&1
+      uci set crontabs.signatures=crontab
+      uci set crontabs.signatures.minutes=$MM
+      uci set crontabs.signatures.hours=$HH
+      uci set crontabs.signatures.days=$DAYDD
+      uci set crontabs.signatures.months=$MONMM
+      uci set crontabs.signatures.weekdays=$WKDAY
+      uci set crontabs.signatures.command="$MYCMD"
+      uci set crontabs.signatures.enabled=1
+      uci commit crontabs
+
+  elif [ "$SWT" = "drivers" ]
+  then
+
+      version=`cat /etc/usb-modem.ver`
+      MYCMD="/bin/sh /usr/bin/sw_dwnlod_apply.sh drivers $version download /tmp cron"
+      
+      uci del crontabs.drivers >/dev/null 2>&1
+      uci set crontabs.drivers=crontab
+      uci set crontabs.drivers.minutes=$MM
+      uci set crontabs.drivers.hours=$HH
+      uci set crontabs.drivers.days=$DAYDD
+      uci set crontabs.drivers.months=$MONMM
+      uci set crontabs.drivers.weekdays=$WKDAY
+      uci set crontabs.drivers.command="$MYCMD"
+      uci set crontabs.drivers.enabled=1
+      uci commit crontabs
+
+  elif [ "$SWT" = "none" ] && [ "$CMD" = "check" ]
+  then
+      if [ "$frequency" = "weekly" ];
+      then
+        OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +7*86400 ))")"
+        #WKDAY=$(echo $OUTPUT | cut -f5 -d ' ')
+        TWKDAY=$(echo $OUTPUT | cut -f5 -d ' ')
+        if [ "$TWKDAY" -eq "7" ]; then
+             WKDAY=0
+        else
+             WKDAY=$TWKDAY
+        fi
+
+      elif [ "$frequency" = "monthly" ]
+      then
+	OUTPUT="$(date -D '%s' +"%M %H %d %m %u"  -d "$(( `date +%s` +30*86400 ))")"
+        DAYDD=$(echo $OUTPUT | cut -f3 -d ' ')
+      fi
+
+      MYCMD="/bin/sh /usr/bin/swupdate_chk.sh"
+      uci del crontabs.checkfreq >/dev/null 2>&1
+      uci set crontabs.checkfreq=crontab
+      uci set crontabs.checkfreq.minutes=$MM
+      uci set crontabs.checkfreq.hours=$HH
+      uci set crontabs.checkfreq.days=$DAYDD
+      uci set crontabs.checkfreq.months=$MONMM
+      uci set crontabs.checkfreq.weekdays=$WKDAY
+      uci set crontabs.checkfreq.command="$MYCMD"
+      uci set crontabs.checkfreq.enabled=1
+      uci commit crontabs
+  fi
+#  /etc/init.d/cron reload
+
+}

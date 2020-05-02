@@ -1,0 +1,30 @@
+diff -rauN a/pppd/plugins/radius/buildreq.c b/pppd/plugins/radius/buildreq.c
+--- a/pppd/plugins/radius/buildreq.c	2016-06-21 18:09:10.470631654 +0530
++++ b/pppd/plugins/radius/buildreq.c	2016-06-21 18:19:02.643187037 +0530
+@@ -111,8 +111,7 @@
+    } //while
+    fclose(fserver);
+ 
+-    sprintf(cmd, "ip -4 r g %s | head -n 1 | sed -e \"s/.*src \\([^ ]*\\).*/\\1/\"", 
+-                          strtok(hostname, ":"));
++    sprintf(cmd, "ip -4 r g %s | head -n 1 | sed -e \"s/.*src \\([^ ]*\\).*/\\1/\"", hostname);
+     fp = popen(cmd, "r");
+     fscanf(fp, "%s", source_ip);
+     inet_aton(source_ip, &ip);
+diff -rauN a/pppd/plugins/radius/radius.c b/pppd/plugins/radius/radius.c
+--- a/pppd/plugins/radius/radius.c	2016-06-21 17:19:46.807889940 +0530
++++ b/pppd/plugins/radius/radius.c	2016-06-21 17:20:06.367644041 +0530
+@@ -649,11 +649,13 @@
+ 	    case PW_SERVICE_TYPE:
+ 		/* check for service type       */
+ 		/* if not FRAMED then exit      */
++#if 0
+ 		if (vp->lvalue != PW_FRAMED) {
+ 		    slprintf(msg, BUF_LEN, "RADIUS: wrong service type %ld for %s",
+ 			     vp->lvalue, rstate.user);
+ 		    return -1;
+ 		}
++#endif
+ 		break;
+ 
+ 	    case PW_FRAMED_PROTOCOL:

@@ -1,0 +1,53 @@
+#!/bin/sh
+
+CPS_STATS_FILE="/tmp/stats/cps_stats"
+CPS_STATS_FILE_TMP="/tmp/stats/cps_stats_tmp"
+
+cat /dev/null > /${CPS_STATS_FILE}
+
+board="$(/usr/bin/board_check.sh)"
+
+/usr/sbin/cportalctl complex > ${CPS_STATS_FILE_TMP} 2>/dev/null
+while read -r line; do
+	SSID="${line#*SSID:}"
+
+	local oIFS="$IFS"; IFS=","
+	set $line
+	IFS="$oIFS"
+
+	USER="$1"
+	vap=$(echo $6 | cut -c -3)
+	if [ "$board" = "RV260W" ];then
+		if [ "$vap" = "wl1" ];then
+			RADIO="WLAN1"
+		else
+			RADIO="WLAN0"
+		fi
+	else
+		if [ "$vap" = "wl0" ];then
+			RADIO="WLAN1"
+		else
+			if [ "$board" = "RV340W" ];then
+				RADIO="WLAN2"
+			else
+				RADIO="WLAN0"
+			fi
+		fi
+	fi
+	IP="$2"
+	MAC="$3"
+	if [ "$4" = "AUTHENTICATED" ];then
+		AUTH=1
+	else
+		AUTH=0
+	fi
+	TX_BYTES="$7"
+	RX_BYTES="$8"
+	TX_PACKS="$9"
+	RX_PACKS="$10"
+	CONNECT_TIME="$5"
+	TIME_LEFT="$11"
+
+	echo "$USER,$IP,$MAC,$RADIO,$AUTH,$CONNECT_TIME,$TIME_LEFT,$TX_BYTES,$RX_BYTES,$TX_PACKS,$RX_PACKS,SSID:$SSID" >> ${CPS_STATS_FILE}
+
+done < ${CPS_STATS_FILE_TMP}

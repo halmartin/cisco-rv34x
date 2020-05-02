@@ -1,0 +1,27 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2007-2012 OpenWrt.org
+
+START=11
+STOP=70
+
+OPSDB_STATUS="/tmp/opsdb_status"
+
+start () {
+mkdir /tmp/stats
+mkdir -p /tmp/stats/3g
+mkdir -p /tmp/stats/4g
+
+#touch all the file
+touch /tmp/stats/wanport_stats
+touch /tmp/stats/lanport_stats
+touch /tmp/stats/wlan_port_stats
+touch /tmp/stats/wanstats
+touch /tmp/stats/neighstatsv4
+touch /tmp/stats/neighstatsv6
+touch /tmp/stats/certstats
+
+}
+
+stop() {
+	echo "Stop"
+}

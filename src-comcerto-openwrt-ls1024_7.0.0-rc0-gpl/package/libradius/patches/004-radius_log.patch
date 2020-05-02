@@ -1,0 +1,14 @@
+--- a/src/pam_radius_auth.c	2016-02-19 14:49:56.394615560 +0530
++++ b/src/pam_radius_auth.c	2016-02-19 14:50:13.674615732 +0530
+@@ -1332,6 +1332,11 @@ error:
+ 
+ 	DPRINT(LOG_DEBUG, "authentication %s", retval==PAM_SUCCESS ? "succeeded":"failed");
+ 
++    if(retval == PAM_SUCCESS)
++        _pam_log(LOG_INFO, "User %s authentication %s",user,retval==PAM_SUCCESS ? "succeeded":"failed");
++    else
++        _pam_log(LOG_ERR, "User %s authentication %s",user,retval==PAM_SUCCESS ? "succeeded":"failed");
++
+         if (response->code == PW_AUTHENTICATION_ACK)
+           {
+              if(pam_radius_extract_radresp_attrib(pamh ,recv_buffer,

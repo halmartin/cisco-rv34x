@@ -1,0 +1,26 @@
+From 2e048dc50f67189a5eb57fe77ac228cb0db6c89e Mon Sep 17 00:00:00 2001
+From: "venkat.upputuri" <venkat.upputuri@freescale.com>
+Date: Thu, 7 May 2015 19:13:47 +0530
+Subject: [PATCH 06/19] LOG : DNCPE-27 [C2K/CISCO-SBR] IPSec Pass Through
+
+- Extended connection processing to support ESP and AH protocols.
+---
+ net/netfilter/comcerto_fp_netfilter.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/net/netfilter/comcerto_fp_netfilter.c b/net/netfilter/comcerto_fp_netfilter.c
+index a16dcfb..131895f 100644
+--- a/net/netfilter/comcerto_fp_netfilter.c
++++ b/net/netfilter/comcerto_fp_netfilter.c
+@@ -38,7 +38,7 @@ static unsigned int fp_netfilter_pre_routing(int family, unsigned int hooknum, s
+ 		goto done;
+ 
+ 	protonum = nf_ct_protonum(ct);
+-	if ((protonum != IPPROTO_TCP) && (protonum != IPPROTO_UDP) && (protonum != IPPROTO_IPIP) && (protonum != IPPROTO_IPV6) && (protonum != IPPROTO_ETHERIP) && (protonum != IPPROTO_GRE))
++	if ((protonum != IPPROTO_TCP) && (protonum != IPPROTO_UDP) && (protonum != IPPROTO_IPIP) && (protonum != IPPROTO_IPV6) && (protonum != IPPROTO_ETHERIP) && (protonum != IPPROTO_GRE) && (protonum != IPPROTO_ESP) && (protonum != IPPROTO_AH))
+ 		goto done;
+ 
+ 	dir = CTINFO2DIR(ctinfo);
+-- 
+1.7.7.4
+

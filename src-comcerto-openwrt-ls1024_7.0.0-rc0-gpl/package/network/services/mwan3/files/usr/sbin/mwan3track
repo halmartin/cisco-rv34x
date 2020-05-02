@@ -1,0 +1,102 @@
+#!/bin/sh
+
+. /lib/functions/network.sh
+
+#[ -z "$9" ] && echo "Error: should not be started manually" && exit 0
+[ -z "$10" ] && echo "Error: should not be started manually" && exit 0
+
+if [ -e /var/run/mwan3track-$1.pid ] ; then
+	kill $(cat /var/run/mwan3track-$1.pid) &> /dev/null
+	rm /var/run/mwan3track-$1.pid &> /dev/null
+fi
+
+taskset -p 2 $$ 2>&- >&-
+echo "$$" > /var/run/mwan3track-$1.pid
+
+score=$(($7+$8))
+#track_ips=$(echo $* | cut -d ' ' -f 9-99)
+track_ips=$(echo $* | cut -d ' ' -f 10-99)
+host_up_count=0
+lost=0
+
+while true; do
+
+	if [ -n "$(iptables -w -S mwan3_iface_$1 -t mangle 2> /dev/null)" ]
+	then
+		table=$(ip rule show | grep `iptables -w -t mangle -S mwan3_iface_$1 | tail -n 1 | cut -f 14 -d " " | cut -f 1 -d "/"` | cut -f 6 -d " ")
+	fi
+
+	[ -n "$table" ] && {
+
+		ip route add default via $(ip -4 route show default dev $2 | cut -f 3 -d ' ') dev $2 table $table 2>/dev/null
+		#logger -t mwan3track "Cmd: table $table $2 "
+
+	}
+
+	track_ip=`uci get mwan3.$1.reliability`
+	if [ $track_ip -eq 0 ]; then
+	track_ips=$(ip -4 route show default dev $2 | cut -f 3 -d ' ')
+	fi
+	
+	for track_ip in $track_ips; do
+		ping -I $2 -c $4 -W $5 -q $track_ip &> /dev/null
+		if [ $? -eq 0 ]; then
+			let host_up_count++
+		else
+			let lost++
+		fi
+	done
+		
+	if [ $host_up_count -lt 1 ]; then
+		let score--
+
+		if [ $score -lt $8 ]; then score=0 ; fi
+		if [ $score -eq $8 ]; then
+
+			logger -t mwan3track -p notice "Interface $1 ($2) is offline"
+			network_get_mwaniface DEVICE $1
+			if [ "$DEVICE" = $2 ] ; then
+				#if the devices are same, then may be protocol might have been changed. So handle accordingly
+				local currentproto
+				network_get_mwanproto currentproto $1
+				[ "$currentproto" != "$9" ] && {
+					#logger -t mwan3track -p notice "##########I am running on wrong proto. Hence sucide....!"
+					exit 0
+				}
+				if [ -n "$(ip rule | awk '$5 == ("'$2'")')" -a -n "$(iptables -w -S mwan3_iface_$1 -t mangle 2> /dev/null)" ]; then
+					env -i ACTION=ifdown INTERFACE=$1 DEVICE=$2 /sbin/hotplug-call iface
+				fi
+				score=0
+			else
+				#logger -t mwan3track -p notice "I am running on wrong interfaces. Hence sucide....!"
+				exit 0
+			fi
+
+		fi
+
+	else
+
+		if [ $score -lt $(($7+$8)) ] && [ $lost -gt 0 ]; then
+
+			logger -t mwan3track -p info "Lost $(($lost*$4)) ping(s) on interface $1 ($2)"
+
+		fi
+
+		let score++
+		lost=0
+
+		if [ $score -gt $8 ]; then score=$(($7+$8)); fi
+		if [ $score -eq $8 ]; then
+
+			logger -t mwan3track -p notice "Interface $1 ($2) is online"
+			env -i ACTION=ifup INTERFACE=$1 DEVICE=$2 /sbin/hotplug-call iface
+			rm /var/run/mwan3track-$1.pid
+			exit 0
+		fi
+	fi
+
+	host_up_count=0
+	sleep $6
+done
+
+exit 1

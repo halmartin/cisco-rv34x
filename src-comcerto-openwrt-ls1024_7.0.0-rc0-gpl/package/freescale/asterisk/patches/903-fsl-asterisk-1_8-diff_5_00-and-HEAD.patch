@@ -1,0 +1,30 @@
+diff -Naur -x CVS -x '*.orig' asterisk18_5_00/channels/chan_mspd.c asterisk_HEAD/channels/chan_mspd.c
+--- asterisk18_5_00/channels/chan_mspd.c	2016-11-18 19:31:23.708438000 +0530
++++ asterisk_HEAD/channels/chan_mspd.c	2016-11-18 19:30:45.858615000 +0530
+@@ -15,7 +15,7 @@
+ 
+ #include "asterisk.h"
+ 
+-//ASTERISK_FILE_VERSION(__FILE__, "$Revision: 1.94 $")
++//ASTERISK_FILE_VERSION(__FILE__, "$Revision: 1.95 $")
+ 
+ #include <stdlib.h>
+ #include <stdint.h>
+@@ -2013,7 +2013,7 @@
+ {
+     int i;
+     int has_failed = 0;
+-    int prev_val   = 0;
++   // int prev_val   = 0; unused
+     char *cat = NULL;
+     struct ast_config *cfg;
+     mspd_ud_pref_t *prev_ud_pref = NULL;
+@@ -2053,7 +2053,7 @@
+ 
+     MSPD_LOCK (mspd_global.lock, goto FAIL);
+ 
+-    prev_val = mspd_global.ud_prefs.ud_enable_supvsr;
++    //prev_val = mspd_global.ud_prefs.ud_enable_supvsr; unused variable
+     for (i = 0; i < mspd_global.n_phones; ++i) {
+         mspd_phone_t *phone = &mspd_global.phones[i];
+ 

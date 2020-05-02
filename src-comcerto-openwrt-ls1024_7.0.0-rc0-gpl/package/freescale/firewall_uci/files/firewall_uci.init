@@ -1,0 +1,848 @@
+#!/bin/sh /etc/rc.common
+FW_APP="printeval 0 /usr/sbin/iptables"
+FW6_APP="printeval 0 /usr/sbin/ip6tables"
+LO_IFACE="lo"
+LO_IP="127.0.0.1"
+_board_lan_if_name=`uci get network.vlan1.ifname | awk -F '.' '{print $1}'`
+DMZINTERFACE=$_board_lan_if_name.4094
+FIREWALL_MAXRULES=300
+EXTRA_COMMANDS="hotplug_reload hotplug_v6reload firewall_sched_reload firewall_policynat_reload firewall_dmz_reload"
+STATICNAT_MAXRULES=30
+
+#ALL_WANIFACE_COMBINATION="eth2 ppoe-wan1p pptp-wan1p l2tp-wan1p eth2.+ ppoe-wan1p_+ pptp-wan1p_+ l2tp-wan1p_+ eth0 ppoe-wan2p pptp-wan2p l2tp-wan2p eth0.+ ppoe-wan2p_+ pptp-wan2p_+ l2tp-wan2p_+ 3g-usb+ wwan+"
+#if [ "$_this_board" = "RV160" -o "$_this_board" = "RV160W" -o "$_this_board" = "RV260" -o "$_this_board" = "RV260W" -o "$_this_board" = "RV260P" ];then
+if [ "$__this_dev" = "pp" ]; then
+ALL_WANIFACE_COMBINATION="eth0+ ppoe-wan1+ pptp-wan1+ l2tp-wan1+ 3g-usb+ wwan+"
+ALL_WANIFACE6_COMBINATION="eth0+ ppoe-wan1+ wwan+"
+else
+ALL_WANIFACE_COMBINATION="eth2+ ppoe-wan1+ pptp-wan1+ l2tp-wan1+ eth0+ ppoe-wan2+ pptp-wan2+ l2tp-wan2+ 3g-usb+ wwan+"
+ALL_WANIFACE6_COMBINATION="eth2+ ppoe-wan1+ eth0+ ppoe-wan2+ wwan+"
+fi
+
+#START=45
+
+. /lib/config/uci.sh
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+SCHEDULECONFIG="schedule"
+TMP_FWIFACESTATS="/tmp/fwifacestats.$$"
+
+printeval(){
+	if [ $1 -eq 1 ]
+	then
+		shift
+		echo "$@"
+		"$@"
+	else
+		shift
+		"$@" 2>/dev/null
+	fi
+}
+
+
+#[ -n "$FW_TRACE" ] && {
+	if [ "$FW_TRACE" = 1 ]
+	then
+		FW_APP="printeval 1 /usr/sbin/iptables -w"
+		FW6_APP="printeval 1 /usr/sbin/ip6tables -w"
+		FW_FILTER_APP="printeval 1 /usr/sbin/iptables -w"
+		FW6_FILTER_APP="printeval 1 /usr/sbin/ip6tables -w"
+		FW_NAT_APP="printeval 1 /usr/sbin/iptables --table nat -w"
+	else
+		FW_APP="printeval 0 /usr/sbin/iptables -w"
+		FW6_APP="printeval 0 /usr/sbin/ip6tables -w"
+		FW_NAT_APP="printeval 0 /usr/sbin/iptables --table nat -w"
+		FW_FILTER_APP="printeval 0 /usr/sbin/iptables -w"
+		FW6_FILTER_APP="printeval 0 /usr/sbin/iptables -w"
+	fi
+#}
+
+config_ChainDefault() {
+	local cfg="$1"
+
+	if [ "$cfg" = 'pre' ] 
+	then
+        local status
+        local target=ACCEPT
+        status=`uci get firewall.global_configuration.firewall`
+        [ $status -eq 1 ] && {
+             target=DROP
+        }
+        
+		#$FW_APP --table filter --policy INPUT $target   #TODO:need to recheck and confirm
+		#$FW6_APP --table filter --policy INPUT $target
+		#$FW_APP --table filter --policy OUTPUT $target
+		#$FW6_APP --table filter --policy OUTPUT $target
+		$FW_APP --table filter --policy FORWARD $target
+		$FW6_APP --table filter --policy FORWARD $target
+	else   #post
+	
+		#These default any vlan to wan forwarding rules
+		$FW_APP --table filter --append forward_vlan_defaults --in-interface $_board_lan_if_name.4094 --jump DROP
+		$FW6_APP --table filter --append forward_vlan_defaults --in-interface $_board_lan_if_name.4094 --jump DROP
+		$FW_APP --table filter --append forward_vlan_defaults --in-interface $_board_lan_if_name+ --jump ACCEPT
+		$FW6_APP --table filter --append forward_vlan_defaults --in-interface $_board_lan_if_name+ --jump ACCEPT
+        $FW_APP --table filter --append forward_vlan_defaults --in-interface br-vlan+ --jump ACCEPT
+        $FW6_APP --table filter --append forward_vlan_defaults --in-interface br-vlan+ --jump ACCEPT
+		
+		#$FW_APP --table filter --policy INPUT ACCEPT   #TODO:need to recheck and confirm
+		#$FW6_APP --table filter --policy INPUT ACCEPT
+		$FW_APP --table filter --policy OUTPUT ACCEPT
+		$FW6_APP --table filter --policy OUTPUT ACCEPT
+		$FW_APP --table filter --policy FORWARD DROP
+		$FW6_APP --table filter --policy FORWARD DROP
+	fi
+}
+
+config_basicSettings() {
+	local firewall_status
+	local cfg="$1"
+
+	config_get_bool firewall_status "$cfg" firewall
+	[ "$firewall_status" != "1" ] && {
+		return
+	}
+
+	iptables-uci basicsettings fileID:$$
+	ip6tables-uci basicsettings fileID:$$
+
+	config_get_bool sipalg "$cfg" sipalg 0
+	if [ $sipalg -eq 1 ]    #TODO: rmmod sipalg from somewhere.
+	then
+		local temp=$(lsmod | grep nf_conntrack_sip)
+                [ -n "$temp" ] && {
+                rmmod nf_nat_sip.ko
+		        rmmod nf_conntrack_sip.ko
+		}
+		insmod /lib/modules/3.2.54/nf_conntrack_sip.ko sip_direct_media=0                      
+		insmod /lib/modules/3.2.54/nf_nat_sip.ko
+        logger -t FIREWALL -p local0.info "SIP ALG is enabled"
+	else
+		local temp=$(lsmod | grep nf_nat_sip)
+		[ -n "$temp" ] && {
+			rmmod nf_nat_sip.ko
+			rmmod nf_conntrack_sip.ko
+		}
+        logger -t FIREWALL -p local0.info "SIP ALG is disabled"
+	fi
+    config_get ftp_alg_port "$cfg" ftp_alg_port                                                         
+    if [ "$ftp_alg_port" != "21" ]
+    then                                                      
+        rmmod nf_nat_ftp.ko                    
+        rmmod nf_conntrack_ftp      
+        cmm -c set port_dpi enable
+        cmm -c set port_dpi delete $ftp_alg_port
+        cmm -c set port_dpi add $ftp_alg_port
+        logger -t FIREWALL -p local0.info "FTP ALG is enabled on control port $ftp_alg_port"        
+        insmod /lib/modules/3.2.54/nf_conntrack_ftp.ko ports=$ftp_alg_port
+        insmod /lib/modules/3.2.54/nf_nat_ftp.ko
+    else                                                                             
+        rmmod nf_nat_ftp.ko                                                           
+        rmmod nf_conntrack_ftp             
+        insmod /lib/modules/3.2.54/nf_conntrack_ftp.ko                                             
+        insmod /lib/modules/3.2.54/nf_nat_ftp.ko 
+        logger -t FIREWALL -p local0.info "FTP ALG is enabled on control port 21"
+    fi                                        
+	#TODO: do something about FTP ALG
+}
+
+config_accessRule() {
+	iptables-uci acl fileID:$$
+	ip6tables-uci acl fileID:$$
+}
+
+config_ifaceNAT() {
+	iptables-uci ifacenat fileID:$$
+}
+
+config_staticNAT() { 
+	iptables-uci staticnat fileID:$$
+}
+
+config_portforward_dmz() {
+	status=`cat /tmp/etc/config/firewall |grep redirect`
+	[ "$status" != "" ] && {
+		$FW_NAT_APP --insert nat_reflection_in --in-interface $_board_lan_if_name.4094 -j RETURN
+		$FW_NAT_APP --insert nat_reflection_out --out-interface $_board_lan_if_name.4094 -j RETURN
+	}
+}
+
+config_portForwarding() {
+	iptables-uci portforward fileID:$$
+}
+
+config_policynat() {
+        iptables-uci policynat fileID:$$
+}
+
+config_porttrigger_dmz()
+{
+	status=`cat /tmp/etc/config/firewall |grep port_trigger`                                                                         
+	[ "$status" != "" ] && {
+		$FW_FILTER_APP --insert port_trigger_fwd --in-interface $_board_lan_if_name.4094 -j RETURN                                    
+	}   
+}
+
+config_portTriggering() {
+	iptables-uci porttrigger fileID:$$
+}
+
+config_sessionTimeout() {
+	local cfg="$1"
+	
+	local tcpTO udpTO icmpTO maxSessions
+
+	config_get tcpTO "$cfg" tcp_timeout
+	sysctl -w net.netfilter.nf_conntrack_tcp_timeout_established=$tcpTO 1>/dev/null
+	`cmm -c set timeout tcp $tcpTO`
+	config_get udpTO "$cfg" udp_timeout
+	sysctl -w net.netfilter.nf_conntrack_udp_timeout=$udpTO 1>/dev/null
+	`cmm -c set timeout udp $udpTO`
+	config_get icmpTO "$cfg" icmp_timeout
+	sysctl -w net.netfilter.nf_conntrack_icmp_timeout=$icmpTO 1>/dev/null
+	sysctl -w net.netfilter.nf_conntrack_icmpv6_timeout=$icmpTO 1>/dev/null
+	config_get maxSessions "$cfg" max_connections
+	maxSessions=$(($maxSessions+500)) #500 is for self connections DNS,NTPd etc.,
+	sysctl -w net.netfilter.nf_conntrack_max=$maxSessions 1>/dev/null
+}
+
+config_DMZ() {
+	iptables-uci dmz fileID:$$
+}
+
+config_customChains() {
+	$FW_APP --table filter --append INPUT --jump syn_flood
+	$FW6_APP --table filter --append INPUT --jump syn_flood
+	$FW_APP --table filter --append INPUT --jump udp_flood
+	$FW6_APP --table filter --append INPUT --jump udp_flood
+	$FW_APP --table filter --append INPUT --jump ping_of_death
+	$FW6_APP --table filter --append INPUT --jump ping_of_death
+	$FW_APP --table filter --insert INPUT --jump icmp_flood
+	$FW6_APP --table filter --insert INPUT --jump icmp_flood
+	
+	$FW_APP --table filter --append INPUT --jump input_rule
+	$FW6_APP --table filter --append INPUT --jump input_rule
+	$FW_APP --table filter --append OUTPUT --jump output_rule
+	$FW6_APP --table filter --append OUTPUT --jump output_rule
+
+	$FW_APP --table filter --append FORWARD --jump igmp_fw_bypass
+
+	$FW_APP --table filter --append FORWARD --jump forward_rule
+	$FW6_APP --table filter --append FORWARD --jump forward_rule
+	#Port Forward                                                                                                                
+	$FW_APP --table filter --append FORWARD -j portforward
+	#port trigger
+	$FW_APP --table filter --append FORWARD --jump port_trigger_fwd 
+	$FW_APP --table filter --append FORWARD -j staticnat
+	
+	$FW_APP --table filter --append FORWARD -j miniupnpd_rules
+	$FW_APP --table filter --append FORWARD -j dmzhost_forward
+		
+	$FW_APP --table filter --append INPUT --jump delegate_input
+	$FW6_APP --table filter --append INPUT --jump delegate_input
+	$FW_APP --table filter --append OUTPUT --jump delegate_output
+	$FW6_APP --table filter --append OUTPUT --jump delegate_output
+	$FW_APP --table filter --append FORWARD --jump delegate_forward
+	$FW6_APP --table filter --append FORWARD --jump delegate_forward
+	
+
+	$FW_APP --table filter --append delegate_forward --jump vpn_passthrough
+	$FW_APP --table filter --append delegate_forward --jump vpn_fw_bypass
+	$FW_APP --table filter --append delegate_forward --jump inter_vlan_routing
+	$FW6_APP --table filter --append delegate_forward --jump inter_vlan_routing
+
+	$FW_APP --table filter --append delegate_input -p udp --dport 161 -j snmp
+    #vpn input/output bypass chain
+	$FW_APP --table filter --append delegate_input --jump vpn_input_bypass 
+	$FW_APP --table filter --append delegate_output --jump vpn_output_bypass
+    #sslvpn chain
+	$FW_APP --table filter --append delegate_input --jump sslvpn_input                                                                                     
+	$FW_APP --table filter --append delegate_forward --jump sslvpn_forward         
+    #igmp input chain
+	$FW_APP --table filter --append delegate_input -m iprange --dst-range 224.0.0.0-239.255.255.255 --jump fwIgmpIn        
+
+	$FW_APP --table filter --append delegate_input --jump rip_fw_bypass
+	$FW6_APP --table filter --append delegate_input --jump ripng_fw_bypass
+	$FW_APP --table filter --append delegate_input --jump upnp_internal
+	$FW6_APP --table filter --append delegate_input  --jump upnp6_internal
+
+	$FW_APP --table nat --append POSTROUTING --jump delegate_postrouting
+	$FW_APP --table nat --append POSTROUTING --jump postrouting_rule
+	$FW_APP --table nat --append PREROUTING --jump delegate_prerouting
+	$FW_APP --table nat --append PREROUTING --jump prerouting_rule
+
+	$FW_APP --table nat --append delegate_postrouting --jump vpn_nat_bypass
+	$FW_APP --table nat --append delegate_postrouting --jump nat_reflection_out 
+	$FW_APP --table nat --append delegate_prerouting --jump nat_reflection_in 
+
+	$FW_APP --table nat --append delegate_postrouting --jump staticnat_reflection_out                                                
+        $FW_APP --table nat --append delegate_prerouting --jump staticnat_reflection_in
+	
+	#Hardware DMZ
+	$FW_APP --table filter --append delegate_forward -j hardware_dmz
+	#$FW_APP --table nat --append postrouting_rule -j snat_dmz
+	
+	$FW_APP --table filter --append delegate_input -p udp --dport 67 -j dhcprelay
+	#$FW_APP --table filter --append delegate_input -p udp --dport 161 -j snmp
+	
+	#echo adding remote management dnat target                    
+	$FW_APP --table nat --append prerouting_rule --jump remote_management_dnat
+	#echo adding portforwarding dnat target                                  
+	$FW_APP --table nat --append prerouting_rule --jump portforward_dnat
+	#echo adding staticnat dnat target
+	$FW_APP --table nat --append prerouting_rule --jump staticnat_dnat
+	#echo adding porttrigger dnat target
+	$FW_APP --table nat --append prerouting_rule --jump port_trigger_nat
+	
+	#echo adding miniupnpd dnat target
+	$FW_APP --table nat --append prerouting_rule --jump miniupnpd_dnat
+	
+	#echo adding dmzhost dnat target                                                      
+        $FW_APP --table nat --append prerouting_rule --jump dmzhost_dnat
+	
+	$FW_APP --table filter --append INPUT --jump firewall_disable
+	$FW6_APP --table filter --append INPUT --jump firewall_disable
+	        		
+	$FW_APP --table filter --append INPUT --jump input_wan_defaults                                                   
+        $FW6_APP --table filter --append INPUT --jump input_wan_defaults
+	
+	$FW_APP --table filter --append FORWARD --jump firewall_disable
+	$FW6_APP --table filter --append FORWARD --jump firewall_disable
+	
+	$FW_APP --table filter --append FORWARD --jump forward_vlan_defaults
+	$FW6_APP --table filter --append FORWARD --jump forward_vlan_defaults
+		
+	$FW_APP --table filter --insert FORWARD --protocol tcp --destination-port 80 --jump content_filter
+	$FW6_APP --table filter --insert FORWARD --protocol tcp --destination-port 80 --jump content_filter		
+	
+        $FW_APP --table filter --append OUTPUT --jump firewall_disable
+        $FW6_APP --table filter --append OUTPUT --jump firewall_disable
+        
+        $FW_APP --table nat --append postrouting_rule -j snat_dmz
+        $FW_APP --table nat --append postrouting_rule -j staticnat
+        $FW_APP --table nat --append postrouting_rule -j ifacenat
+}
+
+firewall_spoofrules() {
+	#local firewall_status=`uci get firewall.global_configuration.firewall`                                                       
+	config_get_bool firewall_status "global_configuration" firewall
+	if [ "$firewall_status" != "0" ]                                                                                             
+	then
+		return
+	fi
+	iptables-uci spoofrules	fileID:$$
+	$FW6_FILTER_APP -A firewall_disable -j ACCEPT 	#remaining things are taken care in C APP.
+}
+start() {  #Seems we are missing content_filtering rules for V6. Have a review
+	config_load firewall
+#	config_reload
+	iptables-uci acl contentfilter portforward porttrigger staticnat ifacenat spoofrules dmz policynat fileID:$$
+	ip6tables-uci acl fileID:$$
+	config_portforward_dmz
+	config_porttrigger_dmz
+	config_foreach config_sessionTimeout connection
+	config_ChainDefault post
+	config_foreach config_basicSettings firewall
+	firewall_spoofrules
+}
+
+stop(){
+	#Stop everything or just delete all firewall rules.
+#	echo "inside stop...!"
+	config_ChainDefault pre
+#	$FW_APP --table filter --flush
+#	$FW6_APP --table filter --flush
+
+	$FW_APP --table filter --flush firewall_disable
+	$FW6_APP --table filter --flush firewall_disable
+	                
+	$FW_APP	--table filter --flush input_rule 
+	$FW6_APP --table filter --flush input_rule 
+
+	$FW_APP	--table filter --flush output_rule 
+	$FW6_APP --table filter --flush output_rule
+
+	$FW_APP	--table filter --flush forward_rule 
+	$FW6_APP --table filter --flush forward_rule
+	
+	$FW_APP --table filter --flush syn_flood
+	$FW6_APP --table filter --flush syn_flood
+	$FW_APP --table filter --flush udp_flood
+	$FW6_APP --table filter --flush udp_flood
+	$FW_APP --table filter --flush icmp_flood
+	$FW6_APP --table filter --flush icmp_flood
+	$FW_APP --table filter --flush ping_of_death                                                                                    
+        $FW6_APP --table filter --flush ping_of_death
+#	$FW_APP --table filter --flush INPUT
+#	$FW6_APP --table filter --flush INPUT
+#	$FW_APP --table filter --flush OUTPUT 
+#	$FW6_APP --table filter --flush OUTPUT
+#	$FW_APP --table filter --flush FORWARD
+#	$FW6_APP --table filter --flush FORWARD
+
+	$FW_APP --table filter --flush content_filter
+	$FW6_APP --table filter --flush content_filter
+	$FW_APP --table filter --flush portforward
+	$FW_APP --table filter --flush staticnat
+	$FW_APP --table nat --flush staticnat
+	$FW_APP --table nat --flush ifacenat
+#	$FW_APP --table filter --flush delegate_input
+#	$FW6_APP --table filter --flush delegate_input
+
+#	$FW_APP --table filter --flush delegate_output
+#	$FW6_APP --table filter --flush delegate_output
+
+#	$FW_APP --table filter --flush delegate_forward
+#	$FW6_APP --table filter --flush delegate_forward
+
+	$FW_APP --table filter --flush port_trigger_fwd
+
+	#$FW_APP --table filter --flush rip_fw_bypass
+	#$FW6_APP --table filter --flush ripng_fw_bypass
+	
+	#$FW_APP --table filter --flush dhcprelay
+	#$FW_APP --table filter --flush snmp
+	$FW_APP --table filter --flush forward_vlan_defaults                                                                                    
+        $FW6_APP --table filter --flush forward_vlan_defaults
+	#chains required in NAT table.
+#	$FW_APP --table nat --flush prerouting_rule
+#	$FW_APP --table nat --flush postrouting_rule
+
+	#$FW_APP --table nat --flush PREROUTING
+	#$FW_APP --table nat --flush POSTROUTING
+
+#	$FW_APP --table nat --flush delegate_prerouting
+#	$FW_APP --table nat --flush delegate_postrouting
+	
+	$FW_APP --table nat --flush remote_management_dnat
+	$FW_APP --table nat --flush port_trigger_nat
+	$FW_APP --table nat --flush portforward_dnat
+	$FW_APP --table nat --flush staticnat_dnat
+	$FW_APP --table nat --flush dmzhost_dnat
+	$FW_APP --table filter --flush dmzhost_forward
+	$FW_APP --table nat --flush nat_reflection_in
+	$FW_APP --table nat --flush nat_reflection_out
+	$FW_APP --table nat --flush staticnat_reflection_in                                                                                
+        $FW_APP --table nat --flush staticnat_reflection_out
+
+	#$FW_APP --table mangle --flush POSTROUTING	
+
+#	local allWANiface=`uci show network | grep  "=interface" | cut -f 1 -d = | cut -f 2 -d . | grep -ie ^[wu]` #change logic if needed.`
+	network_all_wan_interfaces_cached allWANiface
+	for iface in $allWANiface
+	do
+		iface=$(echo $iface | sed s/p//g)
+		if $FW_APP --list-rules snat_$iface --table nat &> /dev/null; then
+			$FW_APP --table nat --flush snat_$iface  
+			$FW_APP --table nat --delete-chain snat_$iface  
+		fi
+	done
+	if $FW_APP --list-rules snat_usb1 --table nat &> /dev/null; then
+		$FW_APP --table nat --flush snat_usb1
+		$FW_APP --table nat --delete-chain snat_usb1
+	fi
+ 
+if [ "$_this_board" = "RV340" -o "$_this_board" = "RV340W" -o "$_this_board" = "RV345" -o "$_this_board" = "RV345P" ];then
+	if $FW_APP --list-rules snat_usb2 --table nat &> /dev/null; then
+		$FW_APP --table nat --flush snat_usb2
+		$FW_APP --table nat --delete-chain snat_usb2
+	fi
+fi
+	delete_staticNat
+}
+
+flush_policynat() {
+	cat /tmp/.uci/firewall | grep - | grep -Eo firewall_policy_nat_[0-9]* | uniq | while read line
+	do
+		delete_policynat=$line
+		interface=`uci get /tmp/etc/config/firewall.$delete_policynat.dest_interface` 
+		local device pdevice
+		device=`uci get network.$interface.ifname`
+		pdevice=$(echo $interface | sed s/wan[1-9]*/\&p/g)
+		ip address flush dev $device label $device":2" 2>&- >&-
+		ip address flush dev pptp-$pdevice label pptp-$pdevice":2" 2>&- >&-
+		ip address flush dev l2tp-$pdevice label l2tp-$pdevice":2" 2>&- >&-
+		ip address flush dev ppoe-$pdevice label ppoe-$pdevice":2" 2>&- >&-
+	done
+
+	cat /tmp/.uci/firewall | grep - | grep -Eo firewall_policy_nat_[0-9]* | uniq | while read line                   
+        do                                                                                                                
+                delete_policynat=$line                                                                                 
+                interface=`uci get /tmp/etc/config/firewall.$delete_policynat.src_interface`                           
+                local device pdevice                                                               
+                device=`uci get network.$interface.ifname`                                          
+                pdevice=$(echo $interface | sed s/wan[1-9]*/\&p/g)                          
+                ip address flush dev $device label $device":2" 2>&- >&-                          
+                ip address flush dev pptp-$pdevice label pptp-$pdevice":2" 2>&- >&-
+                ip address flush dev l2tp-$pdevice label l2tp-$pdevice":2" 2>&- >&-
+                ip address flush dev ppoe-$pdevice label ppoe-$pdevice":2" 2>&- >&-
+        done               
+}
+delete_staticNat() {
+	cat /tmp/.uci/firewall | grep - | grep -Eo staticNat_[0-9]* | uniq | while read line
+	do
+		delete_staticnat=$line
+		interface=`uci get /tmp/etc/config/firewall.$delete_staticnat.interface`
+if [ "$_this_board" = "RV340" -o "$_this_board" = "RV340W" -o "$_this_board" = "RV345" -o "$_this_board" = "RV345P" ];then
+		if [ "$interface" = "wan1" ]
+		then
+			#`ip address delete $baseaddr.$lastdigit_firstip/$mask dev eth2 2>&- >&-`
+			ip address flush dev eth2 label eth2:1 2>&- >&-
+			ip address flush dev pptp-wan1p label pptp-wan1p:1 2>&- >&-
+			ip address flush dev l2tp-wan1p label l2tp-wan1p:1 2>&- >&-
+			ip address flush dev ppoe-wan1p label ppoe-wan1p:1 2>&- >&-
+		elif [ "$interface" = "wan2" ]
+		then
+			ip address flush dev eth0 label eth0:1 2>&- >&-
+			ip address flush dev pptp-wan2p label pptp-wan2p:1 2>&- >&-
+			ip address flush dev l2tp-wan2p label l2tp-wan2p:1 2>&- >&-
+			ip address flush dev ppoe-wan2p label ppoe-wan2p:1 2>&- >&-
+		else
+			local device pdevice
+			device=`uci get network.$interface.ifname`
+			pdevice=$(echo $interface | sed s/wan[1-9]*/\&p/g)
+			ip address flush dev $device label $device":1" 2>&- >&-
+			ip address flush dev pptp-$pdevice label pptp-$pdevice":1" 2>&- >&-
+			ip address flush dev l2tp-$pdevice label l2tp-$pdevice":1" 2>&- >&-
+			ip address flush dev ppoe-$pdevice label ppoe-$pdevice":1" 2>&- >&-
+		fi
+else 
+		if [ "$interface" = "wan1" ]
+		then
+			ip address flush dev eth0 label eth0:1 2>&- >&-
+			ip address flush dev pptp-wan1p label pptp-wan1p:1 2>&- >&-
+			ip address flush dev l2tp-wan1p label l2tp-wan1p:1 2>&- >&-
+			ip address flush dev ppoe-wan1p label ppoe-wan1p:1 2>&- >&-
+		else
+			local device pdevice
+			device=`uci get network.$interface.ifname`
+			pdevice=$(echo $interface | sed s/wan[1-9]*/\&p/g)
+			ip address flush dev $device label $device":1" 2>&- >&-
+			ip address flush dev pptp-$pdevice label pptp-$pdevice":1" 2>&- >&-
+			ip address flush dev l2tp-$pdevice label l2tp-$pdevice":1" 2>&- >&-
+			ip address flush dev ppoe-$pdevice label ppoe-$pdevice":1" 2>&- >&-
+		fi
+fi
+	done
+}
+
+flush_staticnat()
+{
+	delete_staticNat
+}
+
+flush_basicsettings()
+{
+	$FW_APP --table filter --flush firewall_disable
+	$FW6_APP --table filter --flush firewall_disable
+	ftp_alg_port=`uci get /tmp/etc/config/firewall.global_configuration.ftp_alg_port`
+	cmm -c set port_dpi delete $ftp_alg_port
+}
+
+reload(){ 
+	if [ "$FW_TRACE" = 1 ]
+	then
+		FW_FILTER_APP="printeval 1 /usr/sbin/iptables -w"
+		FW6_FILTER_APP="printeval 1 /usr/sbin/ip6tables -w"
+		FW_NAT_APP="printeval 1 /usr/sbin/iptables --table nat -w"
+	else
+		FW_FILTER_APP="printeval 0 /usr/sbin/iptables -w"
+		FW6_FILTER_APP="printeval 0 /usr/sbin/ip6tables -w"
+		FW_NAT_APP="printeval 0 /usr/sbin/iptables --table nat -w"
+	fi
+	
+	fw_iface_stats.sh $$
+
+	config_load firewall
+#	source uci_cache $SCHEDULECONFIG
+	tmp_uci=`cat /tmp/.uci/firewall`
+	case $tmp_uci in 
+	*firewall.global_configuration*)
+		flush_basicsettings
+		/usr/bin/clearconnection.sh 2>&- >&-
+		firewall_status_old=`uci get /tmp/etc/config/firewall.global_configuration.firewall`
+		uci commit firewall
+		config_foreach config_basicSettings firewall
+		config_get_bool firewall_status_new "global_configuration" firewall
+		if [ "$firewall_status_old" = "0"  -a "$firewall_status_new" = "1" ]
+		then
+			$FW_FILTER_APP --delete forward_rule -j RETURN
+			$FW6_FILTER_APP --delete forward_rule -j RETURN
+		elif [ "$firewall_status_old" = "1"  -a "$firewall_status_new" = "0" ]
+		then
+			$FW_FILTER_APP --insert forward_rule -j RETURN
+			$FW6_FILTER_APP --insert forward_rule -j RETURN
+		fi
+	
+		firewall_spoofrules
+		#exit
+		;;
+	esac
+	case $tmp_uci in 
+	*firewall.rule*)
+		uci commit firewall
+		#config_deltaRule
+		config_accessRule
+		/usr/bin/clearconnection.sh 2>&- >&-
+		#exit
+		;;
+	esac	
+	case $tmp_uci in 
+	*natmode*)
+		uci commit firewall
+	        #config_foreach config_ifaceNAT natmode
+		config_ifaceNAT
+	        /usr/bin/clearconnection.sh 2>&- >&-
+	        #exit
+		;;
+	esac
+	case $tmp_uci in 
+	*firewall.staticNat*)
+		flush_staticnat
+		uci commit firewall
+	        config_staticNAT
+	        /usr/bin/clearconnection.sh 2>&- >&-
+	        #exit
+		;;
+	esac
+	case $tmp_uci in 
+	*firewall.redirect*)
+		uci commit firewall
+		#config_foreach config_portForwarding redirect
+		config_portForwarding
+		#skip portforward reflection rules for dmz host     
+	        config_portforward_dmz
+	        /usr/bin/clearconnection.sh 2>&- >&-
+	        #exit
+		;;
+	esac
+	case $tmp_uci in 
+	*firewall.port_trigger*)
+		uci commit firewall
+		#config_foreach config_portTriggering port_trigger
+		config_portTriggering
+		config_porttrigger_dmz
+		/usr/bin/clearconnection.sh 2>&- >&-
+	        #exit
+		;;
+	esac
+	case $tmp_uci in 
+	*firewall.session_timeout*)
+		uci commit firewall
+		config_foreach config_sessionTimeout connection
+	        #exit
+		;;
+	esac
+	case $tmp_uci in 
+	*firewall.dmzhost*)
+		uci commit firewall
+		#config_foreach config_DMZ host
+		config_DMZ
+		/usr/bin/clearconnection.sh 2>&- >&-
+	        #exit
+		;;
+	esac
+	case $tmp_uci in
+        *firewall.firewall_policy_nat*)
+				flush_policynat
+                uci commit firewall
+                #config_foreach config_policynat
+                config_policynat
+                /usr/bin/clearconnection.sh 2>&- >&-
+                #exit
+                ;;   
+        esac              
+	case $tmp_uci in 
+	*firewall.content_filter*|*firewall.blockURL*|*firewall.allowURL*|*firewall.blockKeyword*|*firewall.allowKeyword*|*firewall.webfeatures*|*firewall.*trustedDomain*)
+		uci commit firewall
+		#config_foreach config_webFeatures block
+		#config_contentfilter_block 
+		#config_foreach config_trustedDomains trustedDomain
+		#config_contentfilter_allow
+		iptables-uci contentfilter fileID:$$
+		/usr/bin/clearconnection.sh 2>&- >&-
+		#exit
+		;;
+	esac
+	#only reload user configured data, but not the core infra
+	#restart
+	rm $TMP_FWIFACESTATS
+}
+
+firewall_policynat_reload(){
+	local add_status=""                                                                
+	local delete_status=""                              
+	add_status=`cat /tmp/ipgroupdeltaconfig | sed s/"'"//g |grep =ipgroup`
+	delete_status=`cat /tmp/ipgroupdeltaconfig | grep -`
+
+	if [ "$add_status" != "" -a "$delete_status" != "" ]
+	then
+		if [ "$FW_TRACE" = 1 ]                                         
+		then                                                                     
+			FW_FILTER_APP="printeval 1 /usr/sbin/iptables -w"
+			FW_NAT_APP="printeval 1 /usr/sbin/iptables --table nat -w"
+		else                                                               
+			FW_FILTER_APP="printeval 0 /usr/sbin/iptables -w"
+			FW_NAT_APP="printeval 0 /usr/sbin/iptables --table nat -w"
+		fi    
+		fw_iface_stats.sh $$
+		config_policynat	                                            
+	fi
+}
+firewall_dmz_reload(){
+
+	if [ "$FW_TRACE" = 1 ]                                                                                  
+    then                                                                               
+		FW_FILTER_APP="printeval 1 /usr/sbin/iptables -w"
+		FW_NAT_APP="printeval 1 /usr/sbin/iptables --table nat -w"
+    else                                                                             
+		FW_FILTER_APP="printeval 0 /usr/sbin/iptables -w"
+		FW_NAT_APP="printeval 0 /usr/sbin/iptables --table nat -w"
+	fi                                                                         
+	fw_iface_stats.sh $$                                                       
+	config_DMZ   
+}
+#When even ever schedule is changed we need to reload acl and contentfilter configurations
+firewall_sched_reload(){
+	local add_status=""
+	local delete_status=""
+	add_status=`cat /tmp/scheddeltaconfig | sed s/"'"//g |grep =schedule`
+	delete_status=`cat /tmp/scheddeltaconfig | grep -`
+	if [ "$add_status" != "" -a "$delete_status" != "" ]
+	then
+		if [ "$FW_TRACE" = 1 ]                                                                                                
+		then                                                                                                            
+			FW_FILTER_APP="printeval 1 /usr/sbin/iptables -w"
+			FW6_FILTER_APP="printeval 1 /usr/sbin/ip6tables -w"
+			FW_NAT_APP="printeval 1 /usr/sbin/iptables --table nat -w"
+		else                                                                                                                         
+			FW_FILTER_APP="printeval 0 /usr/sbin/iptables -w"
+			FW6_FILTER_APP="printeval 0 /usr/sbin/ip6tables -w"
+			FW_NAT_APP="printeval 0 /usr/sbin/iptables --table nat -w"
+		fi
+		        
+		source uci_cache $SCHEDULECONFIG
+		$FW_APP --table filter --flush forward_rule                                                                                  
+		$FW6_APP --table filter --flush forward_rule
+
+		fw_iface_stats.sh $$   
+
+		`/usr/bin/clearconnection.sh 2>&- >&-`
+		config_load firewall
+		config_accessRule
+		#config_foreach config_webFeatures block
+		#config_contentfilter_block
+		#config_foreach config_trustedDomains trustedDomain
+		#config_contentfilter_allow
+		iptables-uci contentfilter fileID:$$
+	fi
+	rm /tmp/scheddeltaconfig
+}
+ 
+restart(){
+	stop
+	/usr/bin/clearconnection.sh 2>&- >&-
+	fw_iface_stats.sh $$
+	start
+	rm $TMP_FWIFACESTATS
+}
+delete_oldstaticNAT(){
+	
+	local cfg="$1"
+	
+	config_get interface "$cfg" interface
+if [ "$_this_board" = "RV340" -o "$_this_board" = "RV340W" -o "$_this_board" = "RV345" -o "$_this_board" = "RV345P" ];then
+	if [ "$interface" = "wan1" ]
+	then
+		#`ip address delete $baseaddr.$lastdigit_firstip/$mask dev eth2 2>&- >&-`
+		ip address flush dev eth2 label eth2:1 2>&- >&-
+		ip address flush dev pptp-wan1p label pptp-wan1p:1 2>&- >&-
+		ip address flush dev l2tp-wan1p label l2tp-wan1p:1 2>&- >&-
+		ip address flush dev ppoe-wan1p label ppoe-wan1p:1 2>&- >&-
+	elif [ "$interface" = "wan2" ]
+    then
+		ip address flush dev eth0 label eth0:1 2>&- >&-
+		ip address flush dev pptp-wan2p label pptp-wan2p:1 2>&- >&-
+		ip address flush dev l2tp-wan2p label l2tp-wan2p:1 2>&- >&-
+		ip address flush dev ppoe-wan2p label ppoe-wan2p:1 2>&- >&-
+	else
+		local device pdevice
+		device=`uci get network.$interface.ifname`
+		pdevice=$(echo $interface | sed s/wan[1-9]*/\&p/g)
+		ip address flush dev $device label $device":1" 2>&- >&-
+		ip address flush dev pptp-$pdevice label pptp-$pdevice":1" 2>&- >&-
+		ip address flush dev l2tp-$pdevice label l2tp-$pdevice":1" 2>&- >&-
+		ip address flush dev ppoe-$pdevice label ppoe-$pdevice":1" 2>&- >&-
+	fi
+else
+	if [ "$interface" = "wan1" ]
+	then
+		ip address flush dev eth0 label eth0:1 2>&- >&-
+		ip address flush dev pptp-wan1p label pptp-wan1p:1 2>&- >&-
+		ip address flush dev l2tp-wan1p label l2tp-wan1p:1 2>&- >&-
+		ip address flush dev ppoe-wan1p label ppoe-wan1p:1 2>&- >&-
+	else
+		local device pdevice
+		device=`uci get network.$interface.ifname`
+		pdevice=$(echo $interface | sed s/wan[1-9]*/\&p/g)
+		ip address flush dev $device label $device":1" 2>&- >&-
+		ip address flush dev pptp-$pdevice label pptp-$pdevice":1" 2>&- >&-
+		ip address flush dev l2tp-$pdevice label l2tp-$pdevice":1" 2>&- >&-
+		ip address flush dev ppoe-$pdevice label ppoe-$pdevice":1" 2>&- >&-
+	fi
+fi
+}
+
+boot() {
+	#config_load firewall
+	#`iptables-restore /etc/firewall-defaults.txt`
+	#`ip6tables-restore /etc/firewall6-defaults.txt`
+
+	uci commit firewall
+	fw_iface_stats.sh $$
+	start	
+	rm $TMP_FWIFACESTATS
+}
+
+hotplug_v6reload(){
+	if [ "$FW_TRACE" = 1 ]
+	then
+		FW_FILTER_APP="printeval 1 /usr/sbin/iptables -w"
+		FW6_FILTER_APP="printeval 1 /usr/sbin/ip6tables -w"
+		FW_NAT_APP="printeval 1 /usr/sbin/iptables --table nat -w"
+	else
+		FW_FILTER_APP="printeval 0 /usr/sbin/iptables -w"
+		FW6_FILTER_APP="printeval 0 /usr/sbin/ip6tables -w"
+		FW_NAT_APP="printeval 0 /usr/sbin/iptables --table nat -w"
+	fi
+
+	fw_iface_stats.sh $$
+	#config_load firewall
+	#stop
+	#if wan mode is changed delete old routes/addresses configured in staticNat
+	ip6tables-uci basicsettings fileID:$$
+	rm $TMP_FWIFACESTATS
+}
+
+hotplug_reload(){
+	if [ "$FW_TRACE" = 1 ]
+	then
+		FW_FILTER_APP="printeval 1 /usr/sbin/iptables -w"
+		FW6_FILTER_APP="printeval 1 /usr/sbin/ip6tables -w"
+		FW_NAT_APP="printeval 1 /usr/sbin/iptables --table nat -w"
+	else
+		FW_FILTER_APP="printeval 0 /usr/sbin/iptables -w"
+		FW6_FILTER_APP="printeval 0 /usr/sbin/ip6tables -w"
+		FW_NAT_APP="printeval 0 /usr/sbin/iptables --table nat -w"
+	fi
+
+	fw_iface_stats.sh $$
+	#config_load firewall
+	stop
+	#if wan mode is changed delete old routes/addresses configured in staticNat
+	config_load firewall
+	config_foreach delete_oldstaticNAT staticNat
+	start
+	rm $TMP_FWIFACESTATS
+}

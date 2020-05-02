@@ -1,0 +1,131 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add phy proc read and write debug interface.
+--- linux-4.1.8/drivers/net/phy/phy_device.c.org	2017-02-04 13:39:43.358378246 +0800
++++ linux-4.1.8/drivers/net/phy/phy_device.c	2017-02-04 13:40:10.318378129 +0800
+@@ -59,6 +59,7 @@
+ };
+ 
+ static struct phy_driver genphy_driver[GENPHY_DRV_MAX];
++static struct proc_dir_entry *phy_dir, *reg_file;
+ 
+ static LIST_HEAD(phy_fixup_list);
+ static DEFINE_MUTEX(phy_fixup_lock);
+@@ -1229,6 +1230,100 @@
+ 	}
+ }
+ 
++static int proc_show_reg(struct seq_file *seq, void *v)
++{
++	seq_printf(seq,
++	  "Usage:\n"
++	  "phy read:  echo r reg > /proc/phy/reg\n"
++	  "phy write: echo w reg val > /proc/phy/reg\n");
++
++	return 0;
++}
++
++static int proc_open_reg(struct inode *inode, struct file *file)
++{
++	return single_open(file, proc_show_reg, PDE_DATA(inode));
++}
++
++static int proc_write_reg(struct file *file, const char __user * user_buffer, size_t count, loff_t * ppos)
++{
++	struct phy_device *phydev = (struct phy_device *) (((struct seq_file *)file->private_data)->private);
++	char line[64];
++	char *e = ' ';
++	char *p1, *p2;
++	u32 reg, write_val, read_val;
++	int ret;
++
++	ret = copy_from_user(line, user_buffer, count);
++	if(ret)
++		return -EFAULT;
++
++	if(!strncmp(line, "w", 1))
++	{
++		p1 = strchr(line, ' ');
++		if(p1 != NULL)
++		{
++			p1++;
++			reg = simple_strtoul(p1, &e, 0);
++			p2 = strchr(p1, ' ');
++			if(p2 != NULL)
++			{
++				p2++;
++				write_val = simple_strtoul(p2, &e, 0);
++				printk("phy write: addr=0x%x, reg=0x%x\n", phydev->addr, reg);
++				read_val = phy_read(phydev, reg);
++				printk("before write: read_val=0x%x\n", read_val);
++				phy_write(phydev, reg, write_val);
++				printk("do write: write_val=0x%x\n", write_val);
++			}
++		}
++	}
++	else if(!strncmp(line, "r", 1))
++	{
++		p1 = strchr(line, ' ');
++		if(p1 != NULL)
++		{
++			p1++;
++			reg = simple_strtoul(p1, &e, 0);
++			printk("phy read: addr=0x%x, reg=0x%x\n", phydev->addr, reg);
++			read_val = phy_read(phydev, reg);
++			printk("read value=0x%x\n", read_val);
++		}
++	}
++
++	return count;
++}
++
++static struct file_operations phy_proc_fops =
++{
++	.owner = THIS_MODULE,
++	.open = proc_open_reg,
++	.read = seq_read,
++	.write = proc_write_reg,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static int phy_proc_fs_create(struct phy_device *phydev)
++{
++	phy_dir = proc_mkdir("phy", NULL);
++	if(!phy_dir)
++		return -ENOMEM;
++	reg_file = proc_create_data("reg", 0644, phy_dir, &phy_proc_fops, phydev);
++	if(!reg_file)
++		return -ENOMEM;
++
++	return 0;
++}
++
++static int phy_proc_fs_destroy(void)
++{
++	remove_proc_entry("phy/reg", NULL);
++	remove_proc_entry("phy", NULL);
++
++	return 0;
++}
++
+ /**
+  * phy_probe - probe and init a PHY device
+  * @dev: device to probe and init
+@@ -1274,6 +1369,8 @@
+ 
+ 	mutex_unlock(&phydev->lock);
+ 
++	phy_proc_fs_create(phydev);
++
+ 	return err;
+ }
+ 
+@@ -1281,6 +1378,8 @@
+ {
+ 	struct phy_device *phydev = to_phy_device(dev);
+ 
++	phy_proc_fs_destroy();
++
+ 	mutex_lock(&phydev->lock);
+ 	phydev->state = PHY_DOWN;
+ 	mutex_unlock(&phydev->lock);

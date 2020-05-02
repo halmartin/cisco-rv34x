@@ -1,0 +1,44 @@
+From aadca6d7b39e71f283e11a68f972e14ca462fe80 Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Date: Tue, 8 Aug 2017 01:10:41 -0500
+Subject: [PATCH] Corrected the variable (pppInterfaceIPs) diclaration for
+ proper scope and lifetime
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+---
+ pptpctrl.c | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/pptpctrl.c b/pptpctrl.c
+index 2cad5d1..7fda40b 100644
+--- a/pptpctrl.c
++++ b/pptpctrl.c
+@@ -10,6 +10,9 @@
+  *  + added PPPD kill on stop ses
+  *  + correct exit on duplicate connection
+  *
++ * 08/08/2017 Bug Fixed by Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
++ *  + Corrected the variable (pppInterfaceIPs) diclaration 
++ *    for proper scope and lifetime
+  */
+ 
+ #ifdef HAVE_CONFIG_H
+@@ -560,6 +563,7 @@ static void launch_pppd(char **pppaddrs, struct in_addr *inetaddrs)
+ 	sigset_t sigs;
+ 	char tmp[128];
+ 
++	char pppInterfaceIPs[33];
+ 	pppd_argv[an++] = ppp_binary;
+ 
+ 	if (pptpctrl_debug) {
+@@ -659,7 +663,6 @@ static void launch_pppd(char **pppaddrs, struct in_addr *inetaddrs)
+ 	}
+ 
+ 	if (*pppaddrs[0] || *pppaddrs[1]) {
+-		char pppInterfaceIPs[33];
+ 		sprintf(pppInterfaceIPs, "%s:%s", pppaddrs[0], pppaddrs[1]);
+ 		pppd_argv[an++] = pppInterfaceIPs;
+ 	}
+-- 
+1.9.1
+

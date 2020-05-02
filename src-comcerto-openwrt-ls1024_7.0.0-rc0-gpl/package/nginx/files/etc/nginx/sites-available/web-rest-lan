@@ -1,0 +1,45 @@
+server {
+	server_name  localhost:80;
+
+	#mapping to Firewall->Basic Settings->LAN/VPN Web Management, it will generate by ucicfg
+	include /var/nginx/conf.d/lan.http.conf;	
+
+	include /var/nginx/conf.d/web.conf;
+	include /var/nginx/conf.d/web.upload.conf;
+	include /var/nginx/conf.d/web.websocket.conf;
+
+	include /var/nginx/conf.d/misc.conf; 
+
+	include /var/nginx/conf.d/sec.overflow.conf;
+	include /var/nginx/conf.d/sec.browser.conf;
+	include /var/nginx/conf.d/sec.misc.conf;
+
+	include /var/nginx/conf.d/perf.timeout.conf;
+	#include /var/nginx/conf.d/perf.gzip.conf;
+	include /var/nginx/conf.d/perf.cache.conf;
+}
+	
+server {
+	server_name  localhost:443;
+
+	#mapping to Firewall->Basic Settings->LAN/VPN Web Management, it will generate by ucicfg
+	include /var/nginx/conf.d/lan.https.conf;
+	include /var/nginx/conf.d/lan.rest.conf;
+
+	include /var/nginx/conf.d/sec.ssl.conf;	
+	include /var/nginx/conf.d/web.cert.conf;
+	
+	include /var/nginx/conf.d/web.conf;
+	include /var/nginx/conf.d/web.upload.conf;
+	include /var/nginx/conf.d/web.websocket.conf;
+
+	include /var/nginx/conf.d/misc.conf; 
+
+	include /var/nginx/conf.d/sec.overflow.conf;
+	include /var/nginx/conf.d/sec.browser.conf;
+	include /var/nginx/conf.d/sec.misc.conf;
+
+	include /var/nginx/conf.d/perf.timeout.conf;
+	#include /var/nginx/conf.d/perf.gzip.conf;
+	include /var/nginx/conf.d/perf.cache.conf;
+}

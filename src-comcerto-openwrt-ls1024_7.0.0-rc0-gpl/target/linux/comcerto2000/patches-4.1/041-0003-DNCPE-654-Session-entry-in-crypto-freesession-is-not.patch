@@ -1,0 +1,317 @@
+From 29121e67937f2d4fe340429f9bd9ce3f5e47fbf6 Mon Sep 17 00:00:00 2001
+From: sudhakar <sudhakar.mukkara@nxp.com>
+Date: Wed, 15 Feb 2017 11:00:29 +0530
+Subject: [PATCH 3/4] DNCPE-654:Session entry in crypto freesession is not
+ protected properly.
+
+---
+ crypto/ocf/cryptosoft.c |  151 ++++++++++++++++++++++++-----------------------
+ 1 files changed, 78 insertions(+), 73 deletions(-)
+
+diff --git a/crypto/ocf/cryptosoft.c b/crypto/ocf/cryptosoft.c
+index f3c36f7..be803e8 100644
+--- a/crypto/ocf/cryptosoft.c
++++ b/crypto/ocf/cryptosoft.c
+@@ -339,7 +339,7 @@ execute_later(void (fn)(void *), void *arg)
+ static int
+ swcr_newsession(device_t dev, u_int32_t *sid, struct cryptoini *cri)
+ {
+-	struct swcr_data **swd;
++	struct swcr_data *swd, **sess_list;
+ 	u_int32_t i;
+ 	int error;
+ 	char *algo;
+@@ -367,8 +367,8 @@ swcr_newsession(device_t dev, u_int32_t *sid, struct cryptoini *cri)
+ 		} else
+ 			swcr_sesnum *= 2;
+ 
+-		swd = kmalloc(swcr_sesnum * sizeof(struct swcr_data *), SLAB_ATOMIC);
+-		if (swd == NULL) {
++		sess_list = kmalloc(swcr_sesnum * sizeof(struct swcr_data *), SLAB_ATOMIC);
++		if (sess_list == NULL) {
+ 			/* Reset session number */
+ 			if (swcr_sesnum == CRYPTO_SW_SESSIONS)
+ 				swcr_sesnum = 0;
+@@ -378,35 +378,32 @@ swcr_newsession(device_t dev, u_int32_t *sid, struct cryptoini *cri)
+                         write_unlock_irqrestore(&swcrsess_lock, flags);
+ 			return ENOBUFS;
+ 		}
+-		memset(swd, 0, swcr_sesnum * sizeof(struct swcr_data *));
++		memset(sess_list, 0, swcr_sesnum * sizeof(struct swcr_data *));
+ 
+ 		/* Copy existing sessions */
+ 		if (swcr_sessions) {
+-			memcpy(swd, swcr_sessions,
++			memcpy(sess_list, swcr_sessions,
+ 			    (swcr_sesnum / 2) * sizeof(struct swcr_data *));
+ 			kfree(swcr_sessions);
+ 		}
+-
+-		swcr_sessions = swd;
++		swcr_sessions = sess_list;
++	}
++	swd  = (struct swcr_data *) kmalloc(sizeof(struct swcr_data),
++				SLAB_ATOMIC);
++	if (swd == NULL) {
++		dprintk("%s,%d: ENOBUFS\n", __FILE__, __LINE__);
++                write_unlock_irqrestore(&swcrsess_lock, flags);
++         	return ENOBUFS;
+ 	}
+-        swcr_sessions[i] = (struct swcr_data*)0xffffffff;
+-	swd = &swcr_sessions[i];
++	memset(swd, 0, sizeof(struct swcr_data));
++	swcr_sessions[i] = swd;
+ 
+-        write_unlock_irqrestore(&swcrsess_lock, flags);
++	write_unlock_irqrestore(&swcrsess_lock, flags);
+ 
+ 	*sid = i;
+ 
+ 	while (cri) {
+-		*swd = (struct swcr_data *) kmalloc(sizeof(struct swcr_data),
+-				SLAB_ATOMIC);
+-		if (*swd == NULL) {
+-			swcr_freesession(NULL, i);
+-			dprintk("%s,%d: ENOBUFS\n", __FILE__, __LINE__);
+-			return ENOBUFS;
+-		}
+-		memset(*swd, 0, sizeof(struct swcr_data));
+-
+-		if (cri->cri_alg < 0 ||
++     		if (cri->cri_alg < 0 ||
+ 				cri->cri_alg>=sizeof(crypto_details)/sizeof(crypto_details[0])){
+ 			printk("cryptosoft: Unknown algorithm 0x%x\n", cri->cri_alg);
+ 			swcr_freesession(NULL, i);
+@@ -421,10 +418,10 @@ swcr_newsession(device_t dev, u_int32_t *sid, struct cryptoini *cri)
+ 		}
+ 
+ 		mode = crypto_details[cri->cri_alg].mode;
+-		(*swd)->sw_type = crypto_details[cri->cri_alg].sw_type;
+-		(*swd)->sw_alg = cri->cri_alg;
++		swd->sw_type = crypto_details[cri->cri_alg].sw_type;
++		swd->sw_alg = cri->cri_alg;
+ 
+-		spin_lock_init(&(*swd)->sw_tfm_lock);
++		spin_lock_init(&swd->sw_tfm_lock);
+ 
+ 		/* Algorithm specific configuration */
+ 		switch (cri->cri_alg) {
+@@ -435,28 +432,27 @@ swcr_newsession(device_t dev, u_int32_t *sid, struct cryptoini *cri)
+ 			break;
+ 		}
+ 
+-		if ((*swd)->sw_type & SW_TYPE_BLKCIPHER) {
++		if (swd->sw_type & SW_TYPE_BLKCIPHER) {
+ 			dprintk("%s crypto_alloc_*blkcipher(%s, 0x%x)\n", __FUNCTION__,
+ 					algo, mode);
+ 
+ 			/* try async first */
+-			(*swd)->sw_tfm = swcr_no_ablk ? NULL :
++			swd->sw_tfm = swcr_no_ablk ? NULL :
+ 					crypto_ablkcipher_tfm(crypto_alloc_ablkcipher(algo, 0, 0));
+-			if ((*swd)->sw_tfm && !IS_ERR((*swd)->sw_tfm)) {
+-				dprintk("%s %s cipher is async\n", __FUNCTION__, algo);
+-				(*swd)->sw_type |= SW_TYPE_ASYNC;
++			if (swd->sw_tfm && !IS_ERR(swd->sw_tfm)) {
++				swd->sw_type |= SW_TYPE_ASYNC;
+ 			} else {
+-				(*swd)->sw_tfm = crypto_blkcipher_tfm(
++				swd->sw_tfm = crypto_blkcipher_tfm(
+ 						crypto_alloc_blkcipher(algo, 0, CRYPTO_ALG_ASYNC));
+-				if ((*swd)->sw_tfm && !IS_ERR((*swd)->sw_tfm))
++				if (swd->sw_tfm && !IS_ERR(swd->sw_tfm))
+ 					dprintk("%s %s cipher is sync\n", __FUNCTION__, algo);
+ 			}
+-			if (!(*swd)->sw_tfm || IS_ERR((*swd)->sw_tfm)) {
++			if (!(swd->sw_tfm) || IS_ERR(swd->sw_tfm)) {
+ 				int err;
+ 				dprintk("cryptosoft: crypto_alloc_blkcipher failed(%s, 0x%x)\n",
+ 						algo,mode);
+-				err = IS_ERR((*swd)->sw_tfm) ? -(PTR_ERR((*swd)->sw_tfm)) : EINVAL;
+-				(*swd)->sw_tfm = NULL; /* ensure NULL */
++				err = IS_ERR(swd->sw_tfm) ? -(PTR_ERR(swd->sw_tfm)) : EINVAL;
++				swd->sw_tfm = NULL; /* ensure NULL */
+ 				swcr_freesession(NULL, i);
+ 				return err;
+ 			}
+@@ -469,93 +465,103 @@ swcr_newsession(device_t dev, u_int32_t *sid, struct cryptoini *cri)
+ 							cri->cri_key[i] & 0xff);
+ 				dprintk("\n");
+ 			}
+-			if ((*swd)->sw_type & SW_TYPE_ASYNC) {
++			if (swd->sw_type & SW_TYPE_ASYNC) {
+ 				/* OCF doesn't enforce keys */
+ 				crypto_ablkcipher_set_flags(
+-						__crypto_ablkcipher_cast((*swd)->sw_tfm),
++						__crypto_ablkcipher_cast(swd->sw_tfm),
+ 							CRYPTO_TFM_REQ_WEAK_KEY);
+ 				error = crypto_ablkcipher_setkey(
+-							__crypto_ablkcipher_cast((*swd)->sw_tfm),
++							__crypto_ablkcipher_cast(swd->sw_tfm),
+ 								cri->cri_key, (cri->cri_klen + 7) / 8);
+ 			} else {
+ 				/* OCF doesn't enforce keys */
+ 				crypto_blkcipher_set_flags(
+-						crypto_blkcipher_cast((*swd)->sw_tfm),
++						crypto_blkcipher_cast(swd->sw_tfm),
+ 							CRYPTO_TFM_REQ_WEAK_KEY);
+ 				error = crypto_blkcipher_setkey(
+-							crypto_blkcipher_cast((*swd)->sw_tfm),
++							crypto_blkcipher_cast(swd->sw_tfm),
+ 								cri->cri_key, (cri->cri_klen + 7) / 8);
+ 			}
+ 			if (error) {
+ 				printk("cryptosoft: setkey failed %d (crt_flags=0x%x)\n", error,
+-						(*swd)->sw_tfm->crt_flags);
++						swd->sw_tfm->crt_flags);
+ 				swcr_freesession(NULL, i);
+ 				return error;
+ 			}
+-		} else if ((*swd)->sw_type & (SW_TYPE_HMAC | SW_TYPE_HASH)) {
++		} else if (swd->sw_type & (SW_TYPE_HMAC | SW_TYPE_HASH)) {
+ 			dprintk("%s crypto_alloc_*hash(%s, 0x%x)\n", __FUNCTION__,
+ 					algo, mode);
+ 
+ 			/* try async first */
+-			(*swd)->sw_tfm = swcr_no_ahash ? NULL :
++			swd->sw_tfm = swcr_no_ahash ? NULL :
+ 					crypto_ahash_tfm(crypto_alloc_ahash(algo, 0, 0));
+-			if ((*swd)->sw_tfm) {
++			if (swd->sw_tfm) {
+ 				dprintk("%s %s hash is async\n", __FUNCTION__, algo);
+-				(*swd)->sw_type |= SW_TYPE_ASYNC;
++				swd->sw_type |= SW_TYPE_ASYNC;
+ 			} else {
+ 				dprintk("%s %s hash is sync\n", __FUNCTION__, algo);
+-				(*swd)->sw_tfm = crypto_hash_tfm(
++				swd->sw_tfm = crypto_hash_tfm(
+ 						crypto_alloc_hash(algo, 0, CRYPTO_ALG_ASYNC));
+ 			}
+ 
+-			if (!(*swd)->sw_tfm) {
++			if (!swd->sw_tfm) {
+ 				dprintk("cryptosoft: crypto_alloc_hash failed(%s,0x%x)\n",
+ 						algo, mode);
+ 				swcr_freesession(NULL, i);
+ 				return EINVAL;
+ 			}
+ 
+-			(*swd)->u.hmac.sw_klen = (cri->cri_klen + 7) / 8;
+-			(*swd)->u.hmac.sw_key = (char *)kmalloc((*swd)->u.hmac.sw_klen,
++			swd->u.hmac.sw_klen = (cri->cri_klen + 7) / 8;
++			swd->u.hmac.sw_key = (char *)kmalloc(swd->u.hmac.sw_klen,
+ 					SLAB_ATOMIC);
+-			if ((*swd)->u.hmac.sw_key == NULL) {
++			if (swd->u.hmac.sw_key == NULL) {
+ 				swcr_freesession(NULL, i);
+ 				dprintk("%s,%d: ENOBUFS\n", __FILE__, __LINE__);
+ 				return ENOBUFS;
+ 			}
+-			memcpy((*swd)->u.hmac.sw_key, cri->cri_key, (*swd)->u.hmac.sw_klen);
++			memcpy(swd->u.hmac.sw_key, cri->cri_key, swd->u.hmac.sw_klen);
+ 			if (cri->cri_mlen) {
+-				(*swd)->u.hmac.sw_mlen = cri->cri_mlen;
+-			} else if ((*swd)->sw_type & SW_TYPE_ASYNC) {
+-				(*swd)->u.hmac.sw_mlen = crypto_ahash_digestsize(
+-						__crypto_ahash_cast((*swd)->sw_tfm));
++				swd->u.hmac.sw_mlen = cri->cri_mlen;
++			} else if (swd->sw_type & SW_TYPE_ASYNC) {
++				swd->u.hmac.sw_mlen = crypto_ahash_digestsize(
++						__crypto_ahash_cast(swd->sw_tfm));
+ 			} else  {
+-				(*swd)->u.hmac.sw_mlen = crypto_hash_digestsize(
+-						crypto_hash_cast((*swd)->sw_tfm));
++				swd->u.hmac.sw_mlen = crypto_hash_digestsize(
++						crypto_hash_cast(swd->sw_tfm));
+ 			}
+-		} else if ((*swd)->sw_type & SW_TYPE_COMP) {
+-			(*swd)->sw_tfm = crypto_comp_tfm(
++		} else if (swd->sw_type & SW_TYPE_COMP) {
++			swd->sw_tfm = crypto_comp_tfm(
+ 					crypto_alloc_comp(algo, 0, CRYPTO_ALG_ASYNC));
+-			if (!(*swd)->sw_tfm) {
++			if (!swd->sw_tfm) {
+ 				dprintk("cryptosoft: crypto_alloc_comp failed(%s,0x%x)\n",
+ 						algo, mode);
+ 				swcr_freesession(NULL, i);
+ 				return EINVAL;
+ 			}
+-			(*swd)->u.sw_comp_buf = kmalloc(CRYPTO_MAX_DATA_LEN, SLAB_ATOMIC);
+-			if ((*swd)->u.sw_comp_buf == NULL) {
++			swd->u.sw_comp_buf = kmalloc(CRYPTO_MAX_DATA_LEN, SLAB_ATOMIC);
++			if (swd->u.sw_comp_buf == NULL) {
+ 				swcr_freesession(NULL, i);
+ 				dprintk("%s,%d: ENOBUFS\n", __FILE__, __LINE__);
+ 				return ENOBUFS;
+ 			}
+ 		} else {
+-			printk("cryptosoft: Unhandled sw_type %d\n", (*swd)->sw_type);
++			printk("cryptosoft: Unhandled sw_type %d\n", swd->sw_type);
+ 			swcr_freesession(NULL, i);
+ 			return EINVAL;
+ 		}
+ 
+ 		cri = cri->cri_next;
+-		swd = &((*swd)->sw_next);
++                if(cri){
++         		swd->sw_next  = (struct swcr_data *) kmalloc(sizeof(struct swcr_data),
++	                                              			SLAB_ATOMIC);
++	        	if (swd->sw_next == NULL) {
++		        	swcr_freesession(NULL, i);
++			        dprintk("%s,%d: ENOBUFS\n", __FILE__, __LINE__);
++			        return ENOBUFS;
++		        }
++		        memset(swd->sw_next, 0, sizeof(struct swcr_data));
++		        swd = swd->sw_next;
++                }
+ 	}
+ 	return 0;
+ }
+@@ -566,7 +572,7 @@ swcr_newsession(device_t dev, u_int32_t *sid, struct cryptoini *cri)
+ static int
+ swcr_freesession(device_t dev, u_int64_t tid)
+ {
+-	struct swcr_data *swd;
++	struct swcr_data *swd, *swd_next;
+ 	u_int32_t sid = CRYPTO_SESID2LID(tid);
+ 	unsigned long flags;
+ 
+@@ -585,15 +591,15 @@ swcr_freesession(device_t dev, u_int64_t tid)
+ 	if (sid == 0)
+ 		return(0);
+ 
+-        read_lock(&swcrsess_lock);
++	write_lock_irqsave(&swcrsess_lock, flags);
+ 	swd = swcr_sessions[sid];
+-        read_unlock(&swcrsess_lock);
++	swcr_sessions[sid] = NULL;
++	write_unlock_irqrestore(&swcrsess_lock, flags);
++  
+ 
+ 	while (swd != NULL) {
+-		write_lock_irqsave(&swcrsess_lock, flags);
+-		swcr_sessions[sid] = swd->sw_next;
+-		write_unlock_irqrestore(&swcrsess_lock, flags);
+-
++                
++		swd_next = swd->sw_next;
+ 		if (swd->sw_tfm) {
+ 			switch (swd->sw_type & SW_TYPE_ALG_AMASK) {
+ #ifdef HAVE_AHASH
+@@ -634,10 +640,9 @@ swcr_freesession(device_t dev, u_int64_t tid)
+ 				kfree(swd->u.hmac.sw_key);
+ 		}
+ 		kfree(swd);
+-                read_lock(&swcrsess_lock);
+-		swd = swcr_sessions[sid];
+-                read_unlock(&swcrsess_lock);
+-	}
++		swd = swd_next;      
++	} 
++        
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

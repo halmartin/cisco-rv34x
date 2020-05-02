@@ -1,0 +1,14 @@
+diff -aurN '--exclude-from=/home/b38514/fi' mcproxy-2014-12-31-b7bd2d0809a0d1f177181c361b9a6c83e193b79a-orig/mcproxy/src/proxy/simple_mc_proxy_routing.cpp mcproxy-2014-12-31-b7bd2d0809a0d1f177181c361b9a6c83e193b79a/mcproxy/src/proxy/simple_mc_proxy_routing.cpp
+--- mcproxy-2014-12-31-b7bd2d0809a0d1f177181c361b9a6c83e193b79a-orig/mcproxy/src/proxy/simple_mc_proxy_routing.cpp	2017-11-23 16:50:09.366364878 +0530
++++ mcproxy-2014-12-31-b7bd2d0809a0d1f177181c361b9a6c83e193b79a/mcproxy/src/proxy/simple_mc_proxy_routing.cpp	2017-11-29 17:46:51.028444203 +0530
+@@ -443,7 +443,9 @@
+                 if (check_interface(IT_UPSTREAM, ID_OUT, ui.m_if_index, input_if_it->second, gaddr, s.saddr)) {
+ 
+                     if (is_rule_matching_type(IT_UPSTREAM, ID_OUT, RMT_ALL)) {
++			#if 0 /* Commenting the Upstream VIF index addition to OUT INTERFACES list of a mcast route cache */
+                         up_if_list.push_back(ui.m_if_index);
++			#endif
+                     } else if (is_rule_matching_type(IT_UPSTREAM, ID_OUT, RMT_FIRST)) {
+                         up_if_list.push_back(ui.m_if_index);
+                         break;
+

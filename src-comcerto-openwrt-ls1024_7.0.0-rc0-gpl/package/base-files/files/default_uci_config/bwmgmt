@@ -1,0 +1,7 @@
+
+config interface 'usb1'
+	option bwcap_enable '0'
+
+config interface 'usb2'
+	option bwcap_enable '0'
+

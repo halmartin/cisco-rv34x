@@ -1,0 +1,3 @@
+config tcp_lro
+	option ifname	eth0
+	option ifname	ath0

@@ -1,0 +1,44 @@
+--- a/src/logwriter.c	2017-02-09 12:39:17.254647786 +0530
++++ b/src/logwriter.c	2017-02-09 13:02:48.660904007 +0530
+@@ -159,9 +159,11 @@
+           self->flush_waiting_for_timeout = TRUE;
+         }
+       else
+-        {
+-          gint64 to = g_time_val_diff_syslog(&self->flush_target, &now) / 1000;
+-          if (to <= 0)
++        {	  
++          guint64 to=0;
++	  g_time_val_diff_syslog(&self->flush_target, &now, &to);
++	  guint64 time_diff = to / 1000;
++          if (time_diff <= 0)
+             {
+               /* timeout elapsed, start polling again */
+               if (self->writer->flags & LW_ALWAYS_WRITABLE)
+@@ -170,7 +172,7 @@
+             }
+           else
+             {
+-              *timeout = to;
++              *timeout = time_diff;
+             }
+         }
+       return FALSE;
+--- a/src/timeutils.c	2017-02-09 12:39:17.254647786 +0530
++++ b/src/timeutils.c	2017-02-09 12:41:41.676832154 +0530
+@@ -252,12 +252,12 @@
+ }
+ 
+ 
+-gint64
+-g_time_val_diff_syslog(GTimeVal_syslog *t1, GTimeVal *t2)
++guint64
++g_time_val_diff_syslog(GTimeVal_syslog *t1, GTimeVal *t2, guint64 *diff_time)
+ {
+   g_assert(t1);
+   g_assert(t2);
+-  return (t1->tv_sec - t2->tv_sec) * G_USEC_PER_SEC + (t1->tv_usec - t2->tv_usec);
++  *diff_time = (t1->tv_sec - t2->tv_sec) * G_USEC_PER_SEC + (t1->tv_usec - t2->tv_usec);
+ }
+ 
+ void

@@ -1,0 +1,12 @@
+--- linux-4.1.8/drivers/usb/serial/option.c.bak	2017-08-22 18:02:08.197547465 +0800
++++ linux-4.1.8/drivers/usb/serial/option.c	2017-08-22 18:02:25.750670544 +0800
+@@ -1933,9 +1933,6 @@
+ 			portdata->dcd_state = ((signals & 0x01) ? 1 : 0);
+ 			portdata->dsr_state = ((signals & 0x02) ? 1 : 0);
+ 			portdata->ri_state = ((signals & 0x08) ? 1 : 0);
+-
+-			if (old_dcd_state && !portdata->dcd_state)
+-				tty_port_tty_hangup(&port->port, true);
+ 		} else {
+ 			dev_dbg(dev, "%s: type %x req %x\n", __func__,
+ 				req_pkt->bRequestType, req_pkt->bRequest);

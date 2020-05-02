@@ -1,0 +1,53 @@
+#!/bin/sh
+
+DHCP_OUTFILE=/tmp/neighbordata
+pid=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+BRIGE_IFACE="br-wan"
+BRIGE_LAN_IFACE="br-vlan"
+case $pid in
+                *340* | *345*)
+			LANIFACE="eth3"
+                ;;
+                *160* | *260*)
+			LANIFACE="eth2"
+                ;;
+esac
+
+rm -rf /tmp/stats/neighstatsv4
+touch /tmp/stats/neighstatsv4
+`sh /usr/bin/get_dhcp_bind_status neigh`
+
+ip -4 neigh show | grep -i "DELAY\|REACHABLE" | grep "$LANIFACE\|$BRIGE_IFACE\|$BRIGE_LAN_IFACE" > /tmp/tmpneighv4
+sed -i "s/  */ /g" /tmp/tmpneighv4 
+while read ip second iface fourth mac sixth
+do
+	tmp=
+	# Check this ip in dhcp leases file
+	type=`awk -vip=$ip -F "?" '
+				{
+                if ($1 == ip) 
+                        {
+                                print "2"
+                                exit
+                        }
+        }' $DHCP_OUTFILE`
+	[ -z "$type" ] && type=1
+	if [ "$type" = "2" ]; then
+		host=`cat /tmp/dhcp.leases | grep "$ip" | cut -d " " -f4`
+	fi
+        if [ -z "$host" ]; then
+                host=`arp -a | grep -iv "<incomplete>" | grep -v "?" | grep -w "$ip" | cut -d " " -f1`
+        fi
+        tmp=`echo $iface | grep "^${LANIFACE}"` >/dev/null 2>&1
+        if [ -n "$tmp" ];then
+                iface=`uci show network | grep "vlan" | grep "$iface$" | cut -f 2 -d . | awk '{print toupper($0)}'`
+        else
+                iface=`echo $iface | cut -d - -f 2 | sed 's/\_/./g' | awk '{print toupper($0)}' | sed s/WAN[1-9]*/\&-BRIDGE/g`
+        fi
+
+	[ -z "$host" ] && host="-"
+	[ -z "$ip" ] && ip="-"
+	[ -z "$mac" ] && mac="-"
+	`echo "$iface,$host,$ip,$mac,$type," >> /tmp/stats/neighstatsv4`
+	host="-"
+done </tmp/tmpneighv4

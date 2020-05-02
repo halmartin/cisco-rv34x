@@ -1,0 +1,33 @@
+From: Siva Prasad Meduri <siva.meduri@nxp.com>
+Date: Fri, 02 Feb 2018 18:17:39 +0530
+Subject: [PATCH ] 081-netfilter-log-Divide-MAC-into-DST-and-SRC-MAC.patch
+
+Signed-off-by: Siva Prasad Meduri <siva.meduri@nxp.com>
+diff -Naur linux-4.1.8-old/net/ipv4/netfilter/nf_log_ipv4.c linux-4.1.8/net/ipv4/netfilter/nf_log_ipv4.c
+--- linux-4.1.8-old/net/ipv4/netfilter/nf_log_ipv4.c	2018-02-02 20:09:50.455193440 +0530
++++ linux-4.1.8/net/ipv4/netfilter/nf_log_ipv4.c	2018-02-02 20:18:48.535193376 +0530
+@@ -296,14 +296,22 @@
+ 	}
+ 
+ fallback:
+-	nf_log_buf_add(m, "MAC=");
++	nf_log_buf_add(m, "DST_MAC=");
+ 	if (dev->hard_header_len &&
+ 	    skb->mac_header != skb->network_header) {
+ 		const unsigned char *p = skb_mac_header(skb);
+ 		unsigned int i;
+ 
+ 		nf_log_buf_add(m, "%02x", *p++);
+-		for (i = 1; i < dev->hard_header_len; i++, p++)
++/*
++Seperating MAC(18 bytes) into DST MAC( 0 to 6(ETH_ALEN=6) bytes) and SRC MAC(7 to 12(ETH_ALEN + ETH_ALEN=12) bytes) and dropping the last unwanted 6 bytes
++*/
++		for (i = 1; i < ETH_ALEN; i++, p++)
++			nf_log_buf_add(m, ":%02x", *p);
++		nf_log_buf_add(m, " ");
++		nf_log_buf_add(m, "SRC_MAC=");
++
++		for (i = 7; i <= (ETH_ALEN+ETH_ALEN); i++, p++)
+ 			nf_log_buf_add(m, ":%02x", *p);
+ 	}
+ 	nf_log_buf_add(m, " ");

@@ -1,0 +1,29 @@
+From 86b843e46619dad4bc63dcfe4b102ceca83cbcee Mon Sep 17 00:00:00 2001
+From: Yonghua Cao-B53732 <Yonghua.Cao@freescale.com>
+Date: Wed, 17 Feb 2016 14:39:56 +0800
+Subject: [PATCH 35/60] SBR-855 Boardinfo PID needs 12 bytes for RV340W
+
+Boardinfo PID needs 12 bytes for RV340W
+when change from  11bytes to 12bytes, support both RV340 and RV340W.
+
+Signed-off-by: Yonghua Cao-B53732 <Yonghua.Cao@freescale.com>
+---
+ commands/boardinfo.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+index 2ce0a8d..5b6f866 100644
+--- a/commands/boardinfo.c
++++ b/commands/boardinfo.c
+@@ -36,7 +36,7 @@
+ #include <errno.h>
+ #include <environment.h>
+ 
+-#define SIZE_PID 11         /* Max  11 Character Product ID */
++#define SIZE_PID 12         /* Max  12 Character Product ID */
+ #define SIZE_VID  3         /* Max  03 Character H/W Version */
+ #define SIZE_S_N 11         /* Max  11 Character Board Serial Number */
+ #define SIZE_P_N 12         /* Max  12 Character Board Part Number */
+-- 
+2.7.4
+

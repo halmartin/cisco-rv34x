@@ -1,0 +1,109 @@
+#!/bin/sh
+
+errcode=1
+errstring="Invalid Arguments"
+LOCAL_CERT=0
+CA_CERT=1
+CSR_CERT=2
+DEFAULT_LOG_FILE="/tmp/Log/syslog.log"
+LOG_FILE="/var/log/syslog"
+LOG_FILEBK="/var/log/syslogBK"
+CERT_DIR="/etc/ssl/certs"
+PEM_EXT="pem"
+CRT_EXT="crt"
+TMP_CERT=/tmp/.uci/
+filetype=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "fileType") {print $(I+1)};}'`
+certificate_name=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "certificate-name") {print $(I+1)};}'`
+csr_name=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "csr-name") {print $(I+1)};}'`
+
+checkCertType=`openssl req -in $CERT_DIR/$csr_name.$PEM_EXT  -noout -text | grep "Certificate Request"`
+
+if [ -n "$checkCertType" ];then                          
+	format=`echo $csr_name | cut -d . -f 2`                                                            
+	certificate_name=$csr_name                                                  
+	cert_type="certificate-sign-request"                                                               
+else                                                                                                       
+	checkCertType=`openssl x509 -in $CERT_DIR/$certificate_name.$PEM_EXT  -noout -text | grep "CA:TRUE"`
+	if [ -n "$checkCertType" ];then                                           
+		cert_type="CA"                                                   
+	else
+		checkCertType=`openssl x509 -in $CERT_DIR/$certificate_name.$CRT_EXT  -noout -text | grep "CA:TRUE"`
+		if [ -n "$checkCertType" ];then                                           
+			cert_type="CA"                                                   
+			pre_inst_cert=1
+		else	
+			checkCertType=`openssl x509 -in $CERT_DIR/$certificate_name.$PEM_EXT  -noout -text | grep "Certificate"`
+			if [ -n "$checkCertType" ]; then
+				cert_type="certificate"
+			fi      
+		fi
+	fi            
+fi                          
+if [ "$filetype" = "certificate" ] || [ "$filetype" = "csr" ]  && [ -n "$certificate_name" ] ;then
+	# We can delete only local, CSR and CA certificates
+	if [ "$cert_type" = "pkcs12" ];then
+		logger -t system -p local0.notice "Only local, CA and CSR can be deleted"
+		errstring="Only local, CA and CSR can be deleted"
+	else
+		if [ -n "$cert_type" ];then
+			if [ "$cert_type" = "certificate" ];then
+				cert_type=$LOCAL_CERT
+			elif [ "$cert_type" = "CA" ];then
+				cert_type=$CA_CERT
+			elif [ "$cert_type" = "certificate-sign-request" ];then
+				cert_type=$CSR_CERT
+			else
+				errstring="Invalid certificate"
+				exit 1
+			fi
+			if [ "$pre_inst_cert" = 1 ];then
+				useby=`uci get preinstalled_certificate.$certificate_name.useby`
+			else
+				useby=`uci get certificate.$certificate_name.useby`
+			fi
+			if [ "$filetype" = "certificate" ]; then
+
+ 	                       if [ "$useby" != "-" ];then
+					errstring="Certificate $certificate_name is in use."
+					logger -t system -p local0.error "Certificate $certificate_name.$PEM_EXT is in use."
+					exit 1
+				fi
+			fi		
+
+			`uci set certificate.$certificate_name=delete_certificate >/dev/null 2>&1`
+			`uci set certificate.$certificate_name.type=$cert_type >/dev/null 2>&1`
+			`/etc/init.d/config_update.sh certificate >/dev/null 2>&1`
+			errcode=$?
+			if [ "$errcode" -ne 0 ];then
+				errcode=1
+				errstring="Certificate Deletion Failed"
+				logger -t system -p local0.error "Certificate Deletion Failed for $certificate_name."
+			else
+				errcode=0
+				errstring="Success"
+				if [ "$cert_type" = $CA_CERT ];then
+					logger -t system -p local0.notice "CA Certificate $certificate_name deleted successfully."
+				else
+					logger -t system -p local0.notice "Certificate $certificate_name deleted successfully."
+				fi
+			fi
+		else
+			errstring="Invalid Certificate Name"
+		fi
+	fi
+fi
+
+if [ "$filetype" = "log" ]; then
+	echo "" > $LOG_FILE
+	rm -rf $LOG_FILEBK
+	rm -rf $DEFAULT_LOG_FILE
+	errcode=0
+	errstring="Success"
+fi
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errstring\""
+	exit 1
+else
+	exit 0
+fi

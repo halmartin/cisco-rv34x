@@ -1,0 +1,181 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+
+START=60
+STOP=40
+BIN=pptpd
+DEFAULT=/etc/default/$BIN
+RUN_D=/var/run
+PID_F=$RUN_D/$BIN.pid
+log_file=/tmp/pptpd.log
+
+CONFIGFILE=/tmp/etc/pptpd.conf
+OPTIONSFILE=/tmp/etc/ppp/options.pptpd
+OPTIONS="--connections 25 -c $CONFIGFILE"
+
+. /lib/functions.sh
+
+ru_check=`uci get systeminfo.sysinfo.region 2> /dev/null`
+
+ENABLE=0  # check if pptpd can be enabled.
+xappend() {
+	local value="$1"
+	echo "${value#--}" >> $CONFIGFILE    #${name#pattern} Remove(shortest)front-anchored pattern
+}
+
+xappend_options() {
+	local value="$1"
+	echo "${value#--}" >> $OPTIONSFILE    #${name#pattern} Remove(shortest)front-anchored pattern
+}
+
+start() {
+
+	if [ "$ru_check" = "RU" ]; then
+		exit 0
+	fi
+
+	[ -f $DEFAULT ] && . $DEFAULT
+	[ -f $log_file ] && {
+		echo "" >$log_file
+	}
+	mkdir -p $RUN_D
+	for m in arc4 sha1 slhc crc-ccitt ppp_generic ppp_async ppp_mppe_mppc; do
+		if ! lsmod | grep "$m" &> /dev/null; then
+			insmod $m >/dev/null 2>&1
+		fi
+	done
+
+	echo "# auto-generated config file from /etc/config/pptpd" > $CONFIGFILE
+	echo "# auto-generated config file from /etc/config/pptpd" > $OPTIONSFILE
+
+	echo "Starting pptp Server...."
+	config_load pptpd
+	config_foreach get_status_pptpd pptpd 
+	if [ "$ENABLE" -eq 0 ]
+	then
+		exit
+	fi
+
+	#Install required rules to allow clients to connect us.
+	iptables -w --table filter --append vpn_input_bypass --protocol tcp --dport 1723 --jump ACCEPT
+
+	config_foreach config_pptpd pptpd 
+
+	mkdir -p $RUN_D/$BIN
+	[ -f $DEFAULT ] && . $DEFAULT
+	$BIN $OPTIONS
+}
+
+boot() {
+	echo "Creating required links for pptpd"
+#	touch $CONFIGFILE
+#	[ ! -L /etc/ppp/options.pptpd ] && {
+#		rm /etc/ppp/options.pptpd
+#		ln -s $CONFIGFILE /etc/pptpd.conf
+#	}
+
+	mkdir -p /tmp/etc/ppp/
+	touch $OPTIONSFILE
+	[ ! -L /etc/ppp/options.pptpd ] && {
+		rm /etc/ppp/options.pptpd
+		ln -s $OPTIONSFILE /etc/ppp/options.pptpd
+	}
+
+	start
+}
+
+stop() {
+
+	if [ "$ru_check" = "RU" ]; then
+		exit 0
+	fi
+
+	#remove appropriate rules
+	iptables -w --table filter --delete vpn_input_bypass --protocol tcp --dport 1723 --jump ACCEPT
+
+	echo "Stoping pptp Server...."
+	[ -f $PID_F ] && kill $(cat $PID_F)
+}
+
+config_options(){
+	xappend_options "debug"
+	xappend_options "logfile /tmp/pptpd.log"
+	xappend_options "name \"pptpd\""
+	xappend_options "login"
+	xappend_options "lcp-echo-failure 3"
+	xappend_options "lcp-echo-interval 60"
+	xappend_options "#mtu 1482"
+	xappend_options "#mru 1482"
+	xappend_options "lock"
+	xappend_options "nobsdcomp"
+	xappend_options "novj"
+	xappend_options "novjccomp"
+	xappend_options "#nologfd"
+	xappend_options "proxyarp"
+	xappend_options "plugin radius.so"
+	xappend_options "plugin radattr.so"
+	xappend_options "plugin authorize.so"
+
+	local enc
+	config_get enc "$1" encryption
+	if [ $enc = "none" ]
+	then
+		xappend_options "require-pap"
+		xappend_options "require-chap"
+		xappend_options "require-mschap"
+		xappend_options "require-mschap-v2"
+		xappend_options "nomppe"
+	else
+		xappend_options "require-mschap-v2"
+		xappend_options "mppe required,no40,no56,stateless"
+	fi
+	local dns1 dns2
+	config_get dns1 "$cfg" dns1
+	config_get dns2 "$cfg" dns2
+	[ -n "$dns1" ] && {
+		xappend_options "ms-dns $dns1"
+	}
+	[ -n "$dns2" ] && {
+		xappend_options "ms-dns $dns2"
+	}
+	xappend_options ""
+}
+
+config_pptpd(){
+	local cfg="$1"
+	
+	local ip_start
+	local ip_end
+	local end end_octet add first_three_octets ip_increment
+	config_get ip_start "$cfg" ip_start
+	config_get ip_end "$cfg" ip_end
+	xappend "debug"
+	xappend "option /etc/ppp/options.pptpd"
+	xappend "logwtmp"
+	xappend "speed 115200"
+	xappend "stimeout 10"
+	xappend "#localip & remoteip are not needed, ip management is done by pppd"
+	end=`echo $ip_end|cut -d '.' -f 4`
+	end_octet=`echo $ip_start|cut -d '.' -f 4`
+	add=`expr $end_octet + 1`
+	first_three_octets=`echo $ip_start|cut -d '.' -f 1-3`
+	ip_increment=`echo $first_three_octets.$add`
+	xappend "remoteip $ip_increment-$end"
+	xappend "localip $ip_start"				
+	
+	config_options $cfg
+	xappend_options ""
+}
+
+get_status_pptpd() {
+	local cfg="$1"
+	local enable
+	config_get_bool enable "$cfg" enable 0	
+
+	ENABLE=$enable
+}
+
+reload() {
+	stop
+	start	
+}

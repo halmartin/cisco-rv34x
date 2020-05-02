@@ -1,0 +1,230 @@
+#!/bin/sh /etc/rc.common
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+CONFIGFILE=/tmp/etc/raddb/server
+PPP_RADIUS=/tmp/etc/radiusclient/radiusclient.conf
+PPP_RADIUS_SERVER=/tmp/etc/radiusclient/servers
+DOT1X_RADIUS=/tmp/etc/rtapd.conf
+VLANINTERFACE=vlan1
+
+ETC_PPP_RADIUS=/etc/radiusclient/radiusclient.conf
+ETC_PPP_RADIUS_SERVER=/etc/radiusclient/servers
+USR_LOCAL_RAD_CLIENT=/usr/local/etc/radiusclient
+ETC_RADDB_SERVER=/etc/raddb/server
+ETC_RTPAD_CONF=/etc/rtapd.conf
+ETC_RADIUS_CLIENT=/etc/radiusclient/
+
+
+
+tmp_primary_ipaddr=192.168.1.104
+tmp_primary_port=9001
+tmp_preshared_key=12345
+tmp_own_ip_addr=192.168.1.1
+
+
+START=40
+
+board=$__this_device
+
+configure() {
+	local cfg="$1"
+	local enable
+	local primary_ipaddr
+	local primary_port
+	local preshared_key
+	local backup_ipaddr
+	local backup_port
+	config_get enable "$cfg" enable
+
+	if [ $enable -eq 1 ]
+	then
+	#{
+		config_get primary_ipaddr "$cfg" primary_ipaddr
+		config_get primary_port "$cfg" primary_port
+		config_get preshared_key "$cfg" preshared_key
+		echo $primary_ipaddr:$primary_port $preshared_key 1 > $CONFIGFILE
+		config_get backup_ipaddr "$cfg" backup_ipaddr
+		config_get backup_port "$cfg" backup_port
+		echo "auth_order"  radius > $PPP_RADIUS
+		echo "login_tries 4" >> $PPP_RADIUS
+		echo "login_timeout"   60 >> $PPP_RADIUS
+		echo "nologin /etc/nologin" >> $PPP_RADIUS
+		echo "issue   /usr/local/etc/radiusclient/issue" >> $PPP_RADIUS
+		echo "servers     /usr/local/etc/radiusclient/servers" >> $PPP_RADIUS
+		echo "dictionary  /usr/local/etc/radiusclient/dictionary" >> $PPP_RADIUS
+		echo "login_radius    /usr/local/sbin/login.radius" >> $PPP_RADIUS
+		echo "seqfile     /var/run/radius.seq" >> $PPP_RADIUS
+		echo "mapfile     /usr/local/etc/radiusclient/port-id-map" >> $PPP_RADIUS
+		echo "default_realm" >> $PPP_RADIUS
+		echo "radius_timeout  1" >> $PPP_RADIUS
+		echo "radius_retries  3" >> $PPP_RADIUS
+		echo "login_local /bin/login" >> $PPP_RADIUS
+		echo $primary_ipaddr:$primary_port $preshared_key 1 > $CONFIGFILE
+		if [ "$backup_ipaddr" != "" ]
+		then
+		#{
+			echo "authserver  $primary_ipaddr:$primary_port $backup_ipaddr:$backup_port" >> $PPP_RADIUS
+			#echo "acctserver  $primary_ipaddr:1813 $backup_ipaddr:1813" >> $PPP_RADIUS
+			echo "acctserver  127.0.0.1:1813 127.0.0.1:1813" >> $PPP_RADIUS
+			echo "$primary_ipaddr $preshared_key" > $PPP_RADIUS_SERVER
+			echo "$backup_ipaddr $preshared_key" >> $PPP_RADIUS_SERVER
+		#}
+		else
+		#{
+			echo authserver  $primary_ipaddr:$primary_port >> $PPP_RADIUS
+			#echo acctserver  $primary_ipaddr:1813 >> $PPP_RADIUS
+			echo acctserver  127.0.0.1:1813 >> $PPP_RADIUS
+			echo $primary_ipaddr $preshared_key > $PPP_RADIUS_SERVER
+		#}
+		fi
+
+		if [ "$backup_ipaddr" != "" ]
+		then
+		    echo "RADIUS_Server=$primary_ipaddr;$backup_ipaddr" > $DOT1X_RADIUS
+		    echo "RADIUS_Port=$primary_port;$backup_port" >> $DOT1X_RADIUS
+		    echo "RADIUS_Key=$preshared_key;$preshared_key" >> $DOT1X_RADIUS
+		else
+		    echo "RADIUS_Server=$primary_ipaddr" > $DOT1X_RADIUS
+		    echo "RADIUS_Port=$primary_port" >> $DOT1X_RADIUS
+		    echo "RADIUS_Key=$preshared_key" >> $DOT1X_RADIUS
+		fi
+		echo "session_timeout_interval=1800" >> $DOT1X_RADIUS
+
+		if [ "$board" = "RV160" -o "$board" = "RV160W" -o "$board" = "RV260" -o "$board" = "RV260W" -o "$board" = "RV260P" ]; then
+		#{
+			echo "EAPifname=eth2" >> $DOT1X_RADIUS
+			echo "PreAuthifname=eth2" >> $DOT1X_RADIUS
+		#}
+		elif [ "$board" = "RV340" -o "$board" = "RV340W" -o "$board" = "RV345" -o "$board" = "RV345P" ]; then
+		#{
+			echo "EAPifname=eth3" >> $DOT1X_RADIUS
+			echo "PreAuthifname=eth3" >> $DOT1X_RADIUS
+		#}
+		fi
+
+		network_get_ipaddr ipaddr "$VLANINTERFACE"
+		echo "own_ip_addr=$ipaddr" >> $DOT1X_RADIUS
+		if [ "$backup_ipaddr" != "" ]
+		then
+		#{
+			echo $backup_ipaddr:$backup_port $preshared_key 1 >> $CONFIGFILE
+		#}
+		fi
+		ln -s $PPP_RADIUS $ETC_PPP_RADIUS
+		ln -s $PPP_RADIUS_SERVER $ETC_PPP_RADIUS_SERVER
+		ln -s $CONFIGFILE $ETC_RADDB_SERVER
+		ln -s $ETC_RADIUS_CLIENT $USR_LOCAL_RAD_CLIENT
+
+		if [ "$backup_ipaddr" != "" ]
+		then
+		#{
+			confStrongswanEapRadius 1 both $primary_ipaddr/$preshared_key/$primary_port $backup_ipaddr/$preshared_key/$backup_port
+		#}
+		else
+		#{
+			confStrongswanEapRadius 1 pri $primary_ipaddr/$preshared_key/$primary_port
+		#}
+		fi
+	#}
+	else
+	#{
+		echo "RADIUS_Server=$tmp_primary_ipaddr" > $DOT1X_RADIUS
+		echo "RADIUS_Port=$tmp_primary_port" >> $DOT1X_RADIUS
+		echo "RADIUS_Key=$tmp_preshared_key" >> $DOT1X_RADIUS
+		echo "session_timeout_interval=60" >> $DOT1X_RADIUS
+
+		if [ "$board" = "RV160" -o "$board" = "RV160W" -o "$board" = "RV260" -o "$board" = "RV260W" -o "$board" = "RV260P" ]; then
+		#{
+			echo "EAPifname=eth2" >> $DOT1X_RADIUS
+			echo "PreAuthifname=eth2" >> $DOT1X_RADIUS
+		#}
+		elif [ "$board" = "RV340" -o "$board" = "RV340W" -o "$board" = "RV345" -o "$board" = "RV345P" ]; then
+		#{
+			echo "EAPifname=eth3" >> $DOT1X_RADIUS
+			echo "PreAuthifname=eth3" >> $DOT1X_RADIUS
+		#}
+		fi
+		echo "own_ip_addr=$tmp_own_ip_addr" >> $DOT1X_RADIUS
+	#}
+	fi
+}
+
+boot() {
+
+	mkdir -p /tmp/etc/radiusclient
+	if [ ! -L $ETC_RADIUS_CLIENT ]; then
+		rm -f $ETC_PPP_RADIUS
+		rm -f $ETC_PPP_RADIUS_SERVER
+	fi
+	if [ ! -L /usr/local/etc/ ]; then
+		rm -f $USR_LOCAL_RAD_CLIENT
+	fi
+	mkdir -p /tmp/etc/raddb
+	if [ ! -L $ETC_RADDB_SERVER ]; then
+		rm -f $ETC_RADDB_SERVER
+	fi
+
+	start
+
+}
+
+start() {                 
+        rm -rf $CONFIGFILE
+        rm -rf $PPP_RADIUS
+        rm -rf $PPP_RADIUS_SERVER
+	rm -rf $DOT1X_RADIUS
+        touch $CONFIGFILE 
+        touch $PPP_RADIUS
+        touch $PPP_RADIUS_SERVER
+	touch $DOT1X_RADIUS
+
+	tmp_primary_ipaddr=$(uci get radius.radius_0.primary_ipaddr)
+	tmp_primary_port=$(uci get radius.radius_0.primary_port)
+	tmp_preshared_key=$(uci get radius.radius_0.preshared_key)
+
+	## if radius server is not configure from GUI So fill the default values
+	if [ "$tmp_primary_ipaddr" == "" ]; then                         
+		tmp_primary_ipaddr=192.168.1.104                                  
+		tmp_primary_port=9001                                             
+		tmp_preshared_key=12345                                                
+	fi                                                                             
+
+	# Always copy the default configuration, this can be used in case of readius record is not configured.
+	# if Radius Record is Configured, Update the default configuration later.
+	echo "RADIUS_Server=$tmp_primary_ipaddr" > $DOT1X_RADIUS
+	echo "RADIUS_Port=$tmp_primary_port" >> $DOT1X_RADIUS
+	echo "RADIUS_Key=$tmp_preshared_key" >> $DOT1X_RADIUS
+	echo "session_timeout_interval=60" >> $DOT1X_RADIUS
+
+	if [ "$board" = "RV160" -o "$board" = "RV160W" -o "$board" = "RV260" -o "$board" = "RV260W" -o "$board" = "RV260P" ]; then
+		echo "EAPifname=eth2" >> $DOT1X_RADIUS
+		echo "PreAuthifname=eth2" >> $DOT1X_RADIUS
+        elif [ "$board" = "RV340" -o "$board" = "RV340W" -o "$board" = "RV345" -o "$board" = "RV345P" ]; then
+		echo "EAPifname=eth3" >> $DOT1X_RADIUS
+		echo "PreAuthifname=eth3" >> $DOT1X_RADIUS
+        fi
+
+	echo "own_ip_addr=$tmp_own_ip_addr" >> $DOT1X_RADIUS
+
+        config_load radius             
+        config_foreach configure radius
+	ln -s $DOT1X_RADIUS $ETC_RTPAD_CONF
+
+	local isRadiusEnabled=`uci show radius|grep "enable=1"|wc -l`
+	[ $isRadiusEnabled -eq 0 ] && {
+		confStrongswanEapRadius 0
+	}
+}                         
+
+stop() {
+        rm -rf $CONFIGFILE
+        rm -rf $PPP_RADIUS
+        rm -rf $PPP_RADIUS_SERVER 
+	rm -rf $DOT1X_RADIUS
+	rm -rf $ETC_RTPAD_CONF                              
+        touch $CONFIGFILE 
+        touch $PPP_RADIUS
+        touch $PPP_RADIUS_SERVER
+	touch $DOT1X_RADIUS
+}

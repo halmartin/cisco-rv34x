@@ -1,0 +1,190 @@
+#!/bin/sh 
+###########################################################################
+# *  * Copyright 2015, Freescale Semiconductor, Inc. All rights reserved. #
+###########################################################################
+
+###########################################################################
+#file:tvpnc_timer.sh							  #
+#This file is executed only in the context of VPN's Tele-worker module.   # 
+#  This script is executed with connection name as an argument and it     #
+#  handles various cases of this connection and somehow(refer comments)   #
+#  makes the tunnel live.						  #
+###########################################################################
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+# For debug prints
+#TVPNC_DBG=1
+tvpnc_debug() {
+  if [ -n "$TVPNC_DBG" ]
+  then
+    echo "# DBG: $1"
+  fi
+}
+
+isRemoteServerReachable() {
+	#isPeerReachable <localVariable> <remoteIP>
+	local __remoteIP__  __status __buf
+	local loop_num
+	__remoteIP__=$2
+
+	#__buf=$(hping3 $__remoteIP__ -c 1 -2 -p 500 -k -s 500 -d 500 --file /usr/sbin/isakmp.bin 2>/dev/null)
+	check_peer_alive $__remoteIP__ any 2>/dev/null
+	if [ $? -eq 0 ]
+	then
+		#echo $__buf | grep ICMP >/dev/null 2>&1
+		#if [ $? -eq 0 ]
+		#then
+		#	__status=1 #Peer reachable, but Port is Unreachable.
+		#	tvpnc_debug "Peer reachable, but Port is Unreachable"
+		#else
+			__status=0 #Peer and Port, both are reachable.
+			tvpnc_debug "Peer and Port, both are reachable"
+		#fi
+	else
+			__status=1 #Peer is unreachable. Obviously, port also unreachable.
+			tvpnc_debug "Peer is unreachable. Obviously, port also unreachable"
+	fi
+
+	eval "export -- \"$1=\$__status\""
+}
+
+CONN_NAME=$1
+
+[ -z "$CONN_NAME" ] && {
+	tvpnc_debug "TVPNC: Connection name is empty."
+	logger -t VPN-tvpnc-timer "TVPNC: Connection name is empty."
+	exit 0 
+}
+
+isenable=`uci get strongswan.$CONN_NAME.enable 2> /dev/null`
+[ -z "$isenable" ] || [ "$isenable" -eq 0 ] && {
+	tvpnc_debug "TVPNC: Connection:$CONN_NAME is disabled/NOT defined"
+	logger -t VPN-tvpnc-timer "TVPNC: Connection:$CONN_NAME is disabled."
+	exit 0 
+}
+
+AUTO_RETRY=`uci get strongswan.clientGlobal_0.auto_retry`
+RETRY_INTERVAL=120
+RETRY_LIMIT=0
+
+[ "$AUTO_RETRY" -eq 1 ] && {
+	RETRY_INTERVAL=`uci get strongswan.clientGlobal_0.retry_interval`
+	RETRY_LIMIT=`uci get strongswan.clientGlobal_0.retry_limit`
+}
+
+remote_endpoint=`uci get strongswan.$CONN_NAME.remote_endpoint`
+conn_remote_pair="$CONN_NAME=$remote_endpoint"
+
+backup_remote_auto=`uci get strongswan.$CONN_NAME.backup_server_auto 2> /dev/null`
+if [ -n "$backup_remote_auto" ]
+then #Server sent backups
+
+	local itr=0
+	for remote in $backup_remote_auto; do
+		conn_remote_pair="$conn_remote_pair "$CONN_NAME"_bkp$itr=$remote"
+		itr=`expr $itr + 1`
+	done
+
+	tvpnc_debug "conn remote pair is $conn_remote_pair"
+	logger -t VPN-tvpnc-timer "TVPNC: Connection:$CONN_NAME (CONN=RemoteIP) pairs are $conn_remote_pair"
+else #User configured gets priority
+	local backup_server1=`uci get strongswan.$CONN_NAME.backup_server1 2> /dev/null`
+	local backup_server2=`uci get strongswan.$CONN_NAME.backup_server2 2> /dev/null`
+	local backup_server3=`uci get strongswan.$CONN_NAME.backup_server3 2> /dev/null`
+	[ -n "$backup_server1" ] && {
+		conn_remote_pair="$conn_remote_pair "$CONN_NAME"_bkp1=$backup_server1"
+		[ -n "$backup_server2" ] && {
+			conn_remote_pair="$conn_remote_pair "$CONN_NAME"_bkp2=$backup_server2"
+			[ -n "$backup_server3" ] && {
+				conn_remote_pair="$conn_remote_pair "$CONN_NAME"_bkp3=$backup_server3"
+			}
+		}
+	}
+	tvpnc_debug "conn remote pair is $conn_remote_pair"
+	logger -t VPN-tvpnc-timer "TVPNC: Connection:$CONN_NAME (CONN=RemoteIP) pairs are $conn_remote_pair"
+fi
+
+while [ 1 ] ; do
+
+	#TODO: Do we need to update with a new pair after some time? Just think...!
+
+	local pair
+	for pair in $conn_remote_pair; do
+		#START:Handle this particular connection here.
+		local conn_name=`echo $pair | cut -d "=" -f 1`
+		local remote_ip=`echo $pair | cut -d "=" -f 2`
+
+		#Geting live updated values for monitoring etc.
+		AUTO_RETRY=`uci get strongswan.clientGlobal_0.auto_retry`
+		[ "$AUTO_RETRY" -eq 1 ] && {
+			RETRY_INTERVAL=`uci get strongswan.clientGlobal_0.retry_interval`
+			RETRY_LIMIT=`uci get strongswan.clientGlobal_0.retry_limit`
+		}
+
+		while [ 1 ]; do   
+			#If connection is successfull, we should stay here and monitor its status. May be after some time 
+			#   connection may break. Then we need to switch to backup. Then this loop will be helpful for us.
+			#Else keep trying for other remotes.(so break from this to do so.)
+			if [ "$RETRY_LIMIT" -eq 0 ]
+			then
+				ipsec status $conn_name | grep $conn_name | grep -e "ESTABLISHED\|CONNECTING" >/dev/null 2>&1
+				if [ $? -eq 0 ]
+				then
+					tvpnc_debug "TVPNC: Connection:$CONN_NAME. $conn_name is established/connecting...!"
+					logger -t VPN-tvpnc-timer "TVPNC: Connection:$CONN_NAME. $conn_name is established/connecting...!"
+					sleep $RETRY_INTERVAL
+				else
+#					ping $remote_ip -c 10  >/dev/null 2>&1
+#					if [ $? -eq 0 ]
+					isRemoteServerReachable peerStatus $remote_ip
+					if [ $peerStatus -eq 0 ]
+					then
+						tvpnc_debug "TVPNC: Connection:$CONN_NAME. $remote_ip is reachable,so bringing up connection $conn_name ...!"
+						logger -t VPN-tvpnc-timer "TVPNC: Connection:$CONN_NAME. $remote_ip is reachable,so bringing up connection $conn_name ...!"
+						ipsec up $conn_name &
+						sleep $RETRY_INTERVAL
+					else
+						tvpnc_debug "TVPNC: Connection:$CONN_NAME. $remote_ip is NOT reachable,so will try other remote peers...!"
+						logger -t VPN-tvpnc-timer "TVPNC: Connection:$CONN_NAME. $remote_ip is NOT reachable,so will try other remote peers...!"
+						sleep $RETRY_INTERVAL
+						break  #This breaks from the loop and goes to next remote peer. This will exit the while loop.
+					fi
+				fi
+			else
+				local itr=0
+				while [ $itr -lt $RETRY_LIMIT ];do
+					ipsec status $conn_name | grep $conn_name | grep -e "ESTABLISHED\|CONNECTING" >/dev/null 2>&1
+					if [ $? -eq 0 ]
+					then
+						tvpnc_debug "TVPNC: Connection:$CONN_NAME. $conn_name is established/connecting...!"
+						logger -t VPN-tvpnc-timer "TVPNC: Connection:$CONN_NAME. $conn_name is established/connecting...!"
+						sleep $RETRY_INTERVAL
+						itr=0
+						continue
+					else
+#						ping $remote_ip -c 10  >/dev/null 2>&1
+#						if [ $? -eq 0 ]
+						isRemoteServerReachable peerStatus $remote_ip
+						if [ $peerStatus -eq 0 ]
+						then
+							tvpnc_debug "TVPNC: Connection:$CONN_NAME. $remote_ip is reachable,so bringing up connection$conn_name ...!"
+							logger -t VPN-tvpnc-timer "TVPNC: Connection:$CONN_NAME. $remote_ip is reachable,so bringing up connection $conn_name ...!"
+							ipsec up $conn_name &
+							sleep $RETRY_INTERVAL
+						else
+							tvpnc_debug "TVPNC: Connection:$CONN_NAME. $remote_ip is NOT reachable,so will try once again/will go to other remote peers...!"
+							logger -t VPN-tvpnc-timer "TVPNC: Connection:$CONN_NAME. $remote_ip is NOT reachable,so will try once again/will go to other remote peers...!"
+							sleep $RETRY_INTERVAL
+						fi
+					fi
+					itr=`expr $itr + 1`
+				done
+				logger -t VPN-tvpnc-timer "TVPNC: Picking up next connection pair"
+				break  #This breaks from the loop and goes to next remote peer.
+			fi
+		done
+		#END:Handle this particular connection here.
+	done
+done

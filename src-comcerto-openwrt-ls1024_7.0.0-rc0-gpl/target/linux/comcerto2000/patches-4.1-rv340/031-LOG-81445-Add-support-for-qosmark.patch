@@ -1,0 +1,650 @@
+--- a/include/uapi/linux/netfilter/Kbuild	2017-03-23 12:40:29.322971567 +0530
++++ b/include/uapi/linux/netfilter/Kbuild	2017-03-23 12:42:12.414488832 +0530
+@@ -31,6 +31,8 @@ header-y += xt_LOG.h
+ header-y += xt_MARK.h
+ header-y += xt_NFLOG.h
+ header-y += xt_NFQUEUE.h
++header-y += xt_QOSCONNMARK.h
++header-y += xt_QOSMARK.h
+ header-y += xt_RATEEST.h
+ header-y += xt_SECMARK.h
+ header-y += xt_TCPMSS.h
+@@ -70,6 +72,8 @@ header-y += xt_owner.h
+ header-y += xt_physdev.h
+ header-y += xt_pkttype.h
+ header-y += xt_policy.h
++header-y += xt_qosconnmark.h
++header-y += xt_qosmark.h
+ header-y += xt_quota.h
+ header-y += xt_rateest.h
+ header-y += xt_realm.h
+--- a/include/uapi/linux/netfilter/nf_conntrack_common.h	2017-03-23 12:45:03.363916198 +0530
++++ b/include/uapi/linux/netfilter/nf_conntrack_common.h	2017-03-23 12:46:13.619024310 +0530
+@@ -133,6 +133,7 @@ enum ip_conntrack_events {
+ 	IPCT_SECMARK,		/* new security mark has been set */
+ 	IPCT_LABEL,		/* new connlabel has been set */
+     IPCT_DROP,      /* dropping packets enabled on this connection */
++    IPCT_QOSCONNMARK,   /* new qosconnmark has been set */
+ };
+ 
+ enum ip_conntrack_expect_events {
+--- a/include/uapi/linux/netfilter/nfnetlink_conntrack.h	2017-03-23 12:47:42.515447917 +0530
++++ b/include/uapi/linux/netfilter/nfnetlink_conntrack.h	2017-03-23 12:49:44.780546628 +0530
+@@ -56,6 +56,7 @@ enum ctattr_type {
+ #if defined(CONFIG_CPE_FAST_PATH)
+     CTA_COMCERTO_FP_ORIG,
+     CTA_COMCERTO_FP_REPLY,
++    CTA_QOSCONNMARK,
+ #endif
+ 	__CTA_MAX
+ };
+--- a/include/uapi/linux/netfilter/xt_QOSCONNMARK.h	1970-01-01 05:30:00.000000000 +0530
++++ b/include/uapi/linux/netfilter/xt_QOSCONNMARK.h	2017-03-23 12:50:34.541413244 +0530
+@@ -0,0 +1,7 @@
++#ifndef _XT_QOSCONNMARK_H_target
++#define _XT_QOSCONNMARK_H_target
++
++#include <linux/netfilter/xt_qosconnmark.h>
++
++#endif /*_XT_QOSCONNMARK_H_target*/
++
+--- a/include/uapi/linux/netfilter/xt_QOSMARK.h	1970-01-01 05:30:00.000000000 +0530
++++ b/include/uapi/linux/netfilter/xt_QOSMARK.h	2017-03-23 12:51:27.832043885 +0530
+@@ -0,0 +1,7 @@
++#ifndef _XT_QOSMARK_H_target
++#define _XT_QOSMARK_H_target
++
++#include <linux/netfilter/xt_qosmark.h>
++
++#endif /*_XT_QOSMARK_H_target */
++
+--- a/include/uapi/linux/netfilter/xt_qosconnmark.h	1970-01-01 05:30:00.000000000 +0530
++++ b/include/uapi/linux/netfilter/xt_qosconnmark.h	2017-03-23 12:53:22.701446764 +0530
+@@ -0,0 +1,32 @@
++#ifndef _XT_QOSCONNMARK_H
++#define _XT_QOSCONNMARK_H
++
++#include <linux/types.h>
++
++/* Copyright (C) 2002,2004 MARA Systems AB <http://www.marasystems.com>
++    + * by Henrik Nordstrom <hno@marasystems.com>
++    + *
++    + * This program is free software; you can redistribute it and/or modify
++    + * it under the terms of the GNU General Public License as published by
++    + * the Free Software Foundation; either version 2 of the License, or
++    + * (at your option) any later version.
++    + */
++
++enum {
++    XT_QOSCONNMARK_SET = 0,
++    XT_QOSCONNMARK_SAVE_QOSMARK,
++    XT_QOSCONNMARK_RESTORE_QOSMARK
++};
++
++struct xt_qosconnmark_tginfo1 {
++    __u64 mark, ctmask, nfmask;
++    __u8 mode;
++};
++
++struct xt_qosconnmark_mtinfo1 {
++    __u64 mark, mask;
++     __u8 invert;
++};
++
++#endif /*_XT_QOSCONNMARK_H*/
++
+--- a/include/uapi/linux/netfilter/xt_qosmark.h	1970-01-01 05:30:00.000000000 +0530
++++ b/include/uapi/linux/netfilter/xt_qosmark.h	2017-03-23 12:55:03.751944057 +0530
+@@ -0,0 +1,16 @@
++#ifndef _XT_QOSMARK_H
++#define _XT_QOSMARK_H
++
++#include <linux/types.h>
++
++struct xt_qosmark_tginfo2 {
++    __u64 mark, mask;
++};
++
++struct xt_qosmark_mtinfo1 {
++    __u64 mark, mask;
++    __u8 invert;
++};
++
++#endif /*_XT_QOSMARK_H*/
++
+--- a/include/linux/skbuff.h	2017-03-23 13:43:23.797164047 +0530
++++ b/include/linux/skbuff.h	2017-03-23 13:47:48.933658950 +0530
+@@ -505,6 +505,7 @@ static inline u32 skb_mstamp_us_delta(co
+   *	@napi_id: id of the NAPI struct this skb came from
+  *	@secmark: security marking
+  *	@mark: Generic packet mark
++ *  @qosmark: QoS packet mark
+  *	@vlan_proto: vlan encapsulation protocol
+  *	@vlan_tci: vlan tag control information
+  *	@inner_protocol: Protocol (encapsulation)
+@@ -690,11 +691,6 @@ struct sk_buff {
+ 	__u32			headers_end[0];
+ 	/* public: */
+ 
+-	/* These elements must be at the end, see alloc_skb() for details.  */
+-	sk_buff_data_t		tail;
+-	sk_buff_data_t		end;
+-	unsigned char		*head,
+-				*data;
+ #if defined(CONFIG_COMCERTO_CUSTOM_SKB_LAYOUT)
+ 	unsigned char 		*mspd_data;
+ 	__u32 			mspd_len;
+@@ -706,6 +702,16 @@ struct sk_buff {
+ 	unsigned char	pktc_cb[8];
+ 	__u32		pktc_flags;
+ #endif
++   
++#if defined(CONFIG_CPE_FAST_PATH)
++    __u64           qosmark;
++#endif
++
++    /* These elements must be at the end, see alloc_skb() for details.  */
++    sk_buff_data_t      tail;
++    sk_buff_data_t      end;
++    unsigned char       *head,
++                    *data;
+ 
+ 	unsigned int		truesize;
+ 	atomic_t		users;
+--- a/include/net/netfilter/nf_conntrack.h	2017-03-23 13:49:05.235788864 +0530
++++ b/include/net/netfilter/nf_conntrack.h	2017-03-23 13:51:23.284775151 +0530
+@@ -120,6 +120,10 @@ struct nf_conn {
+ #endif
+ 
+ #if defined(CONFIG_CPE_FAST_PATH)
++    u_int64_t qosconnmark;
++#endif
++
++#if defined(CONFIG_CPE_FAST_PATH)
+     struct comcerto_fp_info fp_info[IP_CT_DIR_MAX];
+ #endif
+ 	/* Extensions */
+--- a/net/core/skbuff.c	2017-03-23 13:52:16.839537711 +0530
++++ b/net/core/skbuff.c	2017-03-23 13:57:01.097587954 +0530
+@@ -260,10 +260,6 @@ struct sk_buff *__alloc_skb(unsigned int
+ 	skb->mac_header = (typeof(skb->mac_header))~0U;
+ 	skb->transport_header = (typeof(skb->transport_header))~0U;
+ 
+-#if defined(CONFIG_COMCERTO_CUSTOM_SKB_LAYOUT)
+-	skb->mspd_data = NULL;
+-	skb->mspd_len = 0;
+-#endif
+ 	/* make sure we initialize shinfo sequentially */
+ 	shinfo = skb_shinfo(skb);
+ 	memset(shinfo, 0, offsetof(struct skb_shared_info, dataref));
+@@ -930,6 +926,10 @@ static void __copy_skb_header(struct sk_
+ #endif
+ 	__nf_copy(new, old, false);
+ 
++#if defined(CONFIG_CPE_FAST_PATH)
++    new->qosmark    = old->qosmark;
++#endif
++
+ 	/* Note : this field could be in headers_start/headers_end section
+ 	 * It is not yet because we do not want to have a 16 bit hole
+ 	 */
+--- a/net/ipv4/ip_output.c	2017-03-23 15:27:28.361718091 +0530
++++ b/net/ipv4/ip_output.c	2017-03-23 15:29:42.484742463 +0530
+@@ -479,6 +479,9 @@ static void ip_copy_metadata(struct sk_b
+ 	to->dev = from->dev;
+ 	to->mark = from->mark;
+ 
++#if defined(CONFIG_CPE_FAST_PATH)
++       to->qosmark = from->qosmark;
++#endif
+ 	/* Copy the flags to each fragment. */
+ 	IPCB(to)->flags = IPCB(from)->flags;
+ 
+--- a/net/ipv4/netfilter/nf_conntrack_l3proto_ipv4_compat.c	2017-03-23 15:31:19.309127880 +0530
++++ b/net/ipv4/netfilter/nf_conntrack_l3proto_ipv4_compat.c	2017-03-23 15:33:43.805335999 +0530
+@@ -178,6 +178,12 @@ static int ct_seq_show(struct seq_file *
+ 	seq_printf(s, "mark=%u ", ct->mark);
+ #endif
+ 
++#if defined(CONFIG_CPE_FAST_PATH)
++    if (ct->qosconnmark != 0 && seq_printf(s, "qosconnmark=%0x" PRIx64 " ", ct->qosconnmark))
++        goto release;
++#endif
++     
++
+ 	ct_show_secctx(s, ct);
+ 
+ 	seq_printf(s, "use=%u\n", atomic_read(&ct->ct_general.use));
+--- a/net/ipv6/ip6_output.c	2017-03-23 15:34:42.926880404 +0530
++++ b/net/ipv6/ip6_output.c	2017-03-23 15:36:22.108443713 +0530
+@@ -540,6 +540,10 @@ static void ip6_copy_metadata(struct sk_
+ 	to->dev = from->dev;
+ 	to->mark = from->mark;
+ 
++#if defined(CONFIG_CPE_FAST_PATH)
++        to->qosmark = from->qosmark;
++#endif
++
+ #ifdef CONFIG_NET_SCHED
+ 	to->tc_index = from->tc_index;
+ #endif
+--- a/net/netfilter/Kconfig	2017-03-23 15:37:11.861306398 +0530
++++ b/net/netfilter/Kconfig	2017-03-23 15:38:29.880294301 +0530
+@@ -589,6 +589,30 @@ config NETFILTER_XT_CONNMARK
+ 	ctmark), similarly to the packet mark (nfmark). Using this
+ 	target and match, you can set and match on this mark.
+ 
++config NETFILTER_XT_QOSMARK
++   tristate 'qosmark target and match support'
++   default m if NETFILTER_ADVANCED=n
++   ---help---
++   This option adds the "QOSMARK" target and "qosmark" match.
++
++   Netfilter qosmark matching allows you to match packets based on the
++   "qosmark" value in the packet.
++   The target allows you to create rules in the "mangle" table which alter
++   the netfilter qosmark field associated with the packet.
++
++config NETFILTER_XT_QOSCONNMARK
++   tristate 'qosconnmark target and match support'
++   depends on NF_CONNTRACK
++   depends on NETFILTER_ADVANCED
++   select NF_CONNTRACK_MARK
++   ---help---
++   This option adds the "QOSCONNMARK" target and "qosconnmark" match.
++
++   Netfilter allows you to store a qosmark value per connection (a.k.a.
++   qosconnmark), similarly to the qos mark (qosmark). Using this
++   target and match, you can set and match on this mark.
++
++
+ config NETFILTER_XT_SET
+ 	tristate 'set target and match support'
+ 	depends on IP_SET
+--- a/net/netfilter/Makefile	2017-03-23 15:38:56.009351601 +0530
++++ b/net/netfilter/Makefile	2017-03-23 15:39:46.710688237 +0530
+@@ -99,6 +99,8 @@ obj-$(CONFIG_NETFILTER_XTABLES) += x_tab
+ # combos
+ obj-$(CONFIG_NETFILTER_XT_MARK) += xt_mark.o
+ obj-$(CONFIG_NETFILTER_XT_CONNMARK) += xt_connmark.o
++obj-$(CONFIG_NETFILTER_XT_QOSMARK) += xt_qosmark.o
++obj-$(CONFIG_NETFILTER_XT_QOSCONNMARK) += xt_qosconnmark.o
+ obj-$(CONFIG_NETFILTER_XT_SET) += xt_set.o
+ obj-$(CONFIG_NETFILTER_XT_NAT) += xt_nat.o
+ 
+--- a/net/netfilter/nf_conntrack_core.c	2017-03-23 15:40:13.303977517 +0530
++++ b/net/netfilter/nf_conntrack_core.c	2017-03-23 15:41:37.177891243 +0530
+@@ -1003,6 +1003,9 @@ init_conntrack(struct net *net, struct n
+ #ifdef CONFIG_NF_CONNTRACK_MARK
+ 			ct->mark = exp->master->mark;
+ #endif
++#if defined(CONFIG_CPE_FAST_PATH)
++           ct->qosconnmark = exp->master->qosconnmark;
++#endif
+ #ifdef CONFIG_NF_CONNTRACK_SECMARK
+ 			ct->secmark = exp->master->secmark;
+ #endif
+--- a/net/netfilter/nf_conntrack_netlink.c	2017-03-23 15:42:37.756163630 +0530
++++ b/net/netfilter/nf_conntrack_netlink.c	2017-03-23 16:36:09.285039249 +0530
+@@ -313,6 +313,21 @@ nla_put_failure:
+ #define ctnetlink_dump_mark(a, b) (0)
+ #endif
+ 
++#if defined(CONFIG_CPE_FAST_PATH)
++static inline int
++ctnetlink_dump_qosconnmark(struct sk_buff *skb, const struct nf_conn *ct)
++{
++    nla_put_be64(skb, CTA_QOSCONNMARK, cpu_to_be64(ct->qosconnmark));
++    return 0;
++        
++nla_put_failure:
++    return -1;
++}
++#else
++#define ctnetlink_dump_qosconnmark(a, b) (0)
++#endif
++
++
+ #ifdef CONFIG_NF_CONNTRACK_SECMARK
+ static inline int
+ ctnetlink_dump_secctx(struct sk_buff *skb, const struct nf_conn *ct)
+@@ -544,6 +559,7 @@ ctnetlink_fill_info(struct sk_buff *skb,
+ 	    ctnetlink_dump_protoinfo(skb, ct) < 0 ||
+ 	    ctnetlink_dump_helpinfo(skb, ct) < 0 ||
+ 	    ctnetlink_dump_mark(skb, ct) < 0 ||
++        ctnetlink_dump_qosconnmark(skb, ct) < 0 ||
+ 	    ctnetlink_dump_secctx(skb, ct) < 0 ||
+ #ifdef CONFIG_CPE_FAST_PATH
+ 	    ctnetlink_dump_comcerto_fp(skb, ct) < 0 ||
+@@ -652,6 +668,9 @@ ctnetlink_nlmsg_size(const struct nf_con
+ #ifdef CONFIG_NF_CONNTRACK_MARK
+ 	       + nla_total_size(sizeof(u_int32_t)) /* CTA_MARK */
+ #endif
++#if defined(CONFIG_CPE_FAST_PATH)
++          + nla_total_size(sizeof(u_int64_t)) /* CTA_QOSCONNMARK */
++#endif
+ #ifdef CONFIG_NF_CONNTRACK_ZONES
+ 	       + nla_total_size(sizeof(u_int16_t)) /* CTA_ZONE */
+ #endif
+@@ -773,6 +792,13 @@ ctnetlink_conntrack_event(unsigned int e
+ 			goto nla_put_failure;
+ 	}
+ 
++#if defined(CONFIG_CPE_FAST_PATH)
++    if ((events & (1 << IPCT_QOSCONNMARK) || ct->qosconnmark)
++            && ctnetlink_dump_qosconnmark(skb, ct) < 0)
++        goto nla_put_failure;
++#endif
++    
++
+ #ifdef CONFIG_NF_CONNTRACK_MARK
+ 	if ((events & (1 << IPCT_MARK) || ct->mark)
+ 	    && ctnetlink_dump_mark(skb, ct) < 0)
+@@ -1075,6 +1101,7 @@ static const struct nla_policy ct_nla_po
+ 	[CTA_NAT_SRC]		= { .type = NLA_NESTED },
+ 	[CTA_TIMEOUT] 		= { .type = NLA_U32 },
+ 	[CTA_MARK]		= { .type = NLA_U32 },
++    [CTA_QOSCONNMARK]   = { .type = NLA_U64 },
+ 	[CTA_ID]		= { .type = NLA_U32 },
+ 	[CTA_NAT_DST]		= { .type = NLA_NESTED },
+ 	[CTA_TUPLE_MASTER]	= { .type = NLA_NESTED },
+@@ -1720,6 +1747,11 @@ ctnetlink_change_conntrack(struct nf_con
+ 			return err;
+ 	}
+ 
++#if defined(CONFIG_CPE_FAST_PATH)
++    if (cda[CTA_QOSCONNMARK])
++        ct->qosconnmark = be64_to_cpu(nla_get_be64(cda[CTA_QOSCONNMARK]));
++#endif
++
+ #if defined(CONFIG_NF_CONNTRACK_MARK)
+ 	if (cda[CTA_MARK])
+ 		ct->mark = ntohl(nla_get_be32(cda[CTA_MARK]));
+@@ -1846,6 +1878,12 @@ ctnetlink_create_conntrack(struct net *n
+ 			goto err2;
+ 	}
+ 
++#if defined(CONFIG_CPE_FAST_PATH)
++    if (cda[CTA_QOSCONNMARK])
++        ct->qosconnmark = be64_to_cpu(nla_get_be64(cda[CTA_QOSCONNMARK]));
++#endif
++    
++
+ #if defined(CONFIG_NF_CONNTRACK_MARK)
+ 	if (cda[CTA_MARK])
+ 		ct->mark = ntohl(nla_get_be32(cda[CTA_MARK]));
+--- a/net/netfilter/nf_conntrack_standalone.c	2017-03-23 15:51:36.505389146 +0530
++++ b/net/netfilter/nf_conntrack_standalone.c	2017-03-23 15:53:01.916070841 +0530
+@@ -233,6 +233,11 @@ static int ct_seq_show(struct seq_file *
+ #if defined(CONFIG_NF_CONNTRACK_MARK)
+ 	seq_printf(s, "mark=%u ", ct->mark);
+ #endif
++#if defined(CONFIG_CPE_FAST_PATH)
++       if (ct->qosconnmark != 0 && seq_printf(s, "qosconnmark=0x%llx ", (unsigned long long)ct->qosconnmark))
++           goto release;
++#endif
++    
+ 
+ 	ct_show_secctx(s, ct);
+ 
+--- a/net/netfilter/xt_qosconnmark.c    1970-01-01 05:30:00.000000000 +0530
++++ b/net/netfilter/xt_qosconnmark.c	2017-03-23 16:04:39.264552094 +0530
+@@ -0,0 +1,170 @@
++/*
++ * xt_connmark - Netfilter module to operate on connection marks
++ *
++ * Copyright (C) 2002,2004 MARA Systems AB <http://www.marasystems.com>
++ * by Henrik Nordstrom <hno@marasystems.com>
++ * Copyright © CC Computer Consultants GmbH, 2007 - 2008
++ * Jan Engelhardt <jengelh@medozas.de>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#include <linux/module.h>
++#include <linux/skbuff.h>
++#include <net/netfilter/nf_conntrack.h>
++#include <net/netfilter/nf_conntrack_ecache.h>
++#include <linux/netfilter/x_tables.h>
++#include <linux/netfilter/xt_qosconnmark.h>
++
++MODULE_AUTHOR("Henrik Nordstrom <hno@marasystems.com>");
++MODULE_DESCRIPTION("Xtables: QOS connection mark operations");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("ipt_QOSCONNMARK");
++MODULE_ALIAS("ip6t_QOSCONNMARK");
++MODULE_ALIAS("ipt_qosconnmark");
++MODULE_ALIAS("ip6t_qosconnmark");
++
++static unsigned int
++qosconnmark_tg(struct sk_buff *skb, const struct xt_action_param *par)
++{
++    const struct xt_qosconnmark_tginfo1 *info = par->targinfo;
++    enum ip_conntrack_info ctinfo;
++    struct nf_conn *ct;
++    u_int64_t newmark;
++    
++    ct = nf_ct_get(skb, &ctinfo);
++    if (ct == NULL)
++        return XT_CONTINUE;
++    
++    switch (info->mode) {
++        case XT_QOSCONNMARK_SET:
++            newmark = (ct->qosconnmark & ~info->ctmask) ^ info->mark;
++                if (ct->qosconnmark != newmark) {
++                    ct->qosconnmark = newmark;
++                    nf_conntrack_event_cache(IPCT_QOSCONNMARK, ct);
++                }
++                break;
++        case XT_QOSCONNMARK_SAVE_QOSMARK:
++            newmark = (ct->qosconnmark & ~info->ctmask) ^
++                        (skb->qosmark & info->nfmask);
++            if (ct->qosconnmark != newmark) {
++                    ct->qosconnmark = newmark;
++                    nf_conntrack_event_cache(IPCT_QOSCONNMARK, ct);
++            }
++            break;
++        case XT_QOSCONNMARK_RESTORE_QOSMARK:
++            newmark = (skb->qosmark & ~info->nfmask) ^
++                            (ct->qosconnmark & info->ctmask);
++            skb->qosmark = newmark;
++            break;
++    }
++    
++    return XT_CONTINUE;
++}
++
++static int qosconnmark_tg_check(const struct xt_tgchk_param *par)
++{
++    int ret;
++    
++    ret = nf_ct_l3proto_try_module_get(par->family);
++    if (ret < 0)
++        pr_info("cannot load conntrack support for proto=%u\n",
++                par->family);
++    return ret;
++}
++        
++static void qosconnmark_tg_destroy(const struct xt_tgdtor_param *par)
++{
++     nf_ct_l3proto_module_put(par->family);
++}
++
++static bool
++    qosconnmark_mt(const struct sk_buff *skb, struct xt_action_param *par)
++{
++    const struct xt_qosconnmark_mtinfo1 *info = par->matchinfo;
++    enum ip_conntrack_info ctinfo;
++    const struct nf_conn *ct;
++    
++    ct = nf_ct_get(skb, &ctinfo);
++    if (ct == NULL)
++        return false;
++        
++    return ((ct->qosconnmark & info->mask) == info->mark) ^ info->invert;
++}
++    
++
++static int qosconnmark_mt_check(const struct xt_mtchk_param *par)
++{
++    int ret;
++    
++    ret = nf_ct_l3proto_try_module_get(par->family);
++    if (ret < 0)
++        pr_info("cannot load conntrack support for proto=%u\n",
++                    par->family);
++    return ret;
++}
++        
++static void qosconnmark_mt_destroy(const struct xt_mtdtor_param *par)
++{
++    nf_ct_l3proto_module_put(par->family);
++}
++
++static struct xt_target qosconnmark_tg_reg __read_mostly = {
++    .name           = "QOSCONNMARK",
++    .revision       = 1,
++    .family         = NFPROTO_UNSPEC,
++    .checkentry     = qosconnmark_tg_check,
++    .target         = qosconnmark_tg,
++    .targetsize     = sizeof(struct xt_qosconnmark_tginfo1),
++    .destroy        = qosconnmark_tg_destroy,
++    .me             = THIS_MODULE,
++};
++
++static struct xt_match qosconnmark_mt_reg __read_mostly = {
++    .name           = "qosconnmark",
++    .revision       = 1,
++    .family         = NFPROTO_UNSPEC,
++    .checkentry     = qosconnmark_mt_check,
++    .match          = qosconnmark_mt,
++    .matchsize      = sizeof(struct xt_qosconnmark_mtinfo1),
++    .destroy        = qosconnmark_mt_destroy,
++    .me             = THIS_MODULE,
++};
++
++
++static int __init qosconnmark_mt_init(void)
++{
++    int ret;
++        
++    ret = xt_register_target(&qosconnmark_tg_reg);
++    if (ret < 0)
++        return ret;
++    ret = xt_register_match(&qosconnmark_mt_reg);
++    if (ret < 0) {
++        xt_unregister_target(&qosconnmark_tg_reg);
++        return ret;
++    }
++    return 0;
++}
++
++static void __exit qosconnmark_mt_exit(void)
++{
++    xt_unregister_match(&qosconnmark_mt_reg);
++    xt_unregister_target(&qosconnmark_tg_reg);
++}
++        
++module_init(qosconnmark_mt_init);
++module_exit(qosconnmark_mt_exit);
++
+--- a/net/netfilter/xt_qosmark.c	1970-01-01 05:30:00.000000000 +0530
++++ b/net/netfilter/xt_qosmark.c	2017-03-23 16:09:09.799744810 +0530
+@@ -0,0 +1,85 @@
++/*
++ * xt_mark - Netfilter module to match NFMARK value
++ *
++ * (C) 1999-2001 Marc Boucher <marc@mbsi.ca>
++ * Copyright © CC Computer Consultants GmbH, 2007 - 2008
++ * Jan Engelhardt <jengelh@medozas.de>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++
++#include <linux/module.h>
++#include <linux/skbuff.h>
++
++#include <linux/netfilter/xt_qosmark.h>
++#include <linux/netfilter/x_tables.h>
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Marc Boucher <marc@mbsi.ca>");
++MODULE_DESCRIPTION("Xtables: packet qosmark operations");
++MODULE_ALIAS("ipt_qosmark");
++MODULE_ALIAS("ip6t_qosmark");
++MODULE_ALIAS("ipt_QOSMARK");
++MODULE_ALIAS("ip6t_QOSMARK");
++
++static unsigned int
++qosmark_tg(struct sk_buff *skb, const struct xt_action_param *par)
++{
++    const struct xt_qosmark_tginfo2 *info = par->targinfo;
++    
++    skb->qosmark = (skb->qosmark & ~info->mask) ^ info->mark;
++    return XT_CONTINUE;
++}
++        
++static bool
++qosmark_mt(const struct sk_buff *skb, struct xt_action_param *par)
++{
++    const struct xt_qosmark_mtinfo1 *info = par->matchinfo;
++        
++    return ((skb->qosmark & info->mask) == info->mark) ^ info->invert;
++}
++        
++static struct xt_target qosmark_tg_reg __read_mostly = {
++    .name           = "QOSMARK",
++    .revision       = 2,
++    .family         = NFPROTO_UNSPEC,
++    .target         = qosmark_tg,
++    .targetsize     = sizeof(struct xt_qosmark_tginfo2),
++    .me             = THIS_MODULE,
++};
++
++static struct xt_match qosmark_mt_reg __read_mostly = {
++    .name           = "qosmark",
++    .revision       = 1,
++    .family         = NFPROTO_UNSPEC,
++    .match          = qosmark_mt,
++    .matchsize      = sizeof(struct xt_qosmark_mtinfo1),
++    .me             = THIS_MODULE,
++};
++
++static int __init qosmark_mt_init(void)
++{
++    int ret;
++    
++    ret = xt_register_target(&qosmark_tg_reg);
++    if (ret < 0)
++        return ret;
++    ret = xt_register_match(&qosmark_mt_reg);
++    if (ret < 0) {
++        xt_unregister_target(&qosmark_tg_reg);
++        return ret;
++    }
++    return 0;
++}
++    
++static void __exit qosmark_mt_exit(void)
++{
++    xt_unregister_match(&qosmark_mt_reg);
++    xt_unregister_target(&qosmark_tg_reg);
++}
++        
++module_init(qosmark_mt_init);
++module_exit(qosmark_mt_exit);
++

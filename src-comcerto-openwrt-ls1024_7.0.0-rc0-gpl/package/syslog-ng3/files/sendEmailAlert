@@ -1,0 +1,14 @@
+#!/bin/sh
+EMAIL_CONFIG_FILE=/tmp/etc/config/email
+SYSLOG_CONFIG_FILE=/tmp/etc/config/syslog
+
+while read line; do
+	process_count=`ps | grep /usr/bin/sendmailalert | grep -v "grep /usr/bin/sendmailalert" | wc -l`
+	process_count=$((process_count+1))
+	supressed=`echo $line | grep "supressed by syslog-ng"`
+	if [ -z "$supressed" ]; then
+		echo $line > "/var/log/SendEmailAlert${process_count}"
+		/usr/bin/sendmailalert "/var/log/SendEmailAlert${process_count}" &
+		exit 0
+	fi
+done

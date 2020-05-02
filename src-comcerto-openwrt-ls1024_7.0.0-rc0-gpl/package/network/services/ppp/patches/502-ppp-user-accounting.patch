@@ -1,0 +1,60 @@
+diff -aurN '--exclude-from=/projects/ciscosbr_nbk/b38513/files' ppp-2.4.5-org/pppd/plugins/radius/radius.c ppp-2.4.5/pppd/plugins/radius/radius.c
+--- ppp-2.4.5-org/pppd/plugins/radius/radius.c	2016-01-21 15:08:04.537963000 +0530
++++ ppp-2.4.5/pppd/plugins/radius/radius.c	2016-01-21 15:09:06.821263000 +0530
+@@ -43,6 +43,10 @@
+ #include <string.h>
+ #include <netinet/in.h>
+ #include <stdlib.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <errno.h>
+ 
+ #define BUF_LEN 1024
+ 
+@@ -182,6 +186,29 @@
+     info("RADIUS plugin initialized.");
+ }
+ 
++#define PPP_USER_ACCOUNTING_FILE	"/tmp/ppp_user_accounting.log"
++void log_user_accounting(char *user)
++{
++	int fd, num;
++	time_t now = time(0);
++	char buf[296];
++	struct tm *ltm = localtime(&now);
++
++	memset(buf, 0, 296);
++
++	fd = open(PPP_USER_ACCOUNTING_FILE, O_CREAT|O_APPEND|O_WRONLY, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP);
++	if(fd < 0) {
++		notice("open() failed with error [%s]\n",strerror(errno));
++		return;
++	}
++
++	sprintf(buf, "User:%s PID:%d Time:%d;%d;%d;%d;%d;%d\n",user, getpid(), (1900+ltm->tm_year),(1+ltm->tm_mon),ltm->tm_mday,ltm->tm_hour,ltm->tm_min,ltm->tm_sec);
++	num = write(fd, buf, 296);
++	if(num <= 0) {
++		notice("write() failed with error [%s]\n",strerror(errno));
++	}
++	close(fd);
++}
+ /**********************************************************************
+ * %FUNCTION: add_avp
+ * %ARGUMENTS:
+@@ -321,6 +348,7 @@
+     rc_avpair_free(received);
+     rc_avpair_free(send);
+ 
++    log_user_accounting(user);
+     return (result == OK_RC) ? 1 : 0;
+ }
+ 
+@@ -513,6 +541,7 @@
+ #endif
+     rc_avpair_free(received);
+     rc_avpair_free (send);
++    log_user_accounting(user);
+     return (result == OK_RC);
+ }
+ 

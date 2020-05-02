@@ -1,0 +1,64 @@
+#!/bin/sh
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Script for testing led.
+
+state=$1
+color=$2
+
+if [ "${state}" = "on" ];then
+    state=1
+elif [ "${state}" = "off" ];then
+    state=0
+else
+    echo "[state] on off"
+fi
+
+if [ "${color}" != "red" -a "${color}" != "green" -a "${color}" != "amber" ];then
+    echo "[color] red green amber"
+fi
+
+case "${color}" in
+    red)
+        echo ${state} > /sys/class/leds/rv160w::diag-rled/brightness
+    ;;
+
+    green)
+        echo ${state} > /sys/class/leds/rv160w::power-gled/brightness
+        echo ${state} > /sys/class/leds/rv160w::dmz-gled/brightness
+        echo ${state} > /sys/class/leds/rv160w::wlan5_0-gled/brightness
+        echo ${state} > /sys/class/leds/rv160w::wlan2_4-gled/brightness
+        if [ "${state}" = "1" ];then
+            echo 1 > /sys/class/leds/rv160w::usb2_2-gled/brightness
+            echo 0 > /sys/class/leds/rv160w::usb2_2-aled/brightness
+            echo 1 > /sys/class/leds/rv160w::vpn-gled/brightness
+            echo 0 > /sys/class/leds/rv160w::vpn-aled/brightness
+        else
+            echo 0 > /sys/class/leds/rv160w::usb2_2-gled/brightness
+            echo 0 > /sys/class/leds/rv160w::usb2_2-aled/brightness
+            echo 0 > /sys/class/leds/rv160w::vpn-gled/brightness
+            echo 0 > /sys/class/leds/rv160w::vpn-aled/brightness
+	fi
+    ;;
+
+    amber)
+        if [ "${state}" = "1" ];then
+            echo 0 > /sys/class/leds/rv160w::usb2_2-gled/brightness
+            echo 1 > /sys/class/leds/rv160w::usb2_2-aled/brightness
+            echo 0 > /sys/class/leds/rv160w::vpn-gled/brightness
+            echo 1 > /sys/class/leds/rv160w::vpn-aled/brightness
+            echo 1 > /sys/class/leds/rv160w::pse_led1/brightness
+            echo 1 > /sys/class/leds/rv160w::pse_led2/brightness
+            echo 1 > /sys/class/leds/rv160w::pse_led3/brightness
+            echo 1 > /sys/class/leds/rv160w::pse_led4/brightness
+        else
+            echo 0 > /sys/class/leds/rv160w::usb2_2-gled/brightness
+            echo 0 > /sys/class/leds/rv160w::usb2_2-aled/brightness
+            echo 0 > /sys/class/leds/rv160w::vpn-gled/brightness
+            echo 0 > /sys/class/leds/rv160w::vpn-aled/brightness
+            echo 0 > /sys/class/leds/rv160w::pse_led1/brightness
+            echo 0 > /sys/class/leds/rv160w::pse_led2/brightness
+            echo 0 > /sys/class/leds/rv160w::pse_led3/brightness
+            echo 0 > /sys/class/leds/rv160w::pse_led4/brightness
+	fi
+    ;;
+esac

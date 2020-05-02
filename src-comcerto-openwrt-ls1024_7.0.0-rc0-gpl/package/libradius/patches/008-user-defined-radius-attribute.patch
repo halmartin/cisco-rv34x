@@ -1,0 +1,31 @@
+diff -rauN a/src/pam_radius_auth.c b/src/pam_radius_auth.c
+--- a/src/pam_radius_auth.c	2016-06-01 14:36:10.974242484 +0530
++++ b/src/pam_radius_auth.c	2016-06-01 14:31:45.833575754 +0530
+@@ -820,7 +820,10 @@
+ 		struct in_addr ip;
+ 		FILE *fp;
+ 		char cmd[100];
+-		sprintf(cmd, "ip -4 r g %s | head -n 1 | sed -e \"s/.*src \\([^ ]*\\).*/\\1/\"", strtok(conf->server->hostname, ":"));
++		char hostname[50];
++                strcpy(hostname, conf->server->hostname);
++		sprintf(cmd, "ip -4 r g %s | head -n 1 | sed -e \"s/.*src \\([^ ]*\\).*/\\1/\"", 
++                        strtok(hostname, ":"));
+ 		fp = popen(cmd, "r");
+ 		char source_ip[20];
+ 		fscanf(fp, "%s", source_ip);
+@@ -894,7 +897,6 @@
+ 			ok = FALSE;
+ 			goto next;		/* skip to the next server */
+ 		}
+-
+ 		/* set up per-server IP && port configuration */
+ 		memset ((char *) s_in, '\0', sizeof(struct sockaddr));
+ 		s_in->sin_family = AF_INET;
+@@ -1495,7 +1497,6 @@
+ 	 */
+ 	retval = initialize(&config, TRUE);
+ 	PAM_FAIL_CHECK;
+-
+ 	/*
+ 	 * If there's no client id specified, use the service type, to help
+ 	 * keep track of which service is doing the authentication.

@@ -1,0 +1,868 @@
+diff -aurN a/src/header/common.h c/src/header/common.h
+--- a/src/header/common.h	2016-02-12 11:06:20.227872375 +0530
++++ c/src/header/common.h	2016-02-12 12:03:42.607813382 +0530
+@@ -15,6 +15,9 @@
+ #define host_to_be16(n) (n)
+ #endif
+ 
++#ifndef CONFIG_RV34X_8021X /* RV340 specific */
++#define CONFIG_RV34X_8021X
++#endif
+ 
+ #include <stdint.h>
+ typedef uint64_t u64;
+diff -aurN a/src/header/config.h c/src/header/config.h
+--- a/src/header/config.h	2016-02-12 11:06:20.227872375 +0530
++++ c/src/header/config.h	2016-02-12 12:03:42.607813382 +0530
+@@ -1,7 +1,13 @@
+ #ifndef CONFIG_H
+ #define CONFIG_H
+ 
+-#include <nkutil.h>
++//#include <nkutil.h>
++#define DBG 1
++/*Porting changes here */
++#define LAN_IFACE_NAME "eth3"
++#define MAX_LINE_SIZE 80
++#define RV34xx_NUM_LAN_PORTS 4
++#define RV34xx_LAN_IFIDX 3
+ 
+ typedef u8 macaddr[ETH_ALEN];
+ 
+diff -aurN a/src/header/eapol_sm.h c/src/header/eapol_sm.h
+--- a/src/header/eapol_sm.h	2016-02-12 11:06:20.227872375 +0530
++++ c/src/header/eapol_sm.h	2016-02-12 12:03:42.607813382 +0530
+@@ -1,7 +1,7 @@
+ #ifndef EAPOL_SM_H
+ #define EAPOL_SM_H
+ 
+-#include <nkutil.h>
++//#include <nkutil.h>
+ 
+ /* IEEE Std 802.1X-2001, 8.5 */
+ 
+diff -aurN a/src/header/rtdot1x.h c/src/header/rtdot1x.h
+--- a/src/header/rtdot1x.h	2016-02-12 11:06:20.203872375 +0530
++++ c/src/header/rtdot1x.h	2016-02-12 12:03:42.607813382 +0530
+@@ -2,7 +2,7 @@
+ #define RTDOT1XD_H
+ 
+ #include <syslog.h>
+-#include <nkutil.h>
++//#include <nkutil.h>
+ 
+ #include "common.h"
+ #include "ap.h"
+@@ -77,6 +77,26 @@
+ #define ETH_P_VLAN 0x8100 /* VLAN Protocol */
+ #endif /* ETH_P_VLAN */
+ 
++#ifndef RTKSWITCH_ETH_TYPE
++#define RTKSWITCH_ETH_TYPE 0x8899
++#endif
++
++#ifndef RTK8367_CPUTAG_OFFSET
++#define RTK8367_CPUTAG_OFFSET 19
++#endif
++
++#ifndef RTK8367_CPUTAG_HDR_SIZE
++#define RTK8367_CPUTAG_HDR_SIZE 8
++#endif
++
++#ifndef RTK8367_CPUTAG_START_OFFSET
++#define RTK8367_CPUTAG_START_OFFSET 12
++#endif
++
++#ifndef IEEE_8021X_MAX_PKT_SIZE
++#define IEEE_8021X_MAX_PKT_SIZE 2048
++#endif
++
+ #define BIT(x) (1 << (x))
+ #define REAUTH_TIMER_DEFAULT_reAuthEnabled TRUE
+ #define REAUTH_TIMER_DEFAULT_reAuthPeriod 3600
+@@ -99,9 +119,13 @@
+ #define DBGPRINT(Level, fmt, args...) 	
+ #endif
+ 
++#define SWITCH_TAG 1 //TCK
+ struct ieee8023_hdr {
+ 	u8 dAddr[6];
+ 	u8 sAddr[6];
++#if 0 
++	u8 cpu_tag[8];
++#endif
+ 	u16 eth_type;
+ } __attribute__ ((packed));
+ 
+@@ -140,7 +164,7 @@
+ void Handle_term(int sig, void *eloop_ctx, void *signal_ctx);
+ int RT_ioctl(int sid, int param, char  *data, int data_len, char *prefix_name, unsigned char apidx, int flags);
+ 
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X 
+ void nk_802_1x_init(rtapd *apd);
+ void nk_802_1x_reinit_sta(rtapd *apd, struct sta_info* sta);
+ void nk_802_1x_reinit(rtapd *apd);
+diff -aurN a/src/header/sta_info.h c/src/header/sta_info.h
+--- a/src/header/sta_info.h	2016-02-12 11:06:20.227872375 +0530
++++ c/src/header/sta_info.h	2016-02-12 12:03:42.607813382 +0530
+@@ -1,7 +1,7 @@
+ #ifndef STA_INFO_H
+ #define STA_INFO_H
+ 
+-#include <nkutil.h>
++//#include <nkutil.h>
+ 
+ struct sta_info* Ap_get_sta(rtapd *apd, u8 *sa, u8 *apidx, u16 ethertype, int sock);
+ struct sta_info* Ap_get_sta_radius_identifier(rtapd *apd, u8 radius_identifier);
+diff -aurN a/src/Makefile c/src/Makefile
+--- a/src/Makefile	2016-02-12 11:06:20.227872375 +0530
++++ c/src/Makefile	2016-02-12 12:03:42.607813382 +0530
+@@ -2,23 +2,23 @@
+ OSTYPE  = $(shell uname -s)
+ CURRENT_DIR = $(shell pwd)
+ SOURCE=source
+-SRC     = $(SOURCE)/eloop.c $(SOURCE)/radius_client.c $(SOURCE)/rtdot1x.c $(SOURCE)/ieee802_1x.c $(SOURCE)/config.c $(SOURCE)/eapol_sm.c $(SOURCE)/md5.c $(SOURCE)/radius.c $(SOURCE)/nkutil.c $(SOURCE)/sta_info.c 
++SRC     = $(SOURCE)/eloop.c $(SOURCE)/radius_client.c $(SOURCE)/rtdot1x.c $(SOURCE)/ieee802_1x.c $(SOURCE)/config.c $(SOURCE)/eapol_sm.c $(SOURCE)/md5.c $(SOURCE)/radius.c $(SOURCE)/sta_info.c 
+ OBJS    = $(SRC:.c=.o)
+ CFLAGS  += -D$(OSTYPE) -I$(CURRENT_DIR)/header
+ CFLAGS +=  -DDBG 
+-CFLAGS +=  -I../include -I../nku -I../../../kernel_2.6/linux/include/linux/nk -L../nku 
++#CFLAGS +=  -I $(TOP_DIR)/$(PKG_BUILD_DIR)/../../realtek-ssdk-1.3.4/  
+ CFLAGS += -02 -Wall -g
+ #If you want to support multiple radius server for multiple bssid, add following line
+ #CFLAGS +=  -DMULTIPLE_RADIUS
+ 
+-LDADD += -lnku
++#LDADD += -lnku
+ #LDADD += -lpthread -lm
+ 
+ all: rtdot1xd 
+ 	@echo "Build complete"
+ 
+ rtdot1xd: $(OBJS)
+-	$(CC) $(CFLAGS) -fPIC -shared -o $@ $(OBJS) ${LDADD}
++	$(CC) $(CFLAGS) -o $@ $(OBJS) ${LDADD}
+ 
+ clean:
+ 	rm -f core *~ *.o *.so $(DAEMONS) *.d
+diff -aurN a/src/source/config.c c/src/source/config.c
+--- a/src/source/config.c	2016-02-12 11:06:20.227872375 +0530
++++ c/src/source/config.c	2016-02-12 12:03:42.607813382 +0530
+@@ -118,7 +118,7 @@
+ 	//if (addr == 0)
+ 	//	ret = -1;		
+ 	//else		
+-    	nserv->addr.s_addr = addr;	
++    	nserv->addr.s_addr = htonl(addr);	
+ 
+     return ret;
+ }
+@@ -170,7 +170,7 @@
+ #endif
+ 
+ 	// own_ip_addr
+-	conf->own_ip_addr.s_addr = pDot1xCmmConf->own_ip_addr;
++	conf->own_ip_addr.s_addr = htonl(pDot1xCmmConf->own_ip_addr);
+ 	if (conf->own_ip_addr.s_addr != 0)
+ 	{		
+ 		(*flag) |= 0x01;
+@@ -400,6 +400,7 @@
+ }
+ 
+ 
++#ifdef CONFIG_NK_802_1X
+ struct rtapd_config * Config_read(int ioctl_sock, char *prefix_name)
+ {
+     struct rtapd_config *conf;        
+@@ -435,8 +436,9 @@
+ 	// initial default EAP IF name and Pre-Auth IF name	as "br0"
+ 	conf->num_eap_if = 1;	
+ 	conf->num_preauth_if = 1;	
+-	strcpy(conf->eap_if_name[0], "br0");	
+-	strcpy(conf->preauth_if_name[0], "br0");
++	strcpy(conf->eap_if_name[0], LAN_IFACE_NAME);	
++	strcpy(conf->preauth_if_name[0],LAN_IFACE_NAME);
++	
+ 
+ 	// Get parameters from deiver through IOCTL cmd
+ 	if(!Query_config_from_driver(ioctl_sock, prefix_name, conf, &errors, &flag))
+@@ -485,8 +487,8 @@
+ 		
+     return conf;
+ }
++#endif
+ 
+-#ifdef CONFIG_NK_802_1X
+ /* string to unsigned int */
+ unsigned int nk_atou(const char *addr_string)
+ {
+@@ -762,7 +764,7 @@
+ #endif
+ 
+ 	// own_ip_addr
+-	conf->own_ip_addr.s_addr = pDot1xCmmConf->own_ip_addr;
++	conf->own_ip_addr.s_addr = htonl(pDot1xCmmConf->own_ip_addr);
+ 	if (conf->own_ip_addr.s_addr != 0)
+ 	{		
+ 		(*flag) |= 0x01;
+@@ -791,6 +793,8 @@
+ 				DBGPRINT(RT_DEBUG_TRACE, "(no.%d) Radius ip address: '%s'(%x) for %s%d\n", conf->mbss_num_auth_servers[i],
+ 										inet_ntoa(conf->mbss_auth_server[i]->addr), 
+ 										conf->mbss_auth_server[i]->addr.s_addr, prefix_name, i);
++										inet_ntoa(conf->mbss_auth_server[i]->addr), 
++										conf->mbss_auth_server[i]->addr.s_addr, prefix_name, i);
+    			}	
+ 
+ 			// RADIUS_Port and RADIUS_Key      
+@@ -803,7 +807,9 @@
+ 					DBGPRINT(RT_DEBUG_TRACE, "(no.%d) Radius port: '%d' for %s%d\n", conf->mbss_num_auth_servers[i], conf->mbss_auth_server[i]->port, prefix_name, i);
+ 				}
+ 				else
++				{
+ 					DBGPRINT(RT_DEBUG_ERROR, "(no.%d) Radius port is invalid for %s%d\n", conf->mbss_num_auth_servers[i], prefix_name, i);
++				}
+ 
+ 				if (pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_key_len > 0)
+ 				{
+@@ -814,7 +820,9 @@
+ 						conf->mbss_num_auth_servers[i], conf->mbss_auth_server[i]->shared_secret, conf->mbss_auth_server[i]->shared_secret_len, prefix_name, i);	
+ 				}
+ 				else
++				{
+ 					DBGPRINT(RT_DEBUG_ERROR, "(no.%d) Radius key is invalid for %s%d\n", conf->mbss_num_auth_servers[i], prefix_name, i);
++				}
+ 			
+ 			}
+ #else
+@@ -843,7 +851,9 @@
+ 					DBGPRINT(RT_DEBUG_TRACE,"(no.%d) Radius port: '%d'\n", conf->num_auth_servers, conf->auth_server->port);
+ 				}
+ 				else
++				{
+ 					DBGPRINT(RT_DEBUG_ERROR, "(no.%d) Radius port is invalid\n", conf->num_auth_servers);
++				}
+ 
+ 				if (pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_key_len > 0)
+ 				{
+@@ -854,7 +864,9 @@
+ 					conf->auth_server->shared_secret, conf->auth_server->shared_secret_len);	
+ 				} 
+ 				else
++				{
+ 					DBGPRINT(RT_DEBUG_ERROR, "(no.%d) Radius key is invalid\n", conf->num_auth_servers);
++				}
+ 		
+ 			}       
+ #endif			
+@@ -890,7 +902,9 @@
+    	// radius_retry_primary_interval
+    	conf->radius_retry_primary_interval = pDot1xCmmConf->retry_interval;
+ 	if (conf->radius_retry_primary_interval > 0)
++	{
+ 		DBGPRINT(RT_DEBUG_TRACE,"Radius retry primary interval %d seconds. \n", conf->radius_retry_primary_interval);
++	}
+ 
+ 	// session_timeout_interval
+ 	conf->session_timeout_interval = pDot1xCmmConf->session_timeout_interval;                   
+@@ -997,6 +1011,8 @@
+     int flag = 0;
+ 	char nasId[80];
+ 	int nasId_len;
++	char s[MAX_LINE_SIZE];
++	FILE *fp = NULL;
+                  
+     conf = malloc(sizeof(*conf));
+     if (conf == NULL)
+@@ -1009,7 +1025,7 @@
+     conf->SsidNum = 1;
+     conf->session_timeout_set = 0xffff;
+ 	
+-	nk_get_hostname(nasId);
++    gethostname(nasId, sizeof(nasId));
+ 	
+     /* Some related variable per BSS set to default */
+     for (i = 0; i < MAX_MBSSID_NUM; i++)
+@@ -1038,8 +1054,18 @@
+ 	// initial default EAP IF name and Pre-Auth IF name	as "eth0"
+ 	conf->num_eap_if = 1;	
+ 	conf->num_preauth_if = 1;	
+-	strcpy(conf->eap_if_name[0], "eth0");	
+-	strcpy(conf->preauth_if_name[0], "eth0");
++	strcpy(conf->eap_if_name[0], LAN_IFACE_NAME);	
++	strcpy(conf->preauth_if_name[0], LAN_IFACE_NAME);
++
++	sprintf(s, "ip link set %s promisc on", LAN_IFACE_NAME);
++	fp = popen(s,"r"); //TCK: Ideally Add group multicast desitnation receive on the interface.
++	if(fp == NULL)
++	{
++		DBGPRINT(RT_DEBUG_ERROR, "Unable to set promiscous mode on LAN interface %s. Cannot receive group MAC packets. 8021x setting failed", LAN_IFACE_NAME);			
++		return NULL;
++	}
++	else
++		fclose(fp);
+ 
+ 	if(!nk_Config_parse(config_filename, prefix_name, conf, &errors, &flag))
+ 	{
+@@ -1087,7 +1113,6 @@
+ 
+     return conf;
+ }
+-#endif
+ 
+ static void Config_free_radius(struct hostapd_radius_server *servers, int num_servers)
+ {
+diff -aurN a/src/source/eapol_sm.c c/src/source/eapol_sm.c
+--- a/src/source/eapol_sm.c	2016-02-12 11:06:20.227872375 +0530
++++ c/src/source/eapol_sm.c	2016-02-12 12:07:26.423809547 +0530
+@@ -118,7 +118,7 @@
+ 
+ SM_STATE(AUTH_PAE, CONNECTING)
+ {
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X 
+ 	int from_connecting = sm->auth_pae.state == AUTH_PAE_CONNECTING;
+ 	u8	GroupMac[6] = {0x01, 0x80, 0xc2, 0x00, 0x00, 0x03};
+ 	int add_reAuthCount;
+@@ -138,7 +138,7 @@
+ 
+ 	SM_ENTRY(AUTH_PAE, CONNECTING, auth_pae);
+ 
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X
+ 	/* don't send second identity packet to group mac */
+ 	if (from_connecting && memcmp(sm->sta->addr, GroupMac, 6) == 0)
+ 		return;
+@@ -158,15 +158,18 @@
+ 	sm->txWhen = sm->auth_pae.txPeriod;
+ 	sm->auth_pae.rxInitialRsp = FALSE;
+ 
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X
+ 	if (add_reAuthCount == 1)
+ #endif
++	{
+ 		sm->auth_pae.reAuthCount++;
++	}
+ 	
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X 
+ 	/* don't send Request/Identity for reAuthCount comes to reAuthMax */
+ 	if (sm->auth_pae.reAuthCount <= sm->auth_pae.reAuthMax)
+ #endif
++	
+ 		txInitialMsg(sm->currentId);
+ 	
+ }
+@@ -208,6 +211,7 @@
+ 	    sm->auth_pae.rxInitialRsp)
+ 		sm->auth_pae.authEntersAuthenticating++;
+ 
++	DBGPRINT(RT_DEBUG_INFO,"AUTHENTICATING STATE:: STAID %d\n",sm->sta->aid);
+ 	SM_ENTRY(AUTH_PAE, AUTHENTICATING, auth_pae);
+ 
+ 	sm->authSuccess = FALSE;
+@@ -265,10 +269,10 @@
+ 
+ SM_STEP(AUTH_PAE)
+ {
+-	if ((sm->portControl == Auto &&
+-	     sm->auth_pae.portMode != sm->portControl) ||
+-	    sm->initialize || !sm->portEnabled)
+-		SM_ENTER(AUTH_PAE, INITIALIZE);
++        if ((sm->portControl == Auto &&
++             sm->auth_pae.portMode != sm->portControl) ||
++            sm->initialize || !sm->portEnabled)
++	        SM_ENTER(AUTH_PAE, INITIALIZE);
+ 	else if (sm->portControl == ForceAuthorized &&
+ 		 sm->auth_pae.portMode != sm->portControl &&
+ 		 !(sm->initialize || !sm->portEnabled))
+@@ -418,10 +422,10 @@
+ 
+ SM_STEP(BE_AUTH)
+ {
+-	if (sm->portControl != Auto || sm->initialize || sm->authAbort) {
+-		SM_ENTER(BE_AUTH, INITIALIZE);
+-		return;
+-	}
++        if (sm->portControl != Auto || sm->initialize || sm->authAbort) {
++                SM_ENTER(BE_AUTH, INITIALIZE);
++                return;
++        }
+ 
+ 	switch (sm->be_auth.state) {
+ 	case BE_AUTH_INITIALIZE:
+@@ -553,6 +557,58 @@
+ 	}
+ }
+ 
++/*TVR*/
++int rv_get_portStatus(int aid)
++{
++#define MAX_COMMAND_STR 255
++	FILE *fp = NULL;
++	char status[2];
++	char str[MAX_COMMAND_STR];
++	
++	memset(str, 0 , MAX_COMMAND_STR);
++	sprintf(str, "rtkssdk port_stats -p %d -g 1", aid);
++
++	if((fp = popen(str,"r")) !=NULL)
++	{
++		fgets(status,2,fp);
++		if (strncmp(status,"1",1)==0)
++			return 1;
++		else if (strncmp(status,"0",1)==0)
++			return 0;
++	}
++	else
++		return -1;
++
++	pclose(fp);
++	return status;
++}
++
++int rv_get_portControl(int aid)
++{
++#define MAX_COMMAND_STR 255
++	FILE *fp = NULL;
++	char status[2];
++	char str[MAX_COMMAND_STR];
++	
++	memset(str, 0 , MAX_COMMAND_STR);
++	sprintf(str, "/usr/bin/get_dot1x_portControl start %d", aid);
++
++	if((fp = popen(str,"r")) !=NULL)
++	{
++		fgets(status,2, fp);
++		DBGPRINT("\n\t port control: %s ",status);
++
++		if (strncmp(status,"2",1)==0)
++			return 2;
++		else if (strncmp(status,"1",1)==0)
++			return 1;
++	}
++	else
++		return -1;
++	pclose(fp);
++	return status;
++}
++
+ struct eapol_state_machine *
+ eapol_sm_alloc(rtapd *rtapd, struct sta_info *sta)
+ {
+@@ -594,9 +650,14 @@
+ 		sm->reauth_timer.reAuthPeriod = REAUTH_TIMER_DEFAULT_reAuthPeriod;
+ 	}
+ 
+-#ifdef CONFIG_NK_802_1X
+-	sm->portEnabled = nk_get_portStatus(sta->aid);
+-	sm->portControl = nk_get_portControl(sta->aid);
++		DBGPRINT(RT_DEBUG_TRACE,"BEFORE CALLING RV_GET_PORTSTATUS\r\n" );
++	
++
++#ifdef CONFIG_RV34X_8021X
++	sm->portEnabled = rv_get_portStatus(sta->aid); 
++	DBGPRINT(RT_DEBUG_TRACE, "\r\nPort %d Enabled Status on SWITCH = %s\n", sta->aid, (sm->portEnabled)?"Up":"Down");
++	sm->portControl = rv_get_portControl(sta->aid); /*Read this from 8021x user config */
++	DBGPRINT(RT_DEBUG_TRACE, "\r\nPort %d Control Status on SWITCH = %s\n", sta->aid, ((sm->portControl)-1)?"Auto":"ForceAuth");
+ #else
+ 	sm->portEnabled = FALSE;
+ 	sm->portControl = Auto;
+@@ -604,7 +665,7 @@
+ 	sm->currentId = 1;
+ 	/* IEEE 802.1aa/D4 */
+ 	sm->keyAvailable = FALSE;
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X
+ 	sm->keyTxEnabled = FALSE;
+ #else
+ 	sm->keyTxEnabled =TRUE ;
+diff -aurN a/src/source/ieee802_1x.c c/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-02-12 11:06:20.227872375 +0530
++++ c/src/source/ieee802_1x.c	2016-02-12 12:03:42.607813382 +0530
+@@ -61,24 +61,23 @@
+ 	if (datalen > 0 && data != NULL)
+ 		memcpy(pos + LENGTH_8021X_HDR, data, datalen);
+ 
+-	//If (ethertype==ETH_P_PRE_AUTH), this means the packet is to or from ehternet socket(WPA2, pre-auth)
+ 	if (sta->ethertype == ETH_P_PRE_AUTH)
+ 	{
+ 		if (send(sta->SockNum/*rtapd->eth_sock*/, buf, len, 0) < 0)
+ 			perror("send[WPA2 pre-auth]");
+-		DBGPRINT(RT_DEBUG_INFO,"ieee802_1x_send::WPA2, pre-auth, len=%d\n", len);
++		DBGPRINT(RT_DEBUG_INFO,"ieee802_1x_send::WPA2, pre-auth, len=%d Ether-Type %x\n", len,sta->ethertype);
+ 	}
+ 	else
+ 	{
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X
+ 		if (send(sta->SockNum/*rtapd->eth_sock*/, buf, len, 0) < 0)
+ 			perror("send[WPA2 eap]");
+-		DBGPRINT(RT_DEBUG_INFO,"ieee802_1x_send::WPA2, eap, len=%d\n", len);
++		DBGPRINT(RT_DEBUG_INFO,"ieee802_1x_send::WPA2, eap, len=%d Ether-Type %x\n", len,hdr3->eth_type);
+ #else
+         if (RT_ioctl(rtapd->ioctl_sock, 
+ 					 RT_PRIV_IOCTL, buf, len, 
+ 					 rtapd->prefix_wlan_name, sta->ApIdx, 
+-					 RT_OID_802_DOT1X_RADIUS_DATA))
++				 RT_OID_802_DOT1X_RADIUS_DATA))
+         DBGPRINT(RT_DEBUG_ERROR,"ioctl failed for ieee802_1x_send(len=%d)\n", len);
+ #endif
+ 	}
+@@ -88,8 +87,19 @@
+ 
+ void ieee802_1x_set_sta_authorized(rtapd *rtapd, struct sta_info *sta, int authorized)
+ {
+-#ifdef CONFIG_NK_802_1X
+-	nk_802_1x_SetPortStatus(sta->aid, authorized);
++#ifdef CONFIG_RV34X_8021X 
++	char str[MAX_LINE_SIZE];
++	FILE *fp = NULL;
++	//rv340x_802_1x_SetPortStatus(sta->aid, authorized);
++	sprintf(str, "rtkssdk dot1x -p %d -a %d\n",sta->aid,authorized);
++	fp = popen(str, "r"); //system(str);
++	if(fp == NULL)
++	{
++		DBGPRINT(RT_DEBUG_TRACE,"FAILED to set 802.1x auth state to port %d on switch\n", sta->aid);
++		return;
++	}
++	else
++		fclose(fp);
+ 	DBGPRINT(RT_DEBUG_TRACE,"IEEE802_1X_Set_Sta_Authorized: Port %d = %d \n", sta->aid, authorized);
+ #else
+ 	switch(authorized)
+@@ -152,7 +162,7 @@
+ 	pos = (u8 *) (eap + 1);
+ 	*pos++ = EAP_TYPE_IDENTITY;
+ 
+-	DBGPRINT(RT_DEBUG_INFO, "IEEE802_1X_Request_Identity %d bytes\n",tlen);
++	DBGPRINT(RT_DEBUG_INFO, "IEEE802_1X_Request_Identity %d bytes & eap-leanth = %d\n",tlen,eap->length);
+ 	ieee802_1x_send(rtapd, sta, IEEE802_1X_TYPE_EAP_PACKET, buf, tlen);
+ 	free(buf);
+ }
+@@ -686,13 +696,14 @@
+ 	char SNAP_802_1H[] = {0xaa, 0xaa, 0x03, 0x00, 0x00, 0x00};
+ 	u16 datalen;
+ 
+-	DBGPRINT(RT_DEBUG_TRACE,"IEEE802_1X_RECEIVE : from Supplicant\n");
++	DBGPRINT(RT_DEBUG_TRACE,"IEEE802_1X_RECEIVE : from Supplicant with portnum = %d\n",*apidx);
+ 	
+ 	sta = Ap_get_sta(rtapd, sa, apidx, ethertype, SockNum);
+ 	if (!sta)
+ 	{
+ 		return;
+ 	}
++	sta->aid = *apidx;
+ 	if (RTMPCompareMemory(buf, SNAP_802_1H, 6) == 0)
+ 		buf += LENGTH_802_1_H;
+ 	hdr = (struct ieee802_1x_hdr *) buf;
+diff -aurN a/src/source/radius_client.c c/src/source/radius_client.c
+--- a/src/source/radius_client.c	2016-02-12 11:06:20.227872375 +0530
++++ c/src/source/radius_client.c	2016-02-12 12:03:42.607813382 +0530
+@@ -456,7 +456,7 @@
+ 		}
+ 	}
+ 	// bind before connect to assign local port
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X
+ /* purpose     : 802.1x      author : ChunRu       date : 2013-01-22    */
+ /* description : fix sometimes DUT cannot send packets to Radius Server */
+ 	/* Ralink original code mark this part */
+diff -aurN a/src/source/rtdot1x.c c/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2016-02-12 11:06:20.227872375 +0530
++++ c/src/source/rtdot1x.c	2016-02-12 12:18:31.947798141 +0530
+@@ -33,6 +33,8 @@
+ #define NK_DEFAULT_CONFIG_FILENAME "/etc/rtapd.conf"
+ #define NK_DEFAULT_PID_FILENAME "/var/run/rtapd.pid"
+ 
++struct rtapd_config * nk_Config_read(char *config_filename, char *prefix_name);
++
+ struct hapd_interfaces {
+ 	int count;
+ 	rtapd **rtapd;
+@@ -157,7 +159,7 @@
+ 	DBGPRINT(RT_DEBUG_TRACE, "Reloading configuration\n");
+ 
+ 	/* create new config */					
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X 
+ 	newconf = nk_Config_read(config_filename, rtapd->prefix_wlan_name);
+ #else
+ 	newconf = Config_read(rtapd->ioctl_sock, rtapd->prefix_wlan_name);
+@@ -215,12 +217,14 @@
+ {                              
+ 	rtapd *rtapd = eloop_ctx;
+ 	int len;
+-	unsigned char buf[3000];
+-	u8 *sa, *da, *pos, *pos_vlan, apidx=0, isVlanTag=0;
++	unsigned char buf[IEEE_8021X_MAX_PKT_SIZE], *pBuf = NULL;
++	unsigned short *eth_type_cpu=NULL;
++	u8 *sa, *da, *pos, *pos_vlan, apidx=0,pVal=0, isVlanTag=0,portnum;
+ 	u16 ethertype,i;
+-    priv_rec *rec;
++    	priv_rec *rec;
+     size_t left;
+-#ifndef CONFIG_NK_802_1X
++
++#ifndef CONFIG_RV34X_8021X 
+ 	u8 	RalinkIe[9] = {221, 7, 0x00, 0x0c, 0x43, 0x00, 0x00, 0x00, 0x00}; 
+ #else
+ 	u8	GroupMac[6] = {0x01, 0x80, 0xc2, 0x00, 0x00, 0x03};
+@@ -236,15 +240,32 @@
+         return;
+ 	}
+ 
+-	rec = (priv_rec*)buf;
+-    left = len -sizeof(*rec)+1;
++	pBuf = &buf[0];
++
++	eth_type_cpu = (unsigned short *)(pBuf + RTK8367_CPUTAG_START_OFFSET);
++	if(eth_type_cpu == NULL)
++	{
++		return;
++	}
++	if(*eth_type_cpu == ntohs(RTKSWITCH_ETH_TYPE))
++	{
++		/*TCK:: Retrieve port number first */
++		apidx = portnum = *(pBuf + RTK8367_CPUTAG_OFFSET); 
++		DBGPRINT(RT_DEBUG_TRACE, "\r\nPacket received on switch port = %d", apidx); 
++		memmove(pBuf + RTK8367_CPUTAG_HDR_SIZE, pBuf,RTK8367_CPUTAG_START_OFFSET);
++		pBuf = pBuf + RTK8367_CPUTAG_HDR_SIZE;
++		len -= RTK8367_CPUTAG_HDR_SIZE;
++	}
++
++	rec = (priv_rec*)pBuf;
++    	left = len -sizeof(*rec)+1;
+ 	if (left <= 0)
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR," too short recv\n");
+ 		return;
+ 	}
+ 						
+-    sa = rec->saddr;
++    	sa = rec->saddr;
+ 	da = rec->daddr;
+ 	ethertype = rec->ethtype[0] << 8;
+ 	ethertype |= rec->ethtype[1];
+@@ -282,10 +303,10 @@
+ 		
+ 		if(i >= rtapd->conf->SsidNum)
+ 		{
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X 
+ 			if (memcmp(da, GroupMac, 6) == 0)
+ 		    {
+-		        apidx = 0;
++			rtapd->conf->SsidNum = apidx;
+ 
+ 		    }
+ 		    else
+@@ -320,7 +341,7 @@
+     	pos += 4;
+     	left -= 4;
+ 	}
+-#ifndef CONFIG_NK_802_1X
++#ifndef CONFIG_RV34X_8021X
+ 	/* Check if this is a internal command or not */
+ 	if (left == sizeof(RalinkIe) && 
+ 		RTMPCompareMemory(pos, RalinkIe, 5) == 0)
+@@ -376,7 +397,7 @@
+ 	// 1. init ethernet interface socket for pre-auth
+ 	for (i = 0; i < rtapd->conf->num_preauth_if; i++)
+ 	{
+-		rtapd->eth_sock[i] = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_PRE_AUTH));
++		rtapd->eth_sock[i] = socket(PF_PACKET, SOCK_RAW, htons(RTKSWITCH_ETH_TYPE));
+ 	    if (rtapd->eth_sock[i] < 0)
+     	{
+     	    perror("socket[PF_PACKET,SOCK_RAW](eth_sock)");
+@@ -414,7 +435,7 @@
+ 	// 2. init wireless interface socket for EAP negotiation      		
+ 	for (i = 0; i < rtapd->conf->num_eap_if; i++)
+ 	{
+-		rtapd->wlan_sock[i] = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_PAE));
++		rtapd->wlan_sock[i] = socket(PF_PACKET, SOCK_RAW, htons(RTKSWITCH_ETH_TYPE));
+         
+ 	    if (rtapd->wlan_sock[i] < 0)
+         {
+@@ -576,11 +597,11 @@
+ 		goto fail;
+ 	}
+ 	
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X 
+ 	rtapd->ioctl_sock = -1;
+ 	rtapd->conf = nk_Config_read(config_filename, rtapd->prefix_wlan_name);
+ #else
+-    // init ioctl socket
++    // init ioctl socket,
+     rtapd->ioctl_sock = socket(PF_INET, SOCK_DGRAM, 0);
+     if (rtapd->ioctl_sock < 0)
+     {
+@@ -588,7 +609,7 @@
+ 	    goto fail;
+     }
+ 
+-	rtapd->conf = Config_read(rtapd->ioctl_sock, rtapd->prefix_wlan_name);
++    rtapd->conf = Config_read(rtapd->ioctl_sock, rtapd->prefix_wlan_name);
+ #endif
+ 
+ 	if (rtapd->conf == NULL)
+@@ -629,7 +650,7 @@
+ 	for (i = 0; i < rtapds->count; i++)
+     {
+ 		rtapd *rtapd = rtapds->rtapd[i];
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X 
+ 		newconf = nk_Config_read(config_filename, rtapd->prefix_wlan_name);
+ #else
+ 		newconf = Config_read(rtapd->ioctl_sock, rtapd->prefix_wlan_name);
+@@ -790,6 +811,33 @@
+ 
+ 	eloop_terminate();
+ }
++void nk_802_1x_init(rtapd *apd)
++{
++	char buf[80];
++	char str[200];
++	int num_lan, i;
++	FILE *fp = NULL;	
++	if (!apd)
++		return;
++	
++	//kd_doCommand("VERSION NUM_LAN", CMD_PRINT, ASH_DO_NOTHING, buf);
++	num_lan = RV34xx_NUM_LAN_PORTS; //TCK:: Hard coding for RV340:: atoi(buf); Read product ID from boardinfo API and use appropriate value. JIRA: SBR-96
++	
++	DBGPRINT(RT_DEBUG_TRACE, "--- enter %s ---\n", __func__);
++	for (i = 0; i < num_lan; i++)
++	{
++		/* must init one time for receive EAPoL packets */
++		sprintf(str, "rtkssdk dot1x -p %d -a 0",(i+1));
++		if(NULL != (fp = popen(str,"r")))
++			nk_Ap_add_sta(apd, NULL, i+1);
++		pclose(fp);
++		if (rv_get_portControl(i+1) == ForceAuthorized)
++		sprintf(str, "rtkssdk dot1x -p %d -a 1",(i+1));
++		if(NULL != (fp = popen(str,"r")));
++		pclose(fp);
++	}
++	DBGPRINT(RT_DEBUG_TRACE, "--- exit %s ---\n", __func__);
++}
+ 
+ int main(int argc, char *argv[])
+ {
+@@ -801,7 +849,8 @@
+ 	char prefix_name[IFNAMSIZ+1];
+ 	int has_config = 0;
+     
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X
++
+ 	int waiting = 0;
+ 	
+ 	strcpy(prefix_name, "eth");
+@@ -832,7 +881,6 @@
+ 						RT_DEBUG_TRACE		3
+ 						RT_DEBUG_INFO		4 
+ 				*/
+-				printf("Set debug level as %s\n", optarg);
+ 				RTDebugLevel = (int)strtol(optarg, 0, 10);
+ 				break;
+ 
+@@ -864,7 +912,6 @@
+ 	if (has_config == 0)
+ 		strcpy(config_filename, NK_DEFAULT_CONFIG_FILENAME);
+ 
+-	printf("Ralink DOT1X daemon, version = '%s' \n", dot1x_version);
+ 	DBGPRINT(RT_DEBUG_TRACE, "prefix_name = '%s'\n", prefix_name);
+ 
+ 
+@@ -876,7 +923,7 @@
+         
+         openlog("rtdot1xd",0,LOG_DAEMON);
+ 		
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X 
+ 		FILE *pf;
+ 		pf = fopen (NK_DEFAULT_PID_FILENAME, "w");
+ 
+@@ -911,7 +958,7 @@
+         if (Apd_setup_interface(interfaces.rtapd[0]))
+             goto out;
+         
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X 
+ 		while (waiting > 0)
+ 		{
+ 			for (i = 0; i < 1000; i++)
+diff -aurN a/src/source/sta_info.c c/src/source/sta_info.c
+--- a/src/source/sta_info.c	2016-02-12 11:06:20.227872375 +0530
++++ c/src/source/sta_info.c	2016-02-12 12:03:42.607813382 +0530
+@@ -16,6 +16,7 @@
+ #include "ieee802_1x.h"
+ #include "radius.h"
+ #include "eapol_sm.h"
++struct sta_info* nk_Ap_get_sta(rtapd *apd, u8 *sa);
+ 
+ struct sta_info* Ap_get_sta(rtapd *apd, u8 *sa, u8 *apidx, u16 ethertype, int sock)
+ {
+@@ -52,12 +53,13 @@
+ 		if (apd->conf->SsidNum > 1)
+ 			s->ApIdx = *apidx;
+ 		else
+-			s->ApIdx = 0;
++			s->ApIdx = RV34xx_LAN_IFIDX; 
+ 
+ 		DBGPRINT(RT_DEBUG_TRACE,"Create a new STA(in %s%d)\n", apd->prefix_wlan_name, s->ApIdx);
+ 
+ 		s->SockNum = sock;
+ 		memcpy(s->addr, sa, ETH_ALEN);
++		s->aid = apd->conf->SsidNum;
+ 		s->next = apd->sta_list;
+ 		apd->sta_list = s;
+ 		apd->num_sta++;
+@@ -73,7 +75,43 @@
+ 	return s;
+ }
+ 
+-#ifdef CONFIG_NK_802_1X
++#ifdef CONFIG_RV34X_8021X 
++int nk_802_1x_GetPortFromMac(unsigned char *mac_addr)
++{
++	int port, i;
++	uint64_t mac = 0;
++	
++	if (!mac_addr)
++	{
++		DBGPRINT(RT_DEBUG_TRACE, "nk_802_1x_GetPortFromMac: mac_addr not exist\n");
++		return 1;
++	}
++	
++	DBGPRINT(RT_DEBUG_TRACE, "--- enter %s ---\n", __func__);
++	
++	
++	for(i = 0; i < MAC_ADDR_LEN; i++)
++	{
++		mac <<= 8;
++		mac += *(mac_addr+i);
++	}
++	
++#if 0
++	if (nk_switch_arl_psearch(0, mac, &port) < 0)
++	{
++		DBGPRINT(RT_DEBUG_TRACE, "nk_802_1x_GetPortFromMac (0x%lx) fail\n", mac);
++		return 1;
++	}
++#endif
++
++	DBGPRINT(RT_DEBUG_TRACE, "nk_802_1x_GetPortFromMac: (0x%lx) port = %d\n", mac, port);
++	
++	DBGPRINT(RT_DEBUG_TRACE, "--- exit %s (port = %d) ---\n", __func__, port);
++	return 1; //port;
++}
++#endif
++
++#ifdef CONFIG_RV34X_8021X 
+ struct sta_info* nk_Ap_get_sta(rtapd *apd, u8 *sa)
+ {
+ 	int port;

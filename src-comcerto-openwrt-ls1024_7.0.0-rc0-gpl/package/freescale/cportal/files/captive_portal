@@ -1,0 +1,38 @@
+#!/bin/sh /etc/rc.common
+
+STOP=99
+
+cp_cmd="/usr/sbin/cportald"
+DEFAULT_CERT="Default"
+start() {
+	while pgrep -l cportald >/dev/null;  do
+		sleep 1
+	done
+	start-stop-daemon -S -b -x ${cp_cmd}
+	/usr/bin/updateCertUsage add $DEFAULT_CERT CaptivePortal
+}
+
+stop() {
+	local pidfile
+	pidfile=/var/run/captive.pid
+	[ -e ${pidfile} ] && {
+		/usr/bin/updateCertUsage del $DEFAULT_CERT CaptivePortal
+		start-stop-daemon -K -q -s SIGTERM -n cportald
+	}
+}
+
+reload() {
+	local pidfile
+	pidfile=/var/run/captive.pid
+	if [ -e ${pidfile} ]; then
+		start-stop-daemon -K -q -s SIGUSR2 -n cportald
+	else
+		start
+	fi
+
+}
+
+restart() {
+	stop "$1"
+	start "$1"
+}

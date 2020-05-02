@@ -1,0 +1,87 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2011 OpenWrt.org
+
+. /lib/functions.sh
+. /etc/boardInfo
+
+START=98
+STOP=10
+
+SERVICE_USE_PID=1
+
+start () {
+	if [ ! -d "$CronDir" ];then
+		mkdir -p $CronDir
+	fi
+
+	if [ ! -f "$CronConfigFile" ];then
+		cp -f $RootfsCronConfig	$CronConfigFile
+	fi
+
+	cp -f $CronConfigFile $CronTmpConfigFile
+	loglevel=$(uci_get "system.@system[0].cronloglevel")
+
+	# Read uci and prepare all cronjobs
+	echo "# WARNING: This is an auto generated file, please use uci to set cron entries" > $CronJobFile
+	echo "# This file is generated from /etc/init.d/cron" >> $CronJobFile
+	echo >> $CronJobFile
+
+	# This is a exception to disable dstTime cronjob, because it may disturb the timezone even if the DST is not enabled.
+	# system init file take care of add the cronjob again if the DST is enabled.
+	uci set crontabs.dstTime.enabled=0
+	uci commit crontabs
+
+
+	config_load crontabs
+	config_foreach cron_config crontab
+
+	#mkdir -p /var/spool/cron
+	#ln -s /etc/crontabs /var/spool/cron/ 2>/dev/null
+	#ln -sf /etc/config/crontabs /tmp/etc/config/crontabs
+
+	service_start /usr/sbin/crond -c $CronDir -l ${loglevel:-5}
+}
+
+stop() {
+	service_stop /usr/sbin/crond
+}
+
+cron_config () {
+	local cfg="$1"
+	local minutes hours days months weekdays command enabled
+
+	config_get enabled "$cfg" enabled '0'
+	if [ "$enabled" = 1 ];then
+		config_get minutes "$cfg" minutes
+		config_get hours "$cfg" hours
+		config_get days "$cfg" days
+		config_get months "$cfg" months
+		config_get weekdays "$cfg" weekdays
+		config_get command "$cfg" command
+
+		# Add the cron entry
+		if [ -n "$minutes" ] && [ -n "$hours" ] && [ -n "$days" ] && [ -n "$months" ] && [ -n "$weekdays" ] && [ -n "$command" ];then
+			echo $minutes" "$hours" "$days" "$months" "$weekdays" "$command >> $CronJobFile
+		fi
+	fi
+}
+
+reload() {
+	# Stop the daemon
+	stop
+
+	# Read uci and prepare all cronjobs
+	echo "# WARNING: This is an auto generated file, please use uci to set cron entries" > $CronJobFile
+	echo "# This file is generated from /etc/init.d/cron" >> $CronJobFile
+	echo >> $CronJobFile
+	config_load crontabs
+	config_foreach cron_config crontab
+
+	# Start the daemon
+	loglevel=$(uci_get "system.@system[0].cronloglevel")
+	[ -z "$(ls $CronDir)" ] && exit 1
+	service_start /usr/sbin/crond -c $CronDir -l ${loglevel:-5}
+
+	# copy the config file
+	cp -f $CronTmpConfigFile $CronConfigFile
+}

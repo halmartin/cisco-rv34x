@@ -1,0 +1,41 @@
+--- linux-4.1.8/drivers/net/phy/broadcom.c.org	2017-10-12 08:40:14.706487545 +0800
++++ linux-4.1.8/drivers/net/phy/broadcom.c	2017-10-12 15:36:50.808361861 +0800
+@@ -330,7 +330,7 @@
+ 
+ 		phy_write(phydev, 0x1e, 0x21);
+ 		reg = phy_read(phydev, 0x1f);
+-		if (((reg & (1 << 4)) == (1 << 4))) {
++		if (((reg & (1 << 4)) == (1 << 4)) && ((reg & (1 << 6)) != (1 << 6))) {
+ 			phy_write(phydev, 0x1e, 0x23e);
+ 			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
+ 
+@@ -340,13 +340,6 @@
+ 			phy_write(phydev, 0x1e, 0x23e);
+ 			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
+ 		}
+-		else {
+-			phy_write(phydev, 0x1e, 0x23e);
+-			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
+-
+-			phy_write(phydev, 0x1e, 0x21);
+-			phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) & ~(3 << 1)) & ~(1 << 0));
+-		}
+ 
+ 		phy_write(phydev, 0x1e, 0x21);
+ 		reg = phy_read(phydev, 0x1f);
+@@ -384,6 +377,15 @@
+ 			phy_write(phydev, 0x1e, 0x23e);
+ 			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 6));
+ 
++			phy_write(phydev, 0x1e, 0x23e);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
++
++			phy_write(phydev, 0x1e, 0x21);
++			phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) & ~(2 << 1)) | (1 << 0));
++
++			phy_write(phydev, 0x1e, 0x23e);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
++
+ 			phydev->autoneg = AUTONEG_DISABLE;
+ 			phydev->duplex = DUPLEX_FULL;
+ 			phy_write(phydev, 0x1e, 0x233);

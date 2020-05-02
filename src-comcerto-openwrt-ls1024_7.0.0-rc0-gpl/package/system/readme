@@ -1,0 +1,3 @@
+Changes:
+
+1)fstools/Makefile :Removed the NAND SUPPORT for UBIFS option

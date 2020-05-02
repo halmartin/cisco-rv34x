@@ -1,0 +1,146 @@
+#!/bin/sh
+
+##Rest API: GET /v1/organizations/{organizationId}/policies
+#This API gets list of policies belongs to an organization identified by organizationId.
+##Command:
+#curl -X GET https://management.api.umbrella.com/v1/organizations/2251171/policies --user 'e2ca354f65c24068afac72758669e061:a7eb4ef43e2a48229ce87add8b8e98e0'
+##Output:
+#[{"createdAt":"2017-03-24T00:15:18.000Z","policyId":661379,"name":"Default Policy","organizationId":2251171,"priority":0,"isDefault":true}]
+
+. /usr/share/libubox/jshn.sh
+
+#logger -t rpc-testing "Called $0 with args: $@" 
+
+RPC_OUTPUT=/tmp/odns_device_output
+RPC_DEBUG=/tmp/odns_debug_output
+CURL="/usr/bin/curl"
+
+key=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "key") {print $(I+1)};}'`
+secret=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "secret") {print $(I+1)};}'`
+ca=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "ca") {print $(I+1)};}'`
+
+org_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "organization-id") {print $(I+1)};}'`
+
+[ -z "$key" ] && {
+	key=$(uci get umbrella.netdev_config_0.key)
+}
+
+[ -z "$secret" ] && {
+	secret=$(uci get umbrella.netdev_config_0.secret)
+}
+
+#Error Codes
+ODNS_SUCCESS=0
+ODNS_FAILURE=1
+errcode=$ODNS_SUCCESS
+
+#clear the old contents of the debug file
+echo -n "" > $RPC_DEBUG
+echo "$0: key=$key secret=$secret ca=$ca orgid=$org_id " > $RPC_DEBUG
+echo "no. of argument:" $# >> $RPC_DEBUG
+
+#validating the input arguments
+if [ -z $org_id ];then
+    echo "not-ok __BEGIN error-code 1 error-message \"organization-id is missing\" not-ok __END"
+    exit 0
+elif [ -z $key ] || [ -z $secret ];then
+    echo "not-ok __BEGIN error-code 1 error-message \"key & secret is missing\" not-ok __END"
+    exit 0
+fi
+
+
+#Athentication Credentials
+KEY="$key:$secret"
+URL="https://management.api.umbrella.com/v1/organizations/$org_id"
+
+get_policies ()
+{
+#	local __tmp=$(curl -k -X GET https://management.api.umbrella.com/v1/organizations/2251171/policies --user 'e2ca354f65c24068afac72758669e061:a7eb4ef43e2a48229ce87add8b8e98e0' 2>/dev/null)
+
+	#[ "$(cat "$RPC_OUTPUT")" == "" ] && {
+	#	echo "not-ok __BEGIN error-code 1 error-message \"Network Error\" not-ok __END"
+	#	return 0
+	#}
+
+	isAuthFailure=$(cat $RPC_OUTPUT | grep message)
+	isFailure=$(cat $RPC_OUTPUT | grep error)
+
+	if [ -n "$isAuthFailure" ]
+	then
+		#Failure case 403
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		#json_get_keys __keys
+		#echo "keys: $__keys"
+
+		json_get_var message message
+
+ 		echo "not-ok __BEGIN error-code 403 error-message \"$message\" not-ok __END"
+	elif [ -n "$isFailure" ]
+	then
+		#Failure case
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_get_var statusCode statusCode
+		json_get_var error error
+		json_get_var txId txId
+
+		echo "not-ok __BEGIN error-code $statusCode error-message \"$error\" tx-id \"$txId\" not-ok __END"
+	else
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		__tmp="{\"__policies\":$__tmp}"
+		#echo "Final Json for Parsing: $__tmp"
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_select "__policies"
+		local Index="1"
+
+		echo "success-code 200"
+
+		while json_get_type type $Index && [ "$type" = object ]; do
+			json_select "$((Index++))"
+			json_get_keys __keys
+			#       echo $__keys  #sample output: createdAt policyId name organizationId priority isDefault isDirectlyApplied
+
+			json_get_var policyId policyId 
+			json_get_var organizationId organizationId
+			json_get_var name name
+			json_get_var priority priority
+			json_get_var isDefault isDefault
+			json_get_var createdAt createdAt
+
+			if [ "$isDefault" == 1 ] 
+			then
+				isDefault=true
+			else
+				isDefault=false
+			fi
+
+			echo "policies __BEGIN policy-id \"$policyId\" organization-id \"$organizationId\" name \"$name\" priority \"$priority\" is-default \"$isDefault\" created-at \"$createdAt\" policies  __END"  
+
+			json_select ".."
+		done
+
+		json_select ".."
+	fi
+}
+
+$CURL $URL/policies -X GET --user $KEY -k 2>/dev/null > $RPC_OUTPUT
+[ "$?" != "0" ] && {
+  echo "not-ok __BEGIN error-code 1 error-message \"Network Error\" not-ok __END"
+  exit 0
+}
+
+#calling get_policies
+get_policies
+
+exit 0

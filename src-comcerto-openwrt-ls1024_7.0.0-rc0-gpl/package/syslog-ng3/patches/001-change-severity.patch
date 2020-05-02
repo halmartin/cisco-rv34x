@@ -1,0 +1,17 @@
+--- syslog-ng-3.0.5_Orig/src/syslog-names.c	2015-11-01 12:19:48.756027401 +0530
++++ syslog-ng-3.0.5/src/syslog-names.c	2015-11-01 12:22:53.605695642 +0530
+@@ -26,11 +26,11 @@
+ #include <string.h>
+ 
+ struct sl_name sl_levels[] = {
+-  {"emerg", LOG_EMERG},
++  {"emergency", LOG_EMERG},
+   {"panic", LOG_EMERG},		/* DEPRECATED */
+   {"alert", LOG_ALERT},
+-  {"crit", LOG_CRIT},
+-  {"err", LOG_ERR},
++  {"critical", LOG_CRIT},
++  {"error", LOG_ERR},
+   {"error", LOG_ERR},		/* DEPRECATED */
+   {"warning", LOG_WARNING},
+   {"warn", LOG_WARNING},	/* DEPRECATED */

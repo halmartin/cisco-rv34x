@@ -1,0 +1,40 @@
+From 9f91839c96a1986f589f1ba409e3c11f00c96d5a Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Mon, 5 Oct 2015 13:34:52 +0530
+Subject: [PATCH 19/60] SBR-92
+
+Updated File Header Information String
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ commands/imageenv.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/commands/imageenv.c b/commands/imageenv.c
+index 90780ef..df68dc4 100644
+--- a/commands/imageenv.c
++++ b/commands/imageenv.c
+@@ -1,5 +1,7 @@
+ /*
+- * Copyright (c) 2007 Sascha Hauer <s.hauer@pengutronix.de>, Pengutronix
++ * Copyright (c) 2015 Vinaykumar Masane-B47602 <vinaykumar.masane@freescale>,
++ * Koneti Nagesh-B47094 <nagesh.koneti@freescale.com> 
++ * Freescale Semicondunctors Pvt. Ltd.
+  *
+  * See file CREDITS for list of people who contributed to this
+  * project.
+@@ -20,9 +22,10 @@
+ 
+ /**
+  * @file
+- * @brief Concatenate files to stdout command
++ * @brief imageenv: Read and Export active image partition for bootup
+  */
+ 
++
+ #include <common.h>
+ #include <command.h>
+ #include <fs.h>
+-- 
+2.7.4
+

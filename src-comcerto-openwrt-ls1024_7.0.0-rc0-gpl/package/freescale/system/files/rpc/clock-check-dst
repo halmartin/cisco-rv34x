@@ -1,0 +1,283 @@
+#!/bin/sh
+
+# Parse all the parameter
+
+errocode=1
+errstring="Failed"
+
+recurring_mode=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "recurring") {print $(I+1)};}'`
+offset=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "saving-offset") {print $(I+1)};}'`
+year=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "year") {print $(I+1)};}'`
+
+start_month=`echo $@ | awk '{
+                                        for (I=1;I<=NF;I=I+2) 
+                                        {
+                                                if ($I == "start-date") 
+                                                {
+                                                        if ($(I+1) == "__BEGIN") {
+                                                                for (J=I+2;J<=NF;J=J+2) {
+                                                                        if ($J == "month") {
+                                                                                {print $(J+1)};
+                                                                                break;
+                                                                        }
+                                                                        if ($J == "start-date") {
+                                                                                if ($(J+1) == "__END") {
+                                                                                        break;
+                                                                                }
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                    }'`
+
+
+start_day=`echo $@ | awk '{
+                                        for (I=1;I<=NF;I=I+2) 
+                                        {
+                                                if ($I == "start-date") 
+                                                {
+                                                        if ($(I+1) == "__BEGIN") {
+                                                                for (J=I+2;J<=NF;J=J+2) {
+                                                                        if ($J == "day") {
+                                                                                {print $(J+1)};
+                                                                                break;
+                                                                        }
+                                                                        if ($J == "start-date") {
+                                                                                if ($(J+1) == "__END") {
+                                                                                        break;
+                                                                                }
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                    }'`
+
+start_time=`echo $@ | awk '{
+                                        for (I=1;I<=NF;I=I+2) 
+                                        {
+                                                if ($I == "start-date") 
+                                                {
+                                                        if ($(I+1) == "__BEGIN") {
+                                                                for (J=I+2;J<=NF;J=J+2) {
+                                                                        if ($J == "time") {
+                                                                                {print $(J+1)};
+                                                                                break;
+                                                                        }
+                                                                        if ($J == "start-date") {
+                                                                                if ($(J+1) == "__END") {
+                                                                                        break;
+                                                                                }
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                    }'`
+
+
+end_month=`echo $@ | awk '{
+                                        for (I=1;I<=NF;I=I+2) 
+                                        {
+                                                if ($I == "end-date") 
+                                                {
+                                                        if ($(I+1) == "__BEGIN") {
+                                                                for (J=I+2;J<=NF;J=J+2) {
+                                                                        if ($J == "month") {
+                                                                                {print $(J+1)};
+                                                                                break;
+                                                                        }
+                                                                        if ($J == "end-date") {
+                                                                                if ($(J+1) == "__END") {
+                                                                                        break;
+                                                                                }
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                    }'`
+
+
+end_day=`echo $@ | awk '{
+                                        for (I=1;I<=NF;I=I+2) 
+                                        {
+                                                if ($I == "end-date") 
+                                                {
+                                                        if ($(I+1) == "__BEGIN") {
+                                                                for (J=I+2;J<=NF;J=J+2) {
+                                                                        if ($J == "day") {
+                                                                                {print $(J+1)};
+                                                                                break;
+                                                                        }
+                                                                        if ($J == "end-date") {
+                                                                                if ($(J+1) == "__END") {
+                                                                                        break;
+                                                                                }
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                    }'`
+
+end_time=`echo $@ | awk '{
+                                        for (I=1;I<=NF;I=I+2) 
+                                        {
+                                                if ($I == "end-date") 
+                                                {
+                                                        if ($(I+1) == "__BEGIN") {
+                                                                for (J=I+2;J<=NF;J=J+2) {
+                                                                        if ($J == "time") {
+                                                                                {print $(J+1)};
+                                                                                break;
+                                                                        }
+                                                                        if ($J == "end-date") {
+                                                                                if ($(J+1) == "__END") {
+                                                                                        break;
+                                                                                }
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                    }'`
+
+
+if [ "$recurring_mode" = "true" ];then
+	start_week=`echo $@ | awk '{
+                                        for (I=1;I<=NF;I=I+2) 
+                                        {
+                                                if ($I == "start-date") 
+                                                {
+                                                        if ($(I+1) == "__BEGIN") {
+                                                                for (J=I+2;J<=NF;J=J+2) {
+                                                                        if ($J == "week") {
+                                                                                {print $(J+1)};
+                                                                                break;
+                                                                        }
+                                                                        if ($J == "start-date") {
+                                                                                if ($(J+1) == "__END") {
+                                                                                        break;
+                                                                                }
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                    }'`
+	start_week_day=`echo $@ | awk '{
+                                        for (I=1;I<=NF;I=I+2) 
+                                        {
+                                                if ($I == "start-date") 
+                                                {
+                                                        if ($(I+1) == "__BEGIN") {
+                                                                for (J=I+2;J<=NF;J=J+2) {
+                                                                        if ($J == "week-day") {
+                                                                                {print $(J+1)};
+                                                                                break;
+                                                                        }
+                                                                        if ($J == "start-date") {
+                                                                                if ($(J+1) == "__END") {
+                                                                                        break;
+                                                                                }
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                    }'`
+
+
+	end_week=`echo $@ | awk '{
+                                        for (I=1;I<=NF;I=I+2) 
+                                        {
+                                                if ($I == "end-date") 
+                                                {
+                                                        if ($(I+1) == "__BEGIN") {
+                                                                for (J=I+2;J<=NF;J=J+2) {
+                                                                        if ($J == "week") {
+                                                                                {print $(J+1)};
+                                                                                break;
+                                                                        }
+                                                                        if ($J == "end-date") {
+                                                                                if ($(J+1) == "__END") {
+                                                                                        break;
+                                                                                }
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                    }'`
+
+	end_week_day=`echo $@ | awk '{
+                                        for (I=1;I<=NF;I=I+2) 
+                                        {
+                                                if ($I == "end-date") 
+                                                {
+                                                        if ($(I+1) == "__BEGIN") {
+                                                                for (J=I+2;J<=NF;J=J+2) {
+                                                                        if ($J == "week-day") {
+                                                                                {print $(J+1)};
+                                                                                break;
+                                                                        }
+                                                                        if ($J == "end-date") {
+                                                                                if ($(J+1) == "__END") {
+                                                                                        break;
+                                                                                }
+                                                                        }
+                                                                }
+                                                        }
+                                                }
+                                        }
+                                    }'`
+fi
+
+start_hour=`echo $start_time | cut -d : -f 1`
+start_min=`echo $start_time | cut -d : -f 2`
+end_hour=`echo $end_time | cut -d : -f 1`
+end_min=`echo $end_time | cut -d : -f 2`
+
+get_weekday () {
+	week_day=$1
+	case "$week_day" in
+		    Sun) day=0 ;;
+		    Mon) day=1 ;;
+		    Tue) day=2 ;;
+		    Wed) day=3 ;;
+		    Thu) day=4 ;;
+		    Fri) day=5 ;;
+		    Sat) day=6 ;;
+		    Sun) day=7 ;;
+       esac
+       return $day	
+}
+
+if [ "$recurring_mode" = "true" ];then
+	get_weekday $start_week_day
+	start_day=$?
+
+	get_weekday $end_week_day
+	end_day=$?
+
+	/usr/bin/check_dsttime Recurring $year $start_month $start_week $start_day $start_hour $start_min $end_month $end_week $end_day $end_hour $end_min $offset
+	errcode=$?
+	[ "$errcode" -eq 0 ] && {
+		errstring="Success"
+	}
+else
+	/usr/bin/check_dsttime Julian $year $start_month $start_day $start_hour $start_min $end_month $end_day $end_hour $end_min $offset
+	errcode=$?
+	[ "$errcode" -eq 0 ] && {
+		errstring="Success"
+	}
+fi
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message $errstring"
+	exit 1
+else
+	exit 0
+fi

@@ -1,0 +1,374 @@
+From abf93a27287db799a836de25f0ecd19cfc995f4e Mon Sep 17 00:00:00 2001
+From: Madhu Koriginja <madhu.koriginja@freescale.com>
+Date: Thu, 9 Feb 2017 12:32:57 +0530
+Subject: [PATCH 2/4] DNCPE-415: LS1024 power management support addition
+
+Adding power management support for LS1024 platform. As of now
+PMUTIMER is disabled. This will be enabled later.
+Corresponding SDK stash patch link:
+http://sw-stash.freescale.net/projects/DNCPE/repos/sdk-openwrt/pull-requests/525/overview
+---
+ arch/arm/kernel/sleep.S             |   63 +++++++++++++++++++++++++++++++++++
+ arch/arm/mach-comcerto/pcie-c2000.c |    4 ++-
+ drivers/base/power/main.c           |    5 +++
+ drivers/char/Kconfig                |    8 ++++
+ drivers/char/Makefile               |    1 +
+ drivers/net/phy/phy_device.c        |   27 ++++++++++++++-
+ drivers/usb/core/usb.c              |    7 +++-
+ drivers/usb/host/xhci.h             |    2 +
+ kernel/power/main.c                 |   28 +++++++++++++++
+ kernel/power/suspend.c              |   16 ++++++++-
+ 10 files changed, 154 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/kernel/sleep.S b/arch/arm/kernel/sleep.S
+index 7d37bfc..69b6602 100644
+--- a/arch/arm/kernel/sleep.S
++++ b/arch/arm/kernel/sleep.S
+@@ -4,6 +4,13 @@
+ #include <asm/assembler.h>
+ #include <asm/glue-cache.h>
+ #include <asm/glue-proc.h>
++
++#ifdef CONFIG_ARCH_M86XXX
++/* 
++ * IRAM Location to restore the banked registers
++ */
++#define SCRATCHPAD_CPU_CONTEXT_LOC_DBG	 (0xf0802570)
++#endif
+ 	.text
+ 
+ /*
+@@ -112,10 +119,66 @@ ENDPROC(cpu_resume_mmu)
+ 	.popsection
+ cpu_resume_after_mmu:
+ 	bl	cpu_init		@ restore the und/abt/irq banked regs
++
++#ifdef CONFIG_ARCH_M86XXX
++	/* 
++	 * This code is added to restore the banked registers
++	 * This restore has to be kept here as it has to happen 
++	 * after MMU int.
++	 */
++
++	/* Restore cpsr and spsr */
++        ldr 	r7, scratchpad_cpu_context_loc_dbg
++
++	/* Restoring all the banked registers */
++        mrs     r0, cpsr
++
++        /* Restore the Undef mode reisters */
++        bic     r1, r0, #0x1f
++        orr     r1, r1, #0x1b
++        msr     cpsr_c, r1
++	ARM ( ldmia	r7!, {r13-r14} )
++	ldmia	r7!, {r6}
++	msr	spsr, r6
++
++        /* Restore the Abort mode reisters */
++        bic     r1, r0, #0x1f
++        orr     r1, r1, #0x17
++        msr     cpsr_c, r1
++	ARM ( ldmia	r7!, {r13-r14} )
++	ldmia	r7!, {r6}
++	msr	spsr, r6
++
++        /* Restore the IRQ mode reisters */
++        bic     r1, r0, #0x1f
++        orr     r1, r1, #0x12
++        msr     cpsr_c, r1
++	ARM ( ldmia	r7!, {r13-r14} )
++	ldmia	r7!, {r6}
++	msr	spsr, r6
++
++        /* Restore the FIQ mode reisters */
++        bic     r1, r0, #0x1f
++        orr     r1, r1, #0x11
++        msr     cpsr_c, r1
++	ARM ( ldmia	r7!, {r8-r14} )
++	THUMB ( ldmia	r7!, {r8-r12} )
++	ldmia	r7!, {r6}
++	msr	spsr, r6
++
++        /* Return to the original mode */
++        msr     cpsr_c, r0
++#endif
+ 	mov	r0, #0			@ return zero on success
+ 	ldmfd	sp!, {r4 - r11, pc}
+ ENDPROC(cpu_resume_after_mmu)
+ 
++
++#ifdef CONFIG_ARCH_M86XXX
++scratchpad_cpu_context_loc_dbg:
++        .word   SCRATCHPAD_CPU_CONTEXT_LOC_DBG
++#endif
++
+ 	.text
+ 	.align
+ ENTRY(cpu_resume)
+diff --git a/arch/arm/mach-comcerto/pcie-c2000.c b/arch/arm/mach-comcerto/pcie-c2000.c
+index c100c3f..b63f7a5 100644
+--- a/arch/arm/mach-comcerto/pcie-c2000.c
++++ b/arch/arm/mach-comcerto/pcie-c2000.c
+@@ -43,7 +43,9 @@
+ #include <mach/serdes-c2000.h>
+ #include <mach/reset.h>
+ #include <mach/hardware.h>
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
+ #include <linux/irqchip/chained_irq.h>
++#endif
+ #include <linux/platform_device.h>
+ #include <linux/clk.h>
+ #include <mach/comcerto-2000/pm.h>
+@@ -1563,7 +1565,7 @@ static ssize_t comcerto_pcie_serdes_pd(struct device *dev, struct device_attribu
+ 	return count;
+ }
+ 
+-static DEVICE_ATTR(serdes_pd, 0644, NULL, comcerto_pcie_serdes_pd);
++static DEVICE_ATTR(serdes_pd, 0644, comcerto_pcie_show_reset, comcerto_pcie_serdes_pd);
+ 
+ 
+ #ifdef CONFIG_PM
+diff --git a/drivers/base/power/main.c b/drivers/base/power/main.c
+index 137a77d..9edf593 100644
+--- a/drivers/base/power/main.c
++++ b/drivers/base/power/main.c
+@@ -17,6 +17,7 @@
+  * subsystem list maintains.
+  */
+ 
++#include <linux/version.h>
+ #include <linux/device.h>
+ #include <linux/kallsyms.h>
+ #include <linux/export.h>
+@@ -1726,7 +1727,11 @@ void dpm_manual_resume(struct device *dev,pm_message_t state)
+ 	/* Device resume prepare starts here */
+ 	mutex_lock(&dpm_list_mtx);
+         pm_transition = state;
++#if LINUX_VERSION_CODE < KERNEL_VERSION(3,13,0)
+ 	INIT_COMPLETION(dev->power.completion);
++#else
++	reinit_completion(&dev->power.completion);
++#endif
+ 	mutex_unlock(&dpm_list_mtx);
+ 
+ 	error = device_resume(dev, state, false);
+diff --git a/drivers/char/Kconfig b/drivers/char/Kconfig
+index 50bac53..457ec11 100644
+--- a/drivers/char/Kconfig
++++ b/drivers/char/Kconfig
+@@ -599,6 +599,14 @@ config UV_MMTIMER
+ 	  The uv_mmtimer device allows direct userspace access to the
+ 	  UV system timer.
+ 
++config PMUTIMER
++	tristate "PMUTIMER Timer for C2000 PMU"
++    depends on ARCH_COMCERTO
++	default y
++	help
++	  PMUTIMER is a dedicated timer service for C2000 platform which work with sleep and hibernation mode.
++
++
+ source "drivers/char/tpm/Kconfig"
+ 
+ config TELCLOCK
+diff --git a/drivers/char/Makefile b/drivers/char/Makefile
+index 5979cc3..6f82b17 100644
+--- a/drivers/char/Makefile
++++ b/drivers/char/Makefile
+@@ -13,6 +13,7 @@ obj-$(CONFIG_MSM_SMD_PKT)	+= msm_smd_pkt.o
+ obj-$(CONFIG_MSPEC)		+= mspec.o
+ obj-$(CONFIG_MMTIMER)		+= mmtimer.o
+ obj-$(CONFIG_UV_MMTIMER)	+= uv_mmtimer.o
++#obj-$(CONFIG_PMUTIMER)		+= pmutimer.o
+ obj-$(CONFIG_IBM_BSR)		+= bsr.o
+ obj-$(CONFIG_SGI_MBCS)		+= mbcs.o
+ obj-$(CONFIG_COMCERTO_OTP)	+= comcerto_otp.o
+diff --git a/drivers/net/phy/phy_device.c b/drivers/net/phy/phy_device.c
+index d551df6..55502b9 100644
+--- a/drivers/net/phy/phy_device.c
++++ b/drivers/net/phy/phy_device.c
+@@ -36,6 +36,9 @@
+ #include <linux/of.h>
+ 
+ #include <asm/irq.h>
++#ifdef CONFIG_ARCH_M86XXX
++#include <mach/comcerto-2000/pm.h>
++#endif
+ 
+ MODULE_DESCRIPTION("PHY library");
+ MODULE_AUTHOR("Andy Fleming");
+@@ -1160,7 +1163,17 @@ static int gen10g_config_init(struct phy_device *phydev)
+ int genphy_suspend(struct phy_device *phydev)
+ {
+ 	int value;
+-
++#ifdef CONFIG_ARCH_M86XXX
++	/* Check for the Bit_Mask bit for WoL, if it is enabled
++	 * then we are not going suspend the WoL device , as by
++	 * this device , we will wake from System Resume.
++	 */
++	if ( !(host_utilpe_shared_pmu_bitmask & WOL_IRQ )){
++		/* We will just return
++		 */
++		return 0;
++	}
++#endif
+ 	mutex_lock(&phydev->lock);
+ 
+ 	value = phy_read(phydev, MII_BMCR);
+@@ -1180,7 +1193,17 @@ static int gen10g_suspend(struct phy_device *phydev)
+ int genphy_resume(struct phy_device *phydev)
+ {
+ 	int value;
+-
++#ifdef CONFIG_ARCH_M86XXX
++	/* Check for the Bit_Mask bit for WoL, if it is enabled
++	 * then we are not going suspend the WoL device , as by
++	 * this device , we will wake from System Resume.
++	 */
++	if ( !(host_utilpe_shared_pmu_bitmask & WOL_IRQ )){
++		/* We will just return
++		 */
++		return 0;
++	}
++#endif
+ 	mutex_lock(&phydev->lock);
+ 
+ 	value = phy_read(phydev, MII_BMCR);
+diff --git a/drivers/usb/core/usb.c b/drivers/usb/core/usb.c
+index 8d5b2f4..72b96d3 100644
+--- a/drivers/usb/core/usb.c
++++ b/drivers/usb/core/usb.c
+@@ -66,8 +66,11 @@ int usb_disabled(void)
+ EXPORT_SYMBOL_GPL(usb_disabled);
+ 
+ #ifdef	CONFIG_PM
+-static int usb_autosuspend_delay = 2;		/* Default delay value,
+-						 * in seconds */
++#ifdef	CONFIG_ARCH_M86XXX
++static int usb_autosuspend_delay = -1;		/* Auto suspend disabled. If Autosuspend enabled it is not working. */
++#else
++static int usb_autosuspend_delay = 2;		/* Default delay value in seconds */
++#endif
+ module_param_named(autosuspend, usb_autosuspend_delay, int, 0644);
+ MODULE_PARM_DESC(autosuspend, "default autosuspend delay");
+ 
+diff --git a/drivers/usb/host/xhci.h b/drivers/usb/host/xhci.h
+index 0f26dd2..d5a09cb 100644
+--- a/drivers/usb/host/xhci.h
++++ b/drivers/usb/host/xhci.h
+@@ -1861,6 +1861,8 @@ int xhci_find_raw_port_number(struct usb_hcd *hcd, int port1);
+ #ifdef CONFIG_PM
+ int xhci_bus_suspend(struct usb_hcd *hcd);
+ int xhci_bus_resume(struct usb_hcd *hcd);
++int comcerto_xhci_bus_suspend(struct usb_hcd *hcd);
++int comcerto_xhci_bus_resume(struct usb_hcd *hcd);
+ #else
+ #define	xhci_bus_suspend	NULL
+ #define	xhci_bus_resume		NULL
+diff --git a/kernel/power/main.c b/kernel/power/main.c
+index 86e8157..3564808 100644
+--- a/kernel/power/main.c
++++ b/kernel/power/main.c
+@@ -15,6 +15,9 @@
+ #include <linux/workqueue.h>
+ #include <linux/debugfs.h>
+ #include <linux/seq_file.h>
++#ifdef CONFIG_ARCH_M86XXX
++#include <mach/comcerto-2000/pm.h>
++#endif
+ 
+ #include "power.h"
+ 
+@@ -365,6 +368,28 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
+ 
+ power_attr(state);
+ 
++#ifdef CONFIG_ARCH_M86XXX
++static ssize_t bitmask_show(struct kobject *kobj, struct kobj_attribute *attr,
++			char *buf)
++{
++	unsigned int value=c2k_pm_bitmask_show();
++	return sprintf(buf,"%02x\n",value);
++
++}
++
++static ssize_t bitmask_store(struct kobject *kobj, struct kobj_attribute *attr,
++			   const char *buf, size_t n)
++{
++	unsigned long value;
++	value=simple_strtoul(buf,NULL,16);
++	/* Store the Bitmask value in the Global Variable */
++	c2k_pm_bitmask_store(value);
++	return n;
++
++}
++power_attr(bitmask);
++#endif
++
+ #ifdef CONFIG_PM_SLEEP
+ /*
+  * The 'wakeup_count' attribute, along with the functions defined in
+@@ -585,6 +610,9 @@ power_attr(pm_freeze_timeout);
+ 
+ static struct attribute * g[] = {
+ 	&state_attr.attr,
++#ifdef CONFIG_ARCH_M86XXX
++	&bitmask_attr.attr,
++#endif
+ #ifdef CONFIG_PM_TRACE
+ 	&pm_trace_attr.attr,
+ 	&pm_trace_dev_match_attr.attr,
+diff --git a/kernel/power/suspend.c b/kernel/power/suspend.c
+index 8d7a1ef..4763d40 100644
+--- a/kernel/power/suspend.c
++++ b/kernel/power/suspend.c
+@@ -31,6 +31,9 @@
+ #include <linux/moduleparam.h>
+ 
+ #include "power.h"
++#ifdef CONFIG_ARCH_M86XXX
++#include <mach/comcerto-2000/pm.h>
++#endif
+ 
+ const char *pm_labels[] = { "mem", "standby", "freeze", NULL };
+ const char *pm_states[PM_SUSPEND_MAX];
+@@ -355,8 +358,12 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
+ 
+ 	arch_suspend_disable_irqs();
+ 	BUG_ON(!irqs_disabled());
+-
++#ifndef CONFIG_ARCH_M86XXX
++	/* FIXME syscore suspend/resume is not working for HGW build */
+ 	error = syscore_suspend();
++#else
++	error = 0;
++#endif
+ 	if (!error) {
+ 		*wakeup = pm_wakeup_pending();
+ 		if (!(suspend_test(TEST_CORE) || *wakeup)) {
+@@ -367,7 +374,9 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
+ 				state, false);
+ 			events_check_enabled = false;
+ 		}
++#ifndef CONFIG_ARCH_M86XXX
+ 		syscore_resume();
++#endif
+ 	}
+ 
+ 	arch_suspend_enable_irqs();
+@@ -407,7 +416,10 @@ int suspend_devices_and_enter(suspend_state_t state)
+ 	if (error)
+ 		goto Close;
+ 
+-	suspend_console();
++#ifdef CONFIG_ARCH_M86XXX
++	if ( host_utilpe_shared_pmu_bitmask & DUS_UART0UARTS2_IRQ)
++#endif
++		suspend_console();
+ 	suspend_test_start();
+ 	error = dpm_suspend_start(PMSG_SUSPEND);
+ 	if (error) {
+-- 
+1.7.7.4
+

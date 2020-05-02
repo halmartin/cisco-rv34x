@@ -1,0 +1,117 @@
+From 302608b8db35e061641319c620e5e01593b32b17 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy K <ganeshreddy@freescale.com>
+Date: Tue, 14 Jul 2015 21:48:13 +0530
+Subject: [PATCH 06/60] CMD_BOARDINFO selection errors for RV340
+
+ enabled this in rv340 config files only.
+---
+ arch/arm/configs/comcerto-2k_mfcnevm_defconfig              | 1 +
+ arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig        | 1 +
+ arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig | 1 +
+ arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig      | 1 +
+ arch/arm/configs/comcerto-2k_rv340_defconfig                | 1 +
+ arch/arm/configs/comcerto-2k_rv340_diags_defconfig          | 1 +
+ arch/arm/configs/comcerto-2k_rv340_uloader_defconfig        | 1 +
+ commands/Kconfig                                            | 2 +-
+ 8 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_defconfig
+index 5b1d993..4c09ed0 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_defconfig
+@@ -197,6 +197,7 @@ CONFIG_CMD_UMOUNT=y
+ CONFIG_CMD_NAND=y
+ CONFIG_CMD_NOR=y
+ CONFIG_CMD_COPY=y
++# CONFIG_CMD_BOARDINFO is not set
+ 
+ #
+ # console
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig
+index 9e5d1ac..626e3ea 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig
+@@ -250,6 +250,7 @@ CONFIG_CMD_UMOUNT=y
+ CONFIG_CMD_NAND=y
+ CONFIG_CMD_NOR=y
+ CONFIG_CMD_COPY=y
++# CONFIG_CMD_BOARDINFO is not set
+ 
+ #
+ # console
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig
+index 584da50..53e146d 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig
+@@ -191,6 +191,7 @@ CONFIG_CONSOLE_ACTIVATE_FIRST=y
+ # CONFIG_CMD_NAND is not set
+ # CONFIG_CMD_NOR is not set
+ # CONFIG_CMD_COPY is not set
++# CONFIG_CMD_BOARDINFO is not set
+ 
+ #
+ # console
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig
+index c84d516..a689853 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig
+@@ -188,6 +188,7 @@ CONFIG_COMMAND_SUPPORT=y
+ # CONFIG_CMD_UMOUNT is not set
+ # CONFIG_CMD_NOR is not set
+ # CONFIG_CMD_COPY is not set
++# CONFIG_CMD_BOARDINFO is not set
+ 
+ #
+ # console
+diff --git a/arch/arm/configs/comcerto-2k_rv340_defconfig b/arch/arm/configs/comcerto-2k_rv340_defconfig
+index 0e775d4..80a7592 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_defconfig
+@@ -205,6 +205,7 @@ CONFIG_CMD_NOR=y
+ CONFIG_CMD_UPDATE_SPI=y
+ CONFIG_CMD_UPDATE_FAST_SPI=y
+ CONFIG_CMD_COPY=y
++CONFIG_CMD_BOARDINFO=y
+ 
+ #
+ # console                       
+diff --git a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+index a91f45c..56b14ae 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+@@ -245,6 +245,7 @@ CONFIG_CMD_NOR=y
+ CONFIG_CMD_UPDATE_SPI=y
+ CONFIG_CMD_UPDATE_FAST_SPI=y
+ CONFIG_CMD_COPY=y
++CONFIG_CMD_BOARDINFO=y
+ 
+ #
+ # console                       
+diff --git a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+index 40bb04a..f1c0276 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+@@ -193,6 +193,7 @@ CONFIG_COMMAND_SUPPORT=y
+ # CONFIG_CMD_UPDATE_SPI is not set
+ # CONFIG_CMD_UPDATE_FAST_SPI is not set
+ # CONFIG_CMD_COPY is not set
++# CONFIG_CMD_BOARDINFO is not set
+ 
+ #
+ # console                       
+diff --git a/commands/Kconfig b/commands/Kconfig
+index 4c13381..9a67f52 100644
+--- a/commands/Kconfig
++++ b/commands/Kconfig
+@@ -170,7 +170,7 @@ config CMD_COPY
+ config CMD_BOARDINFO
+ 	bool
+ 	prompt "RV340 boardinfo"
+-	default y
++	default n
+ 	help
+ 	  This command allows to update and show RV340 Board Specfic Information.
+ 
+-- 
+2.7.4
+

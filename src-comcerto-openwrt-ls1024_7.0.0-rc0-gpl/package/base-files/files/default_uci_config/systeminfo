@@ -1,0 +1,11 @@
+
+config system_profile 'sysinfo'
+	option vid 'V01'
+	option pid 'RV340W-A-K9'
+	option prod_desc 'RV340W Dual WAN Gigabit VPN Router with Wireless'
+	option prod_series 'RV300 Series'
+	option serial_number '0123456711N'
+	option maclan '00:88:77:66:54:55'
+	option macwan1 '00:88:77:88:77:51'
+	option macwan2 '00:89:77:98:89:11'
+

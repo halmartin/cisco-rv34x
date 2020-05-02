@@ -1,0 +1,69 @@
+From e02e827ec12f1ac48614aa14d9bc38ae63810c74 Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Tue, 8 May 2018 14:20:22 +0530
+Subject: [PATCH] Support for IPSec on PPTP/L2TP WAN connection types
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ net/key/af_key.c | 38 +++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/net/key/af_key.c b/net/key/af_key.c
+index 02d1593..4ef04cb 100644
+--- a/net/key/af_key.c
++++ b/net/key/af_key.c
+@@ -4180,6 +4180,8 @@ static struct sk_buff * ipsec_xfrm2nlkey (struct net *net, struct xfrm_state *x,
+ 	struct nlmsghdr *nlh = NULL;
+ 	gfp_t allocation = GFP_ATOMIC; //This may called from atomic context
+ 	unsigned char tunnel, keys, natt, state, lifetime;
++	struct rtable *rt;
++	struct flowi4 fl4;
+ 
+ 	/* supported SA informations */
+ 	keys = 1; state = 1; tunnel = 1; lifetime = 1; natt = 1; 
+@@ -4200,7 +4202,41 @@ static struct sk_buff * ipsec_xfrm2nlkey (struct net *net, struct xfrm_state *x,
+ 					printk(KERN_ERR "ipsec_xfrm2nlkey: protocol %d not supported\n", x->id.proto);
+ 					*msg_id = NLKEY_NULL_MSG;
+ 					goto exit;
+-				}	
++
++				}
++				fl4.daddr = x->id.daddr.a4;
++				fl4.saddr = x->props.saddr.a4;
++				fl4.flowi4_tos = 0;
++				fl4.flowi4_oif = 0;
++				fl4.flowi4_mark = 0x20;
++				rt = ip_route_output_key(net, &fl4);
++				if (!IS_ERR(rt)) {
++					if ((!strncmp(rt->dst.dev->name,"l2tp", 4)|| !strncmp(rt->dst.dev->name,"pptp", 4))) {
++						//printk(KERN_INFO "Dst is l2tp/pptp iface %s, no sa offload daddr:%x\n",\
++							rt->dst.dev->name, x->id.daddr.a4);
++						*msg_id = NLKEY_NULL_MSG; /* next message */
++							ip_rt_put(rt);
++						goto exit;
++						}
++					ip_rt_put(rt);
++				}
++				fl4.daddr = x->props.saddr.a4;
++				fl4.saddr = x->id.daddr.a4;
++				fl4.flowi4_tos = 0;
++				fl4.flowi4_oif = 0;
++				fl4.flowi4_mark = 0x20;
++				rt = ip_route_output_key(net, &fl4);
++				if (!IS_ERR(rt)) {
++					if ((!strncmp(rt->dst.dev->name,"l2tp", 4)|| !strncmp(rt->dst.dev->name,"pptp", 4))) {
++						//printk(KERN_INFO "Src is l2tp/pptp if %s, no sa offload daddr:%x\n",\
++							rt->dst.dev->name, x->props.saddr.a4);
++						*msg_id = NLKEY_NULL_MSG; /* next message */
++						ip_rt_put(rt);
++						goto exit;
++					}
++					ip_rt_put(rt);
++				}
++
+ 				memset(&sa_create_msg, 0, sizeof(struct nlkey_sa_create));	
+ 
+ 				/* SA global handler */
+-- 
+1.9.1
+

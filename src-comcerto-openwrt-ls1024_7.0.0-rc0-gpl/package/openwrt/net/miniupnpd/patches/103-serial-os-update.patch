@@ -1,0 +1,35 @@
+--- a/genconfig.sh	2016-04-19 12:53:00.473202445 +0530
++++ b/genconfig.sh	2016-04-19 12:53:14.349202246 +0530
+@@ -289,7 +289,9 @@ case $OS_NAME in
+ 		V6SOCKETS_ARE_V6ONLY=`/sbin/sysctl -n net.ipv6.bindv6only`
+ 		;;
+ 	OpenWRT)
+-		OS_URL=http://www.openwrt.org/
++        OS_NAME=Linux
++        OS_VERSION=3.2.54-Linux
++		OS_URL=http://www.cisco.com/
+ 		echo "#define USE_IFACEWATCHER 1" >> ${CONFIGFILE}
+ 		FW=netfilter
+ 		;;
+--- a/upnpglobalvars.h	2016-04-19 12:54:03.485201539 +0530
++++ b/upnpglobalvars.h	2016-04-19 12:54:18.445201320 +0530
+@@ -71,7 +71,7 @@ extern char uuidvalue_igd[];	/* uuid of
+ extern char uuidvalue_wan[];	/* uuid of WAN Device */
+ extern char uuidvalue_wcd[];	/* uuid of WAN Connection Device */
+ 
+-#define SERIALNUMBER_MAX_LEN (10)
++#define SERIALNUMBER_MAX_LEN (12)
+ extern char serialnumber[];
+ 
+ #define MODELNUMBER_MAX_LEN (48)
+--- a/upnpglobalvars.c	2016-04-19 12:53:56.525201637 +0530
++++ b/upnpglobalvars.c	2016-04-19 12:53:37.489201910 +0530
+@@ -43,7 +43,7 @@ const char * pidfilename = "/var/run/min
+ char uuidvalue_igd[] = "uuid:00000000-0000-0000-0000-000000000000";
+ char uuidvalue_wan[] = "uuid:00000000-0000-0000-0000-000000000000";
+ char uuidvalue_wcd[] = "uuid:00000000-0000-0000-0000-000000000000";
+-char serialnumber[SERIALNUMBER_MAX_LEN] = "00000000";
++char serialnumber[SERIALNUMBER_MAX_LEN] = "000000000000";
+ 
+ char modelnumber[MODELNUMBER_MAX_LEN] = "1";
+ 

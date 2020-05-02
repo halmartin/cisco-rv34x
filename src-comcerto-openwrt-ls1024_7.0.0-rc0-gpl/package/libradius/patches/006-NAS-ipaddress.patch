@@ -1,0 +1,29 @@
+diff -aurN a/src/pam_radius_auth.c b/src/pam_radius_auth.c
+--- a/src/pam_radius_auth.c	2016-05-11 20:00:57.006018710 +0530
++++ b/src/pam_radius_auth.c	2016-05-11 19:42:55.718037240 +0530
+@@ -799,6 +799,7 @@
+ 	if ((conf->server->ip.s_addr == ntohl(0x7f000001)) || (!hostname[0])) {
+ 		ipaddr = 0x7f000001;
+ 	} else {
++#if 0
+ 		struct hostent *hp;
+ 
+ 		if ((hp = gethostbyname(hostname)) == (struct hostent *) NULL) {
+@@ -806,6 +807,17 @@
+ 		} else {
+ 			ipaddr = ntohl(*(uint32_t *) hp->h_addr); /* use the first one available */
+ 		}
++#endif /*keeping the old src for just reference*/		
++		struct in_addr ip;
++		FILE *fp;
++		char cmd[100];
++		sprintf(cmd, "ip -4 r g %s | head -n 1 | sed -e \"s/.*src \\([^ ]*\\).*/\\1/\"", strtok(conf->server->hostname, ":"));
++		fp = popen(cmd, "r");
++		char source_ip[20];
++		fscanf(fp, "%s", source_ip);
++		inet_aton(source_ip, &ip);
++		ipaddr = htonl(ip.s_addr);
++		pclose(fp);
+ 	}
+ 
+ 	/* If we can't find an IP address, then don't add one */

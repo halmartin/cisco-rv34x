@@ -1,0 +1,52 @@
+
+config port 'lan1'
+	option name 'lan1'
+	option status 'enable'
+	option eee 'enable'
+	option flow_control 'enable'
+	option mode 'auto'
+
+config port 'lan2'
+	option name 'lan2'
+	option status 'enable'
+	option eee 'enable'
+	option flow_control 'enable'
+	option mode 'auto'
+
+config port 'lan3'
+	option name 'lan3'
+	option status 'enable'
+	option eee 'enable'
+	option flow_control 'enable'
+	option mode 'auto'
+
+config port 'lan4'
+	option name 'lan4'
+	option status 'enable'
+	option eee 'enable'
+	option flow_control 'enable'
+	option mode 'auto'
+
+config lag 'lag1'
+	option state 'down'
+
+config switch_vlan 'vlan1'
+	option vlan '1'
+	option routing 'enable'
+	option ports '1 2 3 4'
+
+config ip_source_guard 'ip_source_guard_0'
+	option status 'disable'
+
+config block_unknown_mac 'block_unknown_mac_0'
+	option status 'disable'
+
+config dot1x 'dot1x_status'
+	option state 'disable'
+
+config switch 'eth3'
+	option enable '1'
+
+config mirror 'mirror_0'
+	option status 'disable'
+

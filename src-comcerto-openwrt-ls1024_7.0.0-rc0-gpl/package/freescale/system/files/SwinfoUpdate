@@ -1,0 +1,11 @@
+#!/bin/sh /etc/rc.common
+
+START=14
+SWUPDATEINFOFILE="/mnt/configcert/config/swupdateinfo"
+
+# Get the active firmware
+active_firmware=`uci get firmware.firminfo.active`
+append_version="_usb_latest_version="
+updated_version=$active_firmware$append_version
+current_driver_version=`cat /etc/usb-modem.ver`
+sed -i "/^$updated_version/ c$updated_version\"$current_driver_version\"" $SWUPDATEINFOFILE

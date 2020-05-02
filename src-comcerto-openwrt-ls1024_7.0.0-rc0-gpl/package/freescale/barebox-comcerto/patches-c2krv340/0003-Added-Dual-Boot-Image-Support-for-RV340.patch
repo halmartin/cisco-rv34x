@@ -1,0 +1,288 @@
+From dc7564df18800841e02d14ffd160d2d78196d325 Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Sat, 4 Jul 2015 10:29:51 +0530
+Subject: [PATCH 03/60] Added Dual Boot Image Support for RV340 Include
+ selective (active/backup) boot, Selectivte (image1/image2) erase/update
+ Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+
+---
+ arch/arm/boards/comcerto-rv340/c2k_rv340.c |  2 +-
+ arch/arm/boards/comcerto-rv340/env/config  | 20 ++++++++++-----
+ defaultenv/bin/_update_help                | 12 ++++-----
+ defaultenv/bin/boot                        | 41 ++++++++++++++++++++++++++++--
+ defaultenv/bin/erase_firmware              | 27 ++++++++++++++++++++
+ defaultenv/bin/recover_fw                  | 32 +++++++++++++++++++++++
+ defaultenv/bin/update                      |  6 ++---
+ defaultenv/bin/update_firmware             | 24 +++++++++++++++++
+ 8 files changed, 145 insertions(+), 19 deletions(-)
+ create mode 100644 defaultenv/bin/erase_firmware
+ create mode 100644 defaultenv/bin/recover_fw
+ create mode 100644 defaultenv/bin/update_firmware
+
+diff --git a/arch/arm/boards/comcerto-rv340/c2k_rv340.c b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+index aecd291..9d23ec1 100644
+--- a/arch/arm/boards/comcerto-rv340/c2k_rv340.c
++++ b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+@@ -56,7 +56,7 @@
+ static struct spi_board_info c2k_spi_dev_1[] = {
+ 	{
+         .name = SPI_FLASH_DEVICE_DRIVER, /* device name */
+-        .max_speed_hz = 5*1000*1000, /* max freq this device can work with */
++        .max_speed_hz = 4*1000*1000, /* max freq this device can work with */
+         .bus_num = SPI_BUS_NUM_1, /* which driver to attach this device to */
+         .chip_select = SPI_CHIP_SELECT_NUM_0, /* which chip select this device is connected to */
+         .mode = SPI_CPOL | SPI_CPHA | SPI_DMA, /* operating modes */
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index 367f5e5..091075d 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -5,9 +5,9 @@
+ ip=none
+ 
+ # or set your networking parameters here
+-eth0.ipaddr=192.168.1.1
+-eth0.netmask=255.255.255.0
+-eth0.serverip=192.168.1.101
++#eth0.ipaddr=192.168.1.1
++#eth0.netmask=255.255.255.0
++#eth0.serverip=192.168.1.101
+ #eth0.gateway=192.168.1.254
+ eth0.ethaddr=00:0A:0B:0C:0D:0E
+ eth1.ethaddr=00:1A:1B:1C:1D:1E
+@@ -31,14 +31,20 @@ rootfsimage=openwrt-comcerto2000-hgw-rootfs-ubi_nand.img
+ kernelimage_type=uimage
+ kernelimage=openwrt-comcerto2000-hgw-uImage.img
+ 
++active=image1
++inactive=image2
++
++fast_spi_device="spi1.0"
++fast_spi_parts="128k(uloader)ro,512k(barebox)ro,128k(env),128k(board-info)"
++
+ nand_device="comcertonand"
+-nand_parts="512k(barebox),128k(env),4M(kernel),-(rootfs)"
+-rootfs_mtdblock_nand=3
++nand_parts="512k(barebox)ro,8M(kernel1),64M(rootfs1),512k(reserved-dtb1)ro,8M(kernel2),64M(rootfs2),512k(reserved-dtb2)ro,2M(config-cert),8M(avc-sign),32M(webrootdb)"
+ 
+ autoboot_timeout=3
+ 
+ usb3_internal_clk="yes"
+ 
+-bootargs="console=ttyS0,115200n8, init=/etc/preinit"
+-bootargs="$bootargs mac_addr=$eth0.ethaddr,$eth1.ethaddr,$eth2.ethaddr"
++loglevel=3
+ 
++bootargs="console=ttyS0,115200n8, loglevel=$loglevel, init=/etc/preinit"
++bootargs="$bootargs mac_addr=$eth0.ethaddr,$eth1.ethaddr,$eth2.ethaddr"
+diff --git a/defaultenv/bin/_update_help b/defaultenv/bin/_update_help
+index 6b20e01..666ac2b 100644
+--- a/defaultenv/bin/_update_help
++++ b/defaultenv/bin/_update_help
+@@ -1,14 +1,14 @@
+ #!/bin/sh
+ 
+-echo "usage: update -t <uloader|barebox|bareboxenv|kernel|rootfs> -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] -c"
++echo "usage: update -t <uloader|barebox|bareboxenv|kernel1|kernel2|rootfs1|rootfs2> -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] -c"
+ echo "update tools."
+ echo ""
+ echo "options"
+ echo " -c     to check the crc32 for the image and flashed one"
+ echo ""
+ echo "default mode is tftp"
+-echo "type update -t uloader -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update uloader into flash"
+-echo "type update -t barebox -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update barebox into flash"
+-echo "type update -t kernel -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update kernel into flash"
+-echo "type update -t rootfs -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update rootfs into flash"
+-echo "type update -t bareboxenv -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update bareboxenv into flash"
++echo "type update -t uloader -d fastspi [-m tftp|xmodem|ddr] [-f imagename|-a address] to update uloader into flash"
++echo "type update -t barebox -d <fastspi|nand> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update barebox into flash"
++echo "type update -t <kernel1|kernel2> -d <nand> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update kernel into flash"
++echo "type update -t <rootfs1|rootfs2> -d <nand> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update rootfs into flash"
++echo "type update -t bareboxenv -d fastspi [-m tftp|xmodem|ddr] [-f imagename|-a address] to update bareboxenv into flash"
+diff --git a/defaultenv/bin/boot b/defaultenv/bin/boot
+index 573bb73..297a3a1 100755
+--- a/defaultenv/bin/boot
++++ b/defaultenv/bin/boot
+@@ -28,6 +28,44 @@ elif [ x$1 = xtftp ]; then
+ 	kernel_loc=tftp
+ fi
+ 
++if [ x$1 = xactive ]; then
++  echo "Booting active $active ..."
++  if [ x$active = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$active = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  fi
++elif [ x$1 = xinactive ]; then
++  echo "Booting inactive $active ..."
++  if [ x$inactive = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$inactive = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  fi
++else
++  echo "Booting default active $active ..."
++  if [ x$active = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$active = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  else
++    kernel=kernel1
++    rootfs=rootfs1
++  fi
++fi
++
++if [ x$rootfs = xrootfs1 ]; then
++  rootfs_mtdblock_nand=2
++elif [ x$rootfs = xrootfs2 ]; then
++  rootfs_mtdblock_nand=5
++fi
++
+ if [ x$ip = xdhcp ]; then
+ 	bootargs="$bootargs ip=dhcp"
+ elif [ x$ip = xnone ]; then
+@@ -36,7 +74,6 @@ else
+ 	bootargs="$bootargs ip=$eth0.ipaddr::$eth0.gateway:$eth0.netmask:::"
+ fi
+ 
+-
+ if [ x$rootfs_loc = xnet ]; then
+ 	bootargs="$bootargs root=/dev/nfs nfsroot=$nfsroot,v3,tcp noinitrd"
+ elif [ x$rootfs_loc = xinitrd ]; then
+@@ -141,7 +178,7 @@ if [ x$kernel_loc = xnfs ] || [ x$kernel_loc = xtftp ]; then
+ elif [ x$kernel_loc = xnor ]; then
+ 	kdev="/dev/nor0.kernel"
+ elif [ x$kernel_loc = xnand ]; then
+-	kdev="/dev/nand0.kernel.bb"
++	kdev="/dev/nand0.${kernel}.bb"
+ elif [ x$kernel_loc = xfastspi ]; then
+ 	kdev="/dev/spi1.kernel"
+ elif [ x$kernel_loc = xspi ]; then
+diff --git a/defaultenv/bin/erase_firmware b/defaultenv/bin/erase_firmware
+new file mode 100644
+index 0000000..6e80352
+--- /dev/null
++++ b/defaultenv/bin/erase_firmware
+@@ -0,0 +1,27 @@
++#!/bin/sh
++
++. /env/config
++
++if [ x$1 = ximage1 ]; then
++  echo "Erasing Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++elif [ x$1 = ximage2 ]; then
++  echo "Erasing Firmware image2"
++  kernel=kernel2
++  rootfs=rootfs2
++else
++  echo "No Input Option >> Erasing Default Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++fi
++if [ ! -e "/dev/nand0.$kernel" -o ! -e "/dev/nand0.$rootfs" ]; then
++  echo "Partition /dev/nand0.$kernel OR /dev/nand0.$rootfs does not exist!"
++  exit 1
++fi
++echo "Erasing Kernel ..."
++erase /dev/nand0.$kernel
++echo "done."
++echo "Erasing Rootfs ..."
++erase /dev/nand0.$rootfs
++echo "done."
+diff --git a/defaultenv/bin/recover_fw b/defaultenv/bin/recover_fw
+new file mode 100644
+index 0000000..a10bcb8
+--- /dev/null
++++ b/defaultenv/bin/recover_fw
+@@ -0,0 +1,32 @@
++#!/bin/sh
++
++. /env/config
++RESPONSE=N
++readline "Do you want to update NAND Barebox [Y/y]? : " RESPONSE
++if [ x$RESPONSE = xY -o x$RESPONSE = xy ]; then
++  echo "RESPONSE=$RESPONSE >> Updating Barebox image $bareboximage ..."
++  . /env/bin/update -t barebox -d nand -m tftp -f $bareboximage
++  echo "done Barebox Update"
++else
++  echo "RESPONSE=$RESPONSE >> Barebox Updated Skipped in Recovery Procedure!"
++fi
++if [ x$1 = ximage1 ]; then
++  echo "Updating Firmware $1 ..."
++  kernel=kernel1
++  rootfs=rootfs1
++elif [ x$1 = ximage2 ]; then
++  echo "Updating Firmware $1 ..."
++  kernel=kernel2
++  rootfs=rootfs2
++else
++  echo "No input option >> Updating Default Firmware image1 ..."
++  kernel=kernel1
++  rootfs=rootfs1
++fi
++echo "Updating Kernel with Image : $kernelimage ..."
++. /env/bin/update -t $kernel -d nand -m tftp -f $kernelimage
++echo "done Kernel Update."
++echo "Updating Rootfs with Image : $rootfsimage ..."
++. /env/bin/update -t $rootfs -d nand -m tftp -f $rootfsimage
++echo "done Rootfs Update."
++echo "To set last updated image as default (active), Please set active/backup environment variables by editing and saving File: /env/config and reset board"
+diff --git a/defaultenv/bin/update b/defaultenv/bin/update
+index ed62ab5..dda0c3d 100644
+--- a/defaultenv/bin/update
++++ b/defaultenv/bin/update
+@@ -29,9 +29,9 @@ else
+ fi
+ done
+ 
+-if [ x${type} = xkernel ]; then
+-	image=$kernelimage
+-elif [ x${type} = xrootfs ]; then
++if [ x${type} = xkernel1 -o  x${type} = xkernel2 ]; then
++  image=$kernelimage
++elif [ x${type} = xrootfs1 -o  x${type} = xrootfs2 ]; then
+ 	image=$rootfsimage
+ elif [ x${type} = xbarebox ]; then
+ 	image=$bareboximage
+diff --git a/defaultenv/bin/update_firmware b/defaultenv/bin/update_firmware
+new file mode 100644
+index 0000000..012e710
+--- /dev/null
++++ b/defaultenv/bin/update_firmware
+@@ -0,0 +1,24 @@
++#!/bin/sh
++
++. /env/config
++
++if [ x$1 = ximage1 ]; then
++  echo "Updating Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++elif [ x$1 = ximage2 ]; then
++  echo "Updating Firmware image2"
++  kernel=kernel2
++  rootfs=rootfs2
++else
++  echo "No Input Option >> Updating Default Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++fi
++echo "Updating Kernel with Image : $kernelimage ..."
++. /env/bin/update -t $kernel -d nand -m tftp -f $kernelimage
++echo "done Kernel Update"
++echo "Updating Rootfs with Image : $rootfsimage ..."
++. /env/bin/update -t $rootfs -d nand -m tftp -f $rootfsimage
++echo "done Rootfs Update"
++echo "To set last updated image as default (active), Please set active/backup environment variables by editing and saving File: /env/config and reset board"
+-- 
+2.7.4
+

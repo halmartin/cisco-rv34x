@@ -1,0 +1,378 @@
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/alias.c netifd-from-pranay/alias.c
+--- netifd-from-pranay-orig/alias.c	2003-02-06 17:06:16.621770009 +0530
++++ netifd-from-pranay/alias.c	2003-02-06 16:36:33.964181050 +0530
+@@ -112,6 +112,9 @@
+ 	struct alias_device *alias;
+ 
+ 	alias = calloc(1, sizeof(*alias) + strlen(name) + 1);
++	if (!alias)
++		return NULL;
++
+ 	strcpy(alias->name, name);
+ 	alias->dev.set_state = alias_device_set_state;
+ 	alias->dev.hidden = true;
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/device.c netifd-from-pranay/device.c
+--- netifd-from-pranay-orig/device.c	2003-02-06 17:06:16.357773328 +0530
++++ netifd-from-pranay/device.c	2003-02-06 17:24:08.536294218 +0530
+@@ -61,11 +61,15 @@
+ 
+ static int set_device_state(struct device *dev, bool state)
+ {
+-	if (dev->external)
+-		return 0;
++	if (state) {
++		/* Get ifindex for all devices being enabled so a valid  */
++		/* ifindex is in place avoiding possible race conditions */
++		device_set_ifindex(dev, system_if_resolve(dev));
++		if (!dev->ifindex)
++			return -1;
+ 
+-	if (state)
+ 		system_if_up(dev);
++	}
+ 	else
+ 		system_if_down(dev);
+ 
+@@ -215,18 +219,31 @@
+ int device_claim(struct device_user *dep)
+ {
+ 	struct device *dev = dep->dev;
+-	int ret;
++	int ret = 0;
+ 
+ 	if (dep->claimed)
+ 		return 0;
+ 
++	if (!dev)
++		return -1;
++
+ 	dep->claimed = true;
+ 	D(DEVICE, "Claim %s %s, new active count: %d\n", dev->type->name, dev->ifname, dev->active + 1);
+ 	if (++dev->active != 1)
+ 		return 0;
+ 
+ 	device_broadcast_event(dev, DEV_EVENT_SETUP);
+-	ret = dev->set_state(dev, true);
++	if (dev->external) {
++		/* Get ifindex for external claimed devices so a valid   */
++		/* ifindex is in place avoiding possible race conditions */
++		device_set_ifindex(dev, system_if_resolve(dev));
++		if (!dev->ifindex)
++			ret = -1;
++
++		system_if_get_settings(dev, &dev->orig_settings);
++	} else
++		ret = dev->set_state(dev, true);
++
+ 	if (ret == 0)
+ 		device_broadcast_event(dev, DEV_EVENT_UP);
+ 	else {
+@@ -312,6 +329,9 @@
+ 
+ 	D(DEVICE, "Create simple device '%s'\n", name);
+ 	dev = calloc(1, sizeof(*dev));
++	if (!dev)
++		return NULL;
++
+ 	dev->external = external;
+ 	dev->set_state = simple_device_set_state;
+ 	device_init(dev, &simple_device_type, name);
+@@ -613,6 +633,9 @@
+ 			continue;
+ 
+ 		ndev = device_create_default(dev->ifname, dev->external);
++		if (!ndev)
++			continue;
++
+ 		device_replace(ndev, dev);
+ 	}
+ }
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/handler.c netifd-from-pranay/handler.c
+--- netifd-from-pranay-orig/handler.c	2003-02-06 17:06:16.345773479 +0530
++++ netifd-from-pranay/handler.c	2003-02-06 16:36:33.688184520 +0530
+@@ -128,10 +128,14 @@
+ 	int i, prev_fd;
+ 
+ 	prev_fd = netifd_dir_push(dir_fd);
+-	glob("./*.sh", 0, NULL, &g);
++	if (glob("./*.sh", 0, NULL, &g))
++		return;
++
+ 	for (i = 0; i < g.gl_pathc; i++)
+ 		netifd_parse_script_handler(g.gl_pathv[i], cb);
+ 	netifd_dir_pop(prev_fd);
++
++	globfree(&g);
+ }
+ 
+ char *
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/interface.c netifd-from-pranay/interface.c
+--- netifd-from-pranay-orig/interface.c	2003-02-06 17:06:16.341773529 +0530
++++ netifd-from-pranay/interface.c	2003-02-06 16:36:33.684184570 +0530
+@@ -164,6 +164,9 @@
+ 	}
+ 
+ 	n = calloc(1, sizeof(*n) + len);
++	if (!n)
++		return UBUS_STATUS_UNKNOWN_ERROR;
++
+ 	memcpy(n->data, data, len);
+ 	n->node.key = blobmsg_name(n->data);
+ 	avl_insert(&iface->data, &n->node);
+@@ -995,6 +998,9 @@
+ 		reload = true;
+ 	}
+ 
++	//if (!reload && interface_device_config_changed(if_old, if_new))
++		//reload = true;  from latest netifd
++
+ 	if (FIELD_CHANGED_STR(ifname) ||
+ 	    if_old->proto_handler != if_new->proto_handler)
+ 		reload = true;
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/interface-ip.c netifd-from-pranay/interface-ip.c
+--- netifd-from-pranay-orig/interface-ip.c	2003-02-06 17:06:15.773780670 +0530
++++ netifd-from-pranay/interface-ip.c	2003-02-06 16:36:33.108191811 +0530
+@@ -772,6 +772,9 @@
+ 
+ 	// End-of-assignment sentinel
+ 	c = malloc(sizeof(*c) + 1);
++	if (!c)
++		return;
++
+ 	c->assigned = 1 << (64 - prefix->length);
+ 	c->length = 64;
+ 	c->name[0] = 0;
+@@ -781,11 +784,13 @@
+ 	if (prefix->excl_length > 0) {
+ 		const char name[] = "!excluded";
+ 		c = malloc(sizeof(*c) + sizeof(name));
+-		c->assigned = ntohl(prefix->excl_addr.s6_addr32[1]) &
+-				((1 << (64 - prefix->length)) - 1);
+-		c->length = prefix->excl_length;
+-		memcpy(c->name, name, sizeof(name));
+-		list_add(&c->head, &prefix->assignments);
++		if (c) {
++			c->assigned = ntohl(prefix->excl_addr.s6_addr32[1]) &
++					((1 << (64 - prefix->length)) - 1);
++			c->length = prefix->excl_length;
++			memcpy(c->name, name, sizeof(name));
++			list_add(&c->head, &prefix->assignments);
++		}
+ 	}
+ 
+ 	bool assigned_any = false;
+@@ -813,8 +818,12 @@
+ 
+ 		size_t namelen = strlen(iface->name) + 1;
+ 		c = malloc(sizeof(*c) + namelen);
++		if (!c)
++			continue;
++
+ 		c->length = iface->assignment_length;
+ 		c->assigned = iface->assignment_hint;
++		//c->addr = in6addr_any; from latest netifd
+ 		c->enabled = false;
+ 		memcpy(c->name, iface->name, namelen);
+ 
+@@ -945,6 +954,9 @@
+ 		pclass = (iface) ? iface->name : "local";
+ 
+ 	struct device_prefix *prefix = calloc(1, sizeof(*prefix) + strlen(pclass) + 1);
++	if (!prefix)
++		return NULL;
++
+ 	prefix->length = length;
+ 	prefix->addr = *addr;
+ 	prefix->preferred_until = preferred_until;
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/proto.c netifd-from-pranay/proto.c
+--- netifd-from-pranay-orig/proto.c	2003-02-06 17:06:16.409772674 +0530
++++ netifd-from-pranay/proto.c	2003-02-06 16:36:33.752183715 +0530
+@@ -101,6 +101,9 @@
+ 	struct device_addr *addr;
+ 
+ 	addr = calloc(1, sizeof(*addr));
++	if (!addr)
++		return NULL;
++
+ 	addr->flags = v6 ? DEVADDR_INET6 : DEVADDR_INET4;
+ 	if (ext)
+ 		addr->flags |= DEVADDR_EXTERNAL;
+@@ -262,6 +265,9 @@
+ 	int af = v6 ? AF_INET6 : AF_INET;
+ 
+ 	route = calloc(1, sizeof(*route));
++	if (!route)
++		return NULL;
++
+ 	if (!inet_pton(af, str, &route->nexthop)) {
+ 		interface_add_error(iface, "proto", "INVALID_GATEWAY", &str, 1);
+ 		free(route);
+@@ -287,7 +293,7 @@
+ parse_prefix_option(struct interface *iface, const char *str, size_t len)
+ {
+ 	char buf[128] = {0}, *saveptr;
+-	if (len > sizeof(buf))
++	if (len >= sizeof(buf))
+ 		return false;
+ 
+ 	memcpy(buf, str, len);
+@@ -514,6 +520,9 @@
+ 	struct interface_proto_state *proto;
+ 
+ 	proto = calloc(1, sizeof(*proto));
++	if (!proto)
++		return NULL;
++
+ 	proto->free = default_proto_free;
+ 	proto->cb = no_proto_handler;
+ 
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/proto-shell.c netifd-from-pranay/proto-shell.c
+--- netifd-from-pranay-orig/proto-shell.c	2003-02-06 17:06:16.369773177 +0530
++++ netifd-from-pranay/proto-shell.c	2003-02-06 16:36:33.712184218 +0530
+@@ -739,6 +739,9 @@
+ 	struct proto_shell_state *state;
+ 
+ 	state = calloc(1, sizeof(*state));
++	if (!state)
++		return NULL;
++
+ 	INIT_LIST_HEAD(&state->deps);
+ 
+ 	state->config = malloc(blob_pad_len(attr));
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/system-dummy.c netifd-from-pranay/system-dummy.c
+--- netifd-from-pranay-orig/system-dummy.c	2003-02-06 17:06:15.773780670 +0530
++++ netifd-from-pranay/system-dummy.c	2003-02-06 16:42:10.171954346 +0530
+@@ -83,6 +83,10 @@
+ 	return 0;
+ }
+ 
++void system_if_get_settings(struct device *dev, struct device_settings *s)
++{
++}
++
+ void system_if_clear_state(struct device *dev)
+ {
+ }
+@@ -96,6 +100,11 @@
+ 	return 0;
+ }
+ 
++int system_if_resolve(struct device *dev)
++{
++	return 0;
++}
++
+ struct device *
+ system_if_get_parent(struct device *dev)
+ {
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/system.h netifd-from-pranay/system.h
+--- netifd-from-pranay-orig/system.h	2003-02-06 17:06:15.769780720 +0530
++++ netifd-from-pranay/system.h	2003-02-06 16:43:57.582604011 +0530
+@@ -111,10 +111,13 @@
+ int system_vlandev_add(struct device *vlandev, struct device *dev, struct vlandev_config *cfg);
+ int system_vlandev_del(struct device *vlandev);
+ 
++void system_if_get_settings(struct device *dev, struct device_settings *s);
+ void system_if_clear_state(struct device *dev);
+ int system_if_up(struct device *dev);
+ int system_if_down(struct device *dev);
+ int system_if_check(struct device *dev);
++int system_if_resolve(struct device *dev);
++
+ int system_if_dump_info(struct device *dev, struct blob_buf *b);
+ int system_if_dump_stats(struct device *dev, struct blob_buf *b);
+ struct device *system_if_get_parent(struct device *dev);
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/system-linux.c netifd-from-pranay/system-linux.c
+--- netifd-from-pranay-orig/system-linux.c	2003-02-06 17:06:16.401772775 +0530
++++ netifd-from-pranay/system-linux.c	2003-02-06 16:43:32.138923881 +0530
+@@ -441,6 +441,7 @@
+ 		return NULL;
+ 
+ 	len = readlink(gl.gl_pathv[0], buf, buflen);
++	globfree(&gl);
+ 	if (len < 0)
+ 		return NULL;
+ 
+@@ -480,7 +481,7 @@
+ 	return system_bridge_if(bridge->ifname, dev, SIOCBRDELIF, NULL);
+ }
+ 
+-static int system_if_resolve(struct device *dev)
++int system_if_resolve(struct device *dev)
+ {
+ 	struct ifreq ifr;
+ 	strncpy(ifr.ifr_name, dev->ifname, sizeof(ifr.ifr_name));
+@@ -915,7 +916,7 @@
+ 	return system_link_del(vlandev->ifname);
+ }
+ 
+-static void
++void
+ system_if_get_settings(struct device *dev, struct device_settings *s)
+ {
+ 	struct ifreq ifr;
+@@ -1282,8 +1283,10 @@
+ 
+ 		if (addr->valid_until) {
+ 			int64_t valid = addr->valid_until - now;
+-			if (valid <= 0)
++			if (valid <= 0) {
++				nlmsg_free(msg);
+ 				return -1;
++			}
+ 			else if (valid > UINT32_MAX)
+ 				valid = UINT32_MAX;
+ 
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/tunnel.c netifd-from-pranay/tunnel.c
+--- netifd-from-pranay-orig/tunnel.c	2003-02-06 17:06:16.617770059 +0530
++++ netifd-from-pranay/tunnel.c	2003-02-06 16:36:33.960181100 +0530
+@@ -49,12 +49,11 @@
+ 	if (uci_blob_check_equal(dev->config, attr, cfg))
+ 		return DEV_CONFIG_NO_CHANGE;
+ 
+-	if (attr) {
+-		memset(tb_dev, 0, sizeof(tb_dev));
++	memset(tb_dev, 0, sizeof(tb_dev));
+ 
++	if (attr)
+ 		blobmsg_parse(device_attr_list.params, __DEV_ATTR_MAX, tb_dev,
+ 			blob_data(attr), blob_len(attr));
+-	}
+ 
+ 	device_init_settings(dev, tb_dev);
+ 
+@@ -68,6 +67,9 @@
+ 	struct device *dev;
+ 
+ 	tun = calloc(1, sizeof(*tun));
++	if (!tun)
++		return NULL;
++
+ 	dev = &tun->dev;
+ 	device_init(dev, &tunnel_device_type, name);
+ 	tun->set_state = dev->set_state;
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/ubus.c netifd-from-pranay/ubus.c
+--- netifd-from-pranay-orig/ubus.c	2003-02-06 17:06:16.365773227 +0530
++++ netifd-from-pranay/ubus.c	2003-02-06 16:36:33.708184268 +0530
+@@ -1002,6 +1002,9 @@
+ 	int i;
+ 
+ 	methods = calloc(1, sizeof(iface_object_methods));
++	if (!methods)
++		return;
++
+ 	memcpy(methods, iface_object_methods, sizeof(iface_object_methods));
+ 	iface_object.methods = methods;
+ 
+diff -aurN '--exclude-from=./exclude-files' netifd-from-pranay-orig/vlan.c netifd-from-pranay/vlan.c
+--- netifd-from-pranay-orig/vlan.c	2003-02-06 17:06:16.625769959 +0530
++++ netifd-from-pranay/vlan.c	2003-02-06 16:36:33.968181000 +0530
+@@ -125,6 +125,8 @@
+ 	D(DEVICE, "Create vlan device '%s.%d'\n", dev->ifname, id);
+ 
+ 	vldev = calloc(1, sizeof(*vldev));
++	if (!vldev)
++		return NULL;
+ 
+ 	vldev->id = id;
+ 	vlan_dev_set_name(vldev, dev);

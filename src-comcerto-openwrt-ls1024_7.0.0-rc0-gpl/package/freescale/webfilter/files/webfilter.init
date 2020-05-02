@@ -1,0 +1,758 @@
+#!/bin/sh /etc/rc.common
+#START=89
+#STOP=10
+
+. /lib/config/uci.sh
+. /lib/functions/network.sh
+. /lib/functions.sh
+
+WFCLI="wfcli"
+WFAPP="wfapp"
+EMPTY=\"\"
+POLICYATTRIBUTESCNT=12
+
+WFMODULENAME="webfilter"
+TMPPOLICYLIST="/tmp/polnames"
+TEMPUCIPATH="/tmp/.uci"
+TEMPUCIWFNAME="$TEMPUCIPATH/$WFMODULENAME"
+UCIPATH="/tmp/etc/config"
+UCIWFNAME="$UCIPATH/$WFMODULENAME"
+
+SCHEDULEMODULENAME="schedule"
+IPGROUPMODULENAME="ipgroup"
+
+board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+
+#It means all records single ip or range ip or subnet are stored in UCI as range format.So accordingly, reading from UCI to be done. 
+#This support is commented for RV26X series. For RV34X Series, it can be un-commented
+#IPGRP_UCI_IPRANGE_FORMAT=1
+
+extra_help() {
+	cat <<EOF
+	ipgrp <update> To update the changes in ipgroup to Webfilter
+	sched <update> To update the changes in schedule to Webfilter
+EOF
+}
+
+EXTRA_COMMANDS="ipgrp sched"
+EXTRA_HELP="$(extra_help)"
+
+# For debugging 
+#WF_TRACE=1
+[ -n "$WF_TRACE" ] && [ "$WF_TRACE" -eq 1 ] && {
+  WFCLI="printeval wfcli"
+}
+
+printeval(){
+  echo ""
+  echo "## CMD:$@"
+  "$@"
+}
+
+# For debug prints
+#WF_DBG=1
+wf_debug() {
+  if [ -n "$WF_DBG" ]
+  then
+    echo " # DBG: " "$1"
+  fi
+}
+
+wf_print() {
+  logger -p 6 -t Webfilter ": $1"
+}
+
+wf_init() {
+  wf_print "Initialising $WFMODULENAME module ...!"
+
+  # Lionic WCF infra must be running including license
+
+  # usage:   $WFAPP [port]    [localdbsz]    [daemonize]   [dbgmode]   [trialmode]  [devid]  [s/n]
+  #  port(50001): port number to listen
+  #  localdbsz(36): Webfilter LocalDB size in MegaBytes
+  #  daemonize (1): runnig background as a service
+  #  dbgmode(0): enabling debug/prints mode for debugging
+  #  trialmode(0): 1 mean demo with database only(WCF registration disabled) 
+  #  devid: deviceid or product id (RV340-WB/RV340W-WB/RV345-WB/RV345P-WB)
+  #  s/n(cisco_freescale_98): Serial Num or (UniqueID)
+
+
+  # $WFAPP &
+
+  # Or with debug options
+  # $WFAPP  50001 40 1 1  1
+  sno=`uci get systeminfo.sysinfo.serial_number`
+  wf_print "  Bringing up '$WFAPP'...! ($WFAPP 50001 40 1 0 0)"
+  $WFAPP 50001 42 1 0 0 "$board-WB" "$sno"
+
+  wf_print "  default configuration load...!"
+  wf_config_load_default
+
+  sleep 1
+  # Lionic infra/setup commands for webfilter
+  wf_print "  lionic infra setup/commands for webfilter ...!"
+
+  lcsh sys rdpage blocked.php
+}
+
+start() {
+  if [ "$board" = "RV160" -o "$board" = "RV160W" ]; then
+    return 0;
+  fi
+
+  config_load webfilter
+  source uci_cache $SCHEDULEMODULENAME
+  source uci_cache $IPGROUPMODULENAME
+  wf_print " start...!"
+  wf_init # Core module init.
+  #lcsh license status
+}
+
+reload() {
+  if [ "$board" = "RV160" -o "$board" = "RV160W" ]; then
+    return 0;
+  fi
+
+  config_load webfilter
+  source uci_cache $SCHEDULEMODULENAME
+  source uci_cache $IPGROUPMODULENAME
+  wf_config_load
+}
+
+stop() {
+  if [ "$board" = "RV160" -o "$board" = "RV160W" ]; then
+    return 0;
+  fi
+
+  wf_print " stop...!"
+
+  [ -n "$WF_TRACE" ] && [ "$WF_TRACE" -eq 1 ] && {
+    WFCLI="wfcli"
+  }
+  lcsh uf off
+  #lcsh sys stop
+
+  killall -9 $WFAPP 2>/dev/null
+  killall -9 $WFCLI 2>/dev/null
+}
+
+
+wf_config_load() {
+
+  # cat /tmp/.uci/webfilter 
+
+  #-webfilter.policy1    DELETE
+
+  #webfilter.policy2.enable=1  MODIFY
+
+  #webfilter.policy55=policy  ADD
+  linecnt=0
+  paddcnt=""
+  pmodcnt=""
+
+  paddcnt=$(grep 'webfilter.policy[0-9]*=' $TEMPUCIWFNAME | wc -l)
+  pdelcnt=$(grep '\-webfilter.policy[0-9]*$' $TEMPUCIWFNAME | wc -l)
+
+  wf_debug "  policy addcnt '$paddcnt'; delcnt '$pdelcnt "
+
+ webdiff=$(cat $TEMPUCIWFNAME | grep -E "='policy|=policy|-webfilter.policy|-webfilter.globalconfig|webfilter.globalconfig")
+
+  for line in $webdiff
+  do
+    oper=$line
+    wf_debug "   oper:$oper"
+
+    new=$(echo $oper | cut -d . -f2 | cut -d = -f1)
+    wf_debug "   new=$new"
+    temp=$(expr $POLICYATTRIBUTESCNT "-" 1)
+    if [ "$old" != "$new" -o "$linecnt" -gt "$temp" -o "$new" = "globalconfig" ];
+    then
+          
+      linecnt=0
+      old=$new
+
+      case $oper in 
+        webfilter.policy*)
+          ##
+          if [ "$pdelcnt" = "1" -a "$paddcnt" = "1" ];then
+            wf_debug "    ** Policy modify case ,'$new' $oper"
+            wf_policy_config mod $new
+          else
+            wf_debug "    ** Policy add case:'$new', $oper"
+            wf_policy_config add $new
+          fi
+          # skip 12 times 
+        ;;
+
+        -webfilter.policy*)
+          ##
+          if [ "$pdelcnt" = "1" -a "$paddcnt" = "1" ];then
+            wf_debug "    ** Policy Modify case, no need to delete"
+          else
+            wf_debug "    ** Policy delete case:'$new', $oper"
+            wf_policy_config del $new
+          fi
+          linecnt=$POLICYATTRIBUTESCNT
+        ;;
+
+	-webfilter.globalconfig)
+          ##
+          wf_debug "    ** Ignoring this case:'$new', $oper"
+	;;
+	
+        webfilter.globalconfig.*)
+          ##
+          wf_debug "    ** Global config modify case:'$new', $oper"
+          wf_global_config
+        ;;
+
+      esac      # end of case matches  
+
+    else
+      linecnt=$(expr $linecnt "+" 1)
+      #echo "    else $linecnt"
+    fi          # end of policy search
+
+    # end of loop for line read
+  done
+
+}
+
+
+wf_global_config() {
+  local wfstatus=`uci_get $WFMODULENAME globalconfig enable 0`
+  #local wfstatus=`uci_get $UCIWFNAME  globalconfig enable 0`
+  $WFCLI glbcfg update $wfstatus   \"\"   \"\"   \"\"   \"\"  \"\"
+
+  if [ "$wfstatus" = "1" ];then
+    lcsh uf on
+    #lcsh sys start
+    #cmm -c set dpi enable
+  else
+    lcsh uf off
+    #lcsh sys stop
+    #cmm -c set dpi disable
+  fi
+}
+
+wf_config_load_default() {
+
+  local line=""
+  # 1. webfilter global configuration, if any
+  wf_global_config
+
+  # 2. webfilter polcies configuration
+  uci show $WFMODULENAME | cut -f 2 -d . | uniq | grep -v = | grep policy | sort >$TMPPOLICYLIST
+  while read -r line
+  do
+
+    polname=$line
+    wf_policy_config add $polname 
+
+  done < $TMPPOLICYLIST
+
+  rm $TMPPOLICYLIST
+}
+
+wf_policy_config() {
+
+  local categorycmd=1
+  local wdomaincmd=1
+  local wkeywdcmd=1
+  local bdomaincmd=1
+  local bkeywdcmd=1
+  local ipexclcmd=1
+
+  local cfg=$1        # config type "add or del or mod"
+  local polname=$2    # policy name
+
+  if [ "$cfg" = "del" ];
+  then
+    name=$(uci get $UCIWFNAME.$polname.name)
+  else
+    #name=`uci get $WFMODULENAME.$polname.name`
+    #name=`uci_get $WFMODULENAME "$polname" name ""`
+    config_get name $polname name
+  fi
+
+  wf_debug "      <module,cfg,policyname> : <$WFMODULENAME,$cfg,$polname>"
+
+  if [ "$cfg" = "del" ];
+  then
+  #{
+    wf_debug "        Policy delete case:$name:"
+    if [ "$name" != "" ];
+    then
+      #$WFCLI policy  $cfg  $name $enable $webreputation $devicetype $ip_group $schedule
+      wf_debug "          Policy delete case:$name: and non-empty policy name"
+      $WFCLI policy  $cfg  "$name" $EMPTY  $EMPTY   $EMPTY  $EMPTY  $EMPTY
+    fi
+  #}
+  else
+  #{
+    wf_debug "        Policy $cfg case:$name:"
+
+    local enable
+    config_get enable $polname enable 0
+    local devicetype
+    config_get devicetype $polname devicetype ANY
+    local webreputation
+    config_get webreputation $polname webreputation 0
+
+    local categories
+    config_get categories $polname categories ""
+    if [ "$categories" = "" ];
+    then
+      categorycmd=0
+    fi
+
+    local ip_group
+    config_get ip_group $polname ip_groups ""
+    if [ "$ip_group" = "" ]; then
+      ip_group="NONE"
+    fi
+
+    local schedule
+    config_get schedule $polname schedule ""
+    if [ "$schedule" = "" ]; then
+      schedule="NONE"
+    fi
+
+    local white_domain_list
+    config_get white_domain_list $polname white_domain_list ""
+    if [ "$white_domain_list" = "" ];
+    then
+      wdomaincmd=0
+    else
+      tmpval=`echo $white_domain_list | sed s/" "/,/g`
+      white_domain_list=$tmpval
+    fi
+
+    local white_url_keyword_list
+    config_get white_url_keyword_list $polname white_url_keyword_list ""
+    if [ "$white_url_keyword_list" = "" ];
+    then
+      wkeywdcmd=0
+    else
+      tmpval=`echo $white_url_keyword_list | sed s/" "/,/g`
+      white_url_keyword_list=$tmpval
+    fi
+
+    local block_domain_list
+    config_get block_domain_list $polname block_domain_list ""
+    if [ "$block_domain_list" = "" ]; then
+      bdomaincmd=0
+    else
+      tmpval=`echo $block_domain_list | sed s/" "/,/g`
+      block_domain_list=$tmpval
+    fi
+
+    local block_url_keyword_list
+    config_get block_url_keyword_list $polname block_url_keyword_list ""
+    if [ "$block_url_keyword_list" = "" ]; then
+      bkeywdcmd=0
+    else
+      tmpval=`echo $block_url_keyword_list | sed s/" "/,/g`
+      block_url_keyword_list=$tmpval
+    fi
+
+    local user_exclusion_ip
+    config_get user_exclusion_ip $polname user_exclusion_ip ""
+    if [ "$user_exclusion_ip" = "" ];
+    then
+      ipexclcmd=0
+    else
+      # Sample format in user_exclusion_ip as below
+      ######   1001::1 1.1.1.1 2.2.2.2-2.2.2.20 4000:400:222:aaaa::1-5000:aaaa:bbbb::2
+      user_exclusion_ip_list=`echo $user_exclusion_ip | sed s/" "/,/g`
+      user_exclusion_ip=$user_exclusion_ip_list
+    fi
+  
+    # configuration commands 
+
+    if [ "$schedule" != "" -a "$schedule" != "ALWAYS" -a "$schedule" != "NONE" ];
+    then
+      # Schedule records configuration, if any
+      uci get $SCHEDULEMODULENAME.$schedule >/dev/null 2>&1
+      recordvalid=$?
+
+      if [ "$recordvalid" = 0 ]; then
+        # valid record
+        wf_sched_config $schedule $SCHEDULEMODULENAME
+      fi
+
+    fi
+
+    if [ "$ip_group" != ""  -a "$ip_group" != "NONE" -a "$ip_group" != "None" ];
+    then
+      # IPGroup records configuration, if any
+      uci get $IPGROUPMODULENAME.$ip_group >/dev/null 2>&1
+      recordvalid=$?
+
+      if [ "$recordvalid" = 0 ]; then
+        # valid record
+        wf_ipgrp_config $ip_group $IPGROUPMODULENAME
+      fi
+
+    fi
+
+    # Webfilter policy configuration command
+    wf_debug sched:$schedule
+    wf_debug ipgrp:$ip_group
+    $WFCLI policy  $cfg  "$name" $enable $webreputation $devicetype $ip_group $schedule
+
+    if [ "$cfg" = "mod" ]; then
+      categorycmd=1
+      wdomaincmd=1
+      wkeywdcmd=1
+      bdomaincmd=1
+      bkeywdcmd=1
+      ipexclcmd=1
+      wf_debug "Policy modify case, preparing appropriate modify commands as per revised config !!"
+    fi
+
+    #if [ $categorycmd = 1 ];
+    #then
+      # Category configuration
+      $WFCLI category  update "$name" "$categories"   $EMPTY $EMPTY $EMPTY $EMPTY
+    #fi
+
+    if [ $wdomaincmd = 1 ];
+    then
+      # White list domain configuration 
+      $WFCLI wl     update "$name" "domain" "$white_domain_list" $EMPTY $EMPTY $EMPTY
+    fi
+
+    if [ $wkeywdcmd = 1 ];
+    then
+      # White list keyword configuration 
+      $WFCLI wl     update "$name" "key" "$white_url_keyword_list" $EMPTY $EMPTY $EMPTY
+    fi
+
+    if [ $bdomaincmd = 1 ]; then
+      # Block list domain configuration 
+      $WFCLI bl     update "$name" "domain" "$block_domain_list" $EMPTY $EMPTY $EMPTY
+    fi
+
+    if [ $bkeywdcmd = 1 ]; then
+      # Block list keyword configuration 
+      $WFCLI bl     update $name "key" "$block_url_keyword_list" $EMPTY $EMPTY $EMPTY
+    fi
+
+    if [ $ipexclcmd = 1 ];
+    then
+      # IPexclusion list configuration 
+      $WFCLI ipexcl    update "$name" "$user_exclusion_ip" $EMPTY   $EMPTY $EMPTY $EMPTY
+    fi
+
+  #}
+  fi
+}
+
+get_daymask() {
+  # This function expects 7 arguments. For each argument, the value must be either 0 or 1 only
+  # The arguments are interpreted as $1-sun, $2-mon, $3-tue .... $7-sat
+
+  # Bitmask CONSTANT values for each day 
+  SUN=1
+  MON=2
+  TUE=4
+  WED=8
+  THU=16
+  FRI=32
+  SAT=64
+
+  # expression to compute the allday mask for the given day's enable/disable config
+  daymaskval=`expr $1 \* $SUN + $2 \* $MON + $3 \* $TUE + $4 \* $WED + $5 \* $THU + $6 \* $FRI + $7 \* $SAT`
+  return $daymaskval
+}
+
+wf_sched_config() {
+
+  schedname=$1
+  SCHED=$2.$schedname
+
+  #get_daymask `uci get $SCHED.sun` `uci get $SCHED.mon` `uci get $SCHED.tue` `uci get $SCHED.wed` `uci get $SCHED.thu` `uci get $SCHED.fri` `uci get $SCHED.sat`
+  eval sun=\$schedule_"$schedname"_sun
+  eval mon=\$schedule_"$schedname"_mon
+  eval tue=\$schedule_"$schedname"_tue
+  eval wed=\$schedule_"$schedname"_wed
+  eval thu=\$schedule_"$schedname"_thu
+  eval fri=\$schedule_"$schedname"_fri
+  eval sat=\$schedule_"$schedname"_sat
+  get_daymask $sun $mon $tue $wed $thu $fri $sat
+
+  daymask=$?
+  eval time1=\$schedule_"$schedname"_start_time
+  eval time2=\$schedule_"$schedname"_end_time
+
+  # Command to configure schedule record 
+  $WFCLI  sched  add  $schedname  $daymask  $time1  $time2   $EMPTY  $EMPTY
+}
+
+wf_ipgrp_config() {
+
+  ipgrpname=$1
+  IPGRP=$2.$ipgrpname
+
+  #<ipgrp>    <add/addrec/delrec/del/show>  <name>    <startip>  <endip>                "" "" ""
+
+  # Command to configure ipgroup
+  $WFCLI  ipgrp  add     $ip_group  $EMPTY  $EMPTY  $EMPTY  $EMPTY  $EMPTY
+
+ if [ -n "$IPGRP_UCI_IPRANGE_FORMAT" ]
+ then
+  ##### for RV34X ipgroup uci read
+  # Identiy the number of subrecords
+  recnums=$(uci show $IPGRP | grep start | wc -l)
+
+  rec=1
+  while [ $rec -le $recnums ]; do
+    # For each record, prepare and execute command
+    wf_debug "adding rec $rec of ip_group $ip_group"
+
+    #ipstart=`uci get $IPGRP.ipstart$rec`
+    eval ipstart=\$ipgroup_"$ipgrpname"_ipstart"$rec"
+    if [ "$?" -ne 0 ]; then
+      ipstart=""
+    fi
+
+    #ipend=`uci get $IPGRP.ipend$rec`
+    eval ipend=\$ipgroup_"$ipgrpname"_ipend"$rec"
+    if [ "$?" -ne 0 ]; then
+      ipend=""
+    fi
+
+    if [ "$ipstart" != ""  -a "$ipend" != "" ]; then
+      wf_debug " ipstart $ipstart ipend $ipend"
+      # Command to configure ipgroup sub records
+      $WFCLI  ipgrp  addrec  $ip_group  $ipstart  $ipend  $EMPTY  $EMPTY  $EMPTY
+    fi
+    rec=`expr $rec + 1`
+
+  done
+  #####
+ else
+
+  ##### for RV26X ipgroup uci read
+  eval ipv4addr=\$"$2"_"$ipgrpname"_ipv4_addr
+  eval ipv4addr_devos=\$"$2"_"$ipgrpname"_ipv4_addr_types
+
+  # To check further on config_get usage, if needed
+  #config_get ipv4addr $ipgrpname ipv4_addr ""
+  if [ "$ipv4addr" != "" ];
+  then 
+    jj=1
+    devos=""
+    for ii in $(echo $ipv4addr | sed 's/,/ /g')
+    do
+      devos=`echo $ipv4addr_devos | cut -d',' -f $jj`
+
+      wf_debug "  adding ipv4addr:$ii,$devos to ipgroup '$ip_group'"
+      $WFCLI  ipgrp  addrec  $ip_group  $ii  $ii  "$devos"  $EMPTY  $EMPTY
+      jj=$(expr $jj "+" 1)
+    done
+  fi
+
+  eval ipv4range=\$"$2"_"$ipgrpname"_ipv4_range
+  eval ipv4range_devos=\$"$2"_"$ipgrpname"_ipv4_range_types
+  if [ "$ipv4range" != "" ];
+  then 
+    jj=1
+    devos=""
+    for ii in $(echo $ipv4range | sed 's/,/ /g')
+    do
+      devos=`echo $ipv4range_devos | cut -d',' -f $jj`
+
+      wf_debug "  adding ipv4range:$ii to ipgroup '$ip_group'"
+      start=`echo $ii | cut -d- -f1`
+      end=`echo $ii | cut -d- -f2`
+      wf_debug "  start $start, end $end"
+      $WFCLI  ipgrp  addrec  $ip_group  $start  $end  "$devos"  $EMPTY  $EMPTY
+      jj=$(expr $jj "+" 1)
+    done
+  fi
+
+  eval ipv4subnet=\$"$2"_"$ipgrpname"_ipv4_subnet
+  eval ipv4subnet_devos=\$"$2"_"$ipgrpname"_ipv4_subnet_types
+  if [ "$ipv4subnet" != "" ];
+  then 
+    jj=1
+    devos=""
+    for ii in $(echo $ipv4subnet | sed 's/,/ /g')
+    do
+      devos=`echo $ipv4subnet_devos | cut -d',' -f $jj`
+
+      wf_debug "  adding ipv4subnet:$ii to ipgroup '$ip_group'"
+      start=`echo $ii | cut -d/ -f1`
+      end=`echo $ii | cut -d/ -f2`
+      wf_debug "  subnet $start, mask $end"
+      ret=`ipcalc.sh $start $end 0.0.0.0 4294967294`;
+      start=`echo $ret | cut -d = -f7 | cut -d ' ' -f1`;
+      end=`echo $ret | cut -d = -f8`;
+
+      wf_debug "  now adding as start  $start, end $end"
+      $WFCLI  ipgrp  addrec  $ip_group  $start  $end  "$devos"  $EMPTY  $EMPTY
+      jj=$(expr $jj "+" 1)
+    done
+  fi
+
+  eval ipv6addr=\$"$2"_"$ipgrpname"_ipv6_addr
+  eval ipv6addr_devos=\$"$2"_"$ipgrpname"_ipv6_addr_types
+  if [ "$ipv6addr" != "" ];
+  then 
+    jj=1
+    devos=""
+    for ii in $(echo $ipv6addr | sed 's/,/ /g')
+    do
+      devos=`echo $ipv6addr_devos | cut -d',' -f $jj`
+      wf_debug "  adding ipv6addr:$ii to ipgroup '$ip_group'"
+      $WFCLI  ipgrp  addrec  $ip_group  $ii  $ii  "$devos"  $EMPTY  $EMPTY
+      jj=$(expr $jj "+" 1)
+    done
+  fi
+
+  eval ipv6range=\$"$2"_"$ipgrpname"_ipv6_range
+  eval ipv6range_devos=\$"$2"_"$ipgrpname"_ipv6_range_types
+  if [ "$ipv6range" != "" ];
+  then 
+    jj=1
+    devos=""
+    for ii in $(echo $ipv6range | sed 's/,/ /g')
+    do
+      devos=`echo $ipv6range_devos | cut -d',' -f $jj`
+      wf_debug "  adding $devos, ipv6range:$ii to ipgroup '$ip_group'"
+      start=`echo $ii | cut -d- -f1`
+      end=`echo $ii | cut -d- -f2`
+      wf_debug "  start $start, end $end"
+      $WFCLI  ipgrp  addrec  $ip_group  $start  $end  "$devos"  $EMPTY  $EMPTY
+      jj=$(expr $jj "+" 1)
+    done
+  fi
+
+  eval ipv6subnet=\$"$2"_"$ipgrpname"_ipv6_subnet
+  eval ipv6subnet_devos=\$"$2"_"$ipgrpname"_ipv6_subnet_types
+  if [ "$ipv6subnet" != "" ];
+  then 
+    jj=1
+    devos=""
+    for ii in $(echo $ipv6subnet | sed 's/,/ /g')
+    do
+      devos=`echo $ipv6subnet_devos | cut -d',' -f $jj`
+      wf_debug "  adding ipv6subnet:$ii to ipgroup '$ip_group'"
+      start=`echo $ii | cut -d/ -f1`
+      end=`echo $ii | cut -d/ -f2`
+      wf_debug "  subnet $start, mask $end"
+      $WFCLI  ipgrp  addrecv6pfx  $ip_group  $start  $end  "$devos"  $EMPTY  $EMPTY
+      jj=$(expr $jj "+" 1)
+    done
+  fi
+  #####
+ fi
+}
+
+ipgrp() {
+  if [ "$board" = "RV160" -o "$board" = "RV160W" ]; then
+    return 0;
+  fi
+
+# $1: it expects "update"
+# $2: ipgrpfilename, which contains changed ipgrp configuration
+  config_load $IPGROUPMODULENAME
+# source uci_cache $SCHEDULEMODULENAME
+  source uci_cache $IPGROUPMODULENAME
+
+  if [ "$1" = "update" ]; then
+    wf_print "  updating ipgroup changes"
+    local ipgrpsectionname=$IPGROUPMODULENAME
+    local ipgrpfilename=/tmp/"$IPGROUPMODULENAME"deltaconfig
+    local ipgrp_delete_list_file=/tmp/"$IPGROUPMODULENAME"dellist
+    local ipgrp_add_list_file=/tmp/"$IPGROUPMODULENAME"addlist
+
+    if [ "$2" != "" ]; then
+      # 1.non-empty file name check
+      if [ -e "$2" ]; then
+        # 2. valid file name check
+        ipgrpfilename=$2
+      fi
+    fi
+
+    wf_debug "** IPGROUPMODULENAME: $IPGROUPMODULENAME"
+    wf_debug "** ipgrpsectionname: $ipgrpsectionname"
+    wf_debug "** ipgrpfilename: $ipgrpfilename"
+
+    # Identify any ipgroups deleted in this transaction
+    cat $ipgrpfilename |grep "\-"$ipgrpsectionname""  | cut -d . -f2 >$ipgrp_delete_list_file
+    while read -r line
+    do
+      ip_group=$line
+      wf_debug "** ipgrp del: $ip_group"
+      $WFCLI  ipgrp  del    $ip_group  $EMPTY  $EMPTY  $EMPTY  $EMPTY  $EMPTY
+    done < $ipgrp_delete_list_file
+    rm $ipgrp_delete_list_file
+
+    # Identify any ipgroups got added in this transaction
+    cat $ipgrpfilename |grep -E "\='$ipgrpsectionname'|\="$ipgrpsectionname""  | cut -d . -f2 | cut -d = -f1 >$ipgrp_add_list_file
+    while read -r line
+    do
+      ip_group=$line
+      wf_debug "** ipgrp add: $ip_group"
+      wf_ipgrp_config $ip_group $IPGROUPMODULENAME
+    done < $ipgrp_add_list_file
+    rm $ipgrp_add_list_file
+
+  fi
+}
+
+sched() {
+  if [ "$board" = "RV160" -o "$board" = "RV160W" ]; then
+    return 0;
+  fi
+
+# $1: it expects "update"
+# $2: schedfilename, which contains changed schedule configuration
+  #config_load webfilter
+  source uci_cache $SCHEDULEMODULENAME
+  #source uci_cache $IPGROUPMODULENAME
+  if [ "$1" = "update" ]; then
+    wf_print "  updating schedule changes"
+    local schedsectionname=$SCHEDULEMODULENAME
+    local schedfilename=/tmp/"$SCHEDULEMODULENAME"deltaconfig
+    local sched_delete_list_file=/tmp/"$SCHEDULEMODULENAME"dellist
+    local sched_add_list_file=/tmp/"$SCHEDULEMODULENAME"addlist
+
+    if [ "$2" != "" ]; then
+      # 1.non-empty file name check
+      if [ -e "$2" ]; then
+        # 2. valid file name check
+        schedfilename=$2
+      fi
+    fi 
+
+    wf_debug "** SCHEDULEMODULENAME: $SCHEDULEMODULENAME"
+    wf_debug "** schedsectionname: $schedsectionname"
+    wf_debug "** schedfilename: $schedfilename"
+
+    # Identify any schedule objects deleted in this transaction
+    cat $schedfilename |grep "\-"$schedsectionname""  | cut -d . -f2 >$sched_delete_list_file
+    while read -r line
+    do
+      sched=$line
+      wf_debug "** sched del:$sched"
+      $WFCLI  sched  del   $sched  $EMPTY  $EMPTY  $EMPTY  $EMPTY  $EMPTY
+    done < $sched_delete_list_file
+    rm $sched_delete_list_file
+
+    # Identify any schedule objects got added in this transaction
+    cat $schedfilename |grep -E "\='$schedsectionname'|\="$schedsectionname""  | cut -d . -f2 | cut -d = -f1 >$sched_add_list_file
+    while read -r line
+    do
+      sched=$line
+      wf_debug "** sched add:$sched"
+      wf_sched_config $sched $SCHEDULEMODULENAME
+    done < $sched_add_list_file
+    rm $sched_add_list_file
+
+  fi
+
+}

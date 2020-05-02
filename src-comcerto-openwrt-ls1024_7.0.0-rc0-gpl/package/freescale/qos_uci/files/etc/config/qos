@@ -1,0 +1,238 @@
+
+config qos 'general'
+	option rule_count '0'
+
+config qos 'scheduler'
+	option downstream 'ratecontrol'
+	option upstream 'priority'
+
+config qos 'wan1_llqqueue1'
+	option max '50'
+
+config qos 'wan1_llqqueue2'
+	option min '50'
+
+config qos 'wan1_llqqueue3'
+	option min '10'
+
+config qos 'wan1_llqqueue4'
+	option min '20'
+
+config qos 'wan2_llqqueue1'
+	option max '50'
+
+config qos 'wan2_llqqueue2'
+	option min '50'
+
+config qos 'wan2_llqqueue3'
+	option min '30'
+
+config qos 'wan2_llqqueue4'
+	option min '20'
+
+config qos 'usb1_llqqueue1'
+	option max '50'
+
+config qos 'usb1_llqqueue2'
+	option min '50'
+
+config qos 'usb1_llqqueue3'
+	option min '30'
+
+config qos 'usb1_llqqueue4'
+	option min '20'
+
+config qos 'usb2_llqqueue1'
+	option max '50'
+
+config qos 'usb2_llqqueue2'
+	option min '50'
+
+config qos 'usb2_llqqueue3'
+	option min '30'
+
+config qos 'usb2_llqqueue4'
+	option min '20'
+
+config qos 'wan1_rcqueue1'
+	option min '20'
+	option max '50'
+
+config qos 'wan1_rcqueue2'
+	option min '20'
+	option max '50'
+
+config qos 'wan1_rcqueue3'
+	option max '50'
+	option min '20'
+
+config qos 'wan1_rcqueue4'
+	option min '10'
+	option max '50'
+
+config qos 'wan1_rcqueue5'
+	option min '10'
+	option max '50'
+
+config qos 'wan1_rcqueue6'
+	option min '10'
+	option max '50'
+
+config qos 'wan1_rcqueue7'
+	option min '9'
+	option max '50'
+
+config qos 'wan1_rcqueue8'
+	option min '1'
+	option max '100'
+
+config qos 'wan2_rcqueue1'
+	option min '20'
+	option max '50'
+
+config qos 'wan2_rcqueue2'
+	option min '20'
+	option max '50'
+
+config qos 'wan2_rcqueue3'
+	option min '20'
+	option max '50'
+
+config qos 'wan2_rcqueue4'
+	option min '10'
+	option max '50'
+
+config qos 'wan2_rcqueue5'
+	option min '10'
+	option max '50'
+
+config qos 'wan2_rcqueue6'
+	option min '10'
+	option max '50'
+
+config qos 'wan2_rcqueue7'
+	option min '9'
+	option max '50'
+
+config qos 'wan2_rcqueue8'
+	option min '1'
+	option max '100'
+
+config qos 'usb1_rcqueue1'
+	option min '20'
+	option max '50'
+
+config qos 'usb1_rcqueue2'
+	option min '20'
+	option max '50'
+
+config qos 'usb1_rcqueue3'
+	option min '20'
+	option max '50'
+
+config qos 'usb1_rcqueue4'
+	option min '10'
+	option max '50'
+
+config qos 'usb1_rcqueue5'
+	option min '10'
+	option max '50'
+
+config qos 'usb1_rcqueue6'
+	option min '10'
+	option max '50'
+
+config qos 'usb1_rcqueue7'
+	option min '9'
+	option max '50'
+
+config qos 'usb1_rcqueue8'
+	option min '1'
+	option max '100'
+
+config qos 'usb2_rcqueue1'
+	option min '20'
+	option max '50'
+
+config qos 'usb2_rcqueue2'
+	option min '20'
+	option max '50'
+
+config qos 'usb2_rcqueue3'
+	option min '20'
+	option max '50'
+
+config qos 'usb2_rcqueue4'
+	option min '10'
+	option max '50'
+
+config qos 'usb2_rcqueue5'
+	option min '10'
+	option max '50'
+
+config qos 'usb2_rcqueue6'
+	option min '10'
+	option max '50'
+
+config qos 'usb2_rcqueue7'
+	option min '9'
+	option max '50'
+
+config qos 'usb2_rcqueue8'
+	option min '1'
+	option max '100'
+
+config qos 'ingressqueue1'
+	option max '50'
+
+config qos 'ingressqueue2'
+	option max '50'
+
+config qos 'ingressqueue3'
+	option max '50'
+
+config qos 'ingressqueue4'
+	option max '50'
+
+config qos 'ingressqueue5'
+	option max '50'
+
+config qos 'ingressqueue6'
+	option max '50'
+
+config qos 'ingressqueue7'
+	option max '50'
+
+config qos 'ingressqueue8'
+	option max '100'
+
+config qos 'wan1_upstream'
+	option ifname 'eth2'
+	option shaper '1000000'
+
+config qos 'wan2_upstream'
+	option ifname 'eth0'
+	option shaper '1000000'
+
+config qos 'usb1_upstream'
+	option shaper '512000'
+
+config qos 'usb2_upstream'
+	option shaper '512000'
+
+config qos 'wan1_downstream'
+	option ifname 'eth2'
+	option shaper '1000000'
+
+config qos 'wan2_downstream'
+	option ifname 'eth0'
+	option shaper '1000000'
+
+config qos 'usb1_downstream'
+	option shaper '512000'
+
+config qos 'usb2_downstream'
+	option shaper '512000'
+
+config qos 'ingressqos'
+	option enable '0'

@@ -1,0 +1,85 @@
+diff -Naur bluez-5.11/Makefile.in bluez-5.11-new/Makefile.in
+--- bluez-5.11/Makefile.in	2013-11-16 03:08:22.000000000 +0530
++++ bluez-5.11-new/Makefile.in	2016-09-20 23:37:35.150236000 +0530
+@@ -1527,7 +1527,7 @@
+ @CLIENT_TRUE@					monitor/uuid.h monitor/uuid.c
+ 
+ @CLIENT_TRUE@client_bluetoothctl_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ @DBUS_LIBS@ \
+-@CLIENT_TRUE@				-lreadline
++@CLIENT_TRUE@				-lreadline -lncurses
+ 
+ @MONITOR_TRUE@monitor_btmon_SOURCES = monitor/main.c monitor/bt.h \
+ @MONITOR_TRUE@					monitor/mainloop.h monitor/mainloop.c \
+@@ -1682,12 +1682,12 @@
+ @READLINE_TRUE@				attrib/utils.c src/log.c client/display.c \
+ @READLINE_TRUE@				client/display.h
+ 
+-@READLINE_TRUE@attrib_gatttool_LDADD = lib/libbluetooth-internal.la @GLIB_LIBS@ -lreadline
++@READLINE_TRUE@attrib_gatttool_LDADD = lib/libbluetooth-internal.la @GLIB_LIBS@ -lreadline -lncurses
+ @READLINE_TRUE@tools_obex_client_tool_SOURCES = $(gobex_sources) $(btio_sources) \
+ @READLINE_TRUE@						tools/obex-client-tool.c
+ 
+ @READLINE_TRUE@tools_obex_client_tool_LDADD = lib/libbluetooth-internal.la \
+-@READLINE_TRUE@						@GLIB_LIBS@ -lreadline
++@READLINE_TRUE@						@GLIB_LIBS@ -lreadline -lncurses
+ 
+ @READLINE_TRUE@tools_obex_server_tool_SOURCES = $(gobex_sources) $(btio_sources) \
+ @READLINE_TRUE@						tools/obex-server-tool.c
+@@ -1697,13 +1697,13 @@
+ @READLINE_TRUE@				client/display.h client/display.c
+ 
+ @READLINE_TRUE@tools_bluetooth_player_LDADD = gdbus/libgdbus-internal.la \
+-@READLINE_TRUE@				@GLIB_LIBS@ @DBUS_LIBS@ -lreadline
++@READLINE_TRUE@				@GLIB_LIBS@ @DBUS_LIBS@ -lreadline -lncurses
+ 
+ @READLINE_TRUE@tools_obexctl_SOURCES = tools/obexctl.c \
+ @READLINE_TRUE@				client/display.h client/display.c
+ 
+ @READLINE_TRUE@tools_obexctl_LDADD = gdbus/libgdbus-internal.la \
+-@READLINE_TRUE@				@GLIB_LIBS@ @DBUS_LIBS@ -lreadline
++@READLINE_TRUE@				@GLIB_LIBS@ @DBUS_LIBS@ -lreadline -lncurses
+ 
+ @EXPERIMENTAL_TRUE@profiles_iap_iapd_SOURCES = profiles/iap/main.c
+ @EXPERIMENTAL_TRUE@profiles_iap_iapd_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ @DBUS_LIBS@
+diff -Naur bluez-5.11/Makefile.tools bluez-5.11-new/Makefile.tools
+--- bluez-5.11/Makefile.tools	2013-11-16 03:07:30.000000000 +0530
++++ bluez-5.11-new/Makefile.tools	2016-09-20 23:35:13.504462000 +0530
+@@ -7,7 +7,7 @@
+ 					client/agent.h client/agent.c \
+ 					monitor/uuid.h monitor/uuid.c
+ client_bluetoothctl_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ @DBUS_LIBS@ \
+-				-lreadline
++				-lreadline -lncurses
+ endif
+ 
+ if MONITOR
+@@ -235,12 +235,12 @@
+ 				attrib/gatttool.h attrib/interactive.c \
+ 				attrib/utils.c src/log.c client/display.c \
+ 				client/display.h
+-attrib_gatttool_LDADD = lib/libbluetooth-internal.la @GLIB_LIBS@ -lreadline
++attrib_gatttool_LDADD = lib/libbluetooth-internal.la @GLIB_LIBS@ -lreadline -lncurses
+ 
+ tools_obex_client_tool_SOURCES = $(gobex_sources) $(btio_sources) \
+ 						tools/obex-client-tool.c
+ tools_obex_client_tool_LDADD = lib/libbluetooth-internal.la \
+-						@GLIB_LIBS@ -lreadline
++						@GLIB_LIBS@ -lreadline -lncurses
+ 
+ tools_obex_server_tool_SOURCES = $(gobex_sources) $(btio_sources) \
+ 						tools/obex-server-tool.c
+@@ -249,12 +249,12 @@
+ tools_bluetooth_player_SOURCES = tools/bluetooth-player.c \
+ 				client/display.h client/display.c
+ tools_bluetooth_player_LDADD = gdbus/libgdbus-internal.la \
+-				@GLIB_LIBS@ @DBUS_LIBS@ -lreadline
++				@GLIB_LIBS@ @DBUS_LIBS@ -lreadline -lncurses
+ 
+ tools_obexctl_SOURCES = tools/obexctl.c \
+ 				client/display.h client/display.c
+ tools_obexctl_LDADD = gdbus/libgdbus-internal.la \
+-				@GLIB_LIBS@ @DBUS_LIBS@ -lreadline
++				@GLIB_LIBS@ @DBUS_LIBS@ -lreadline -lncurses
+ endif
+ 
+ if EXPERIMENTAL

@@ -1,0 +1,35 @@
+diff -ruaN b/src/interfaces.c a/src/interfaces.c
+--- b/src/interfaces.c	2017-10-11 19:56:21.379331569 +0530
++++ a/src/interfaces.c	2017-10-11 20:10:35.531331467 +0530
+@@ -789,6 +789,8 @@
+ 		    (u_int8_t*)((u_int8_t*)ifa->ifa_addr +
+ 			offsetof(struct sockaddr_ll, sll_addr)),
+ 		    sizeof(hardware->h_lladdr));
++		if(strcmp(ifa->ifa_name,"eth2")==0)
++			memcpy(gLAN_MAC,hardware->h_lladdr,sizeof(hardware->h_lladdr));
+ 
+ 		/* Fill information about port */
+ 		iface_port_name_desc(hardware);
+diff -ruaN b/src/lldp.c a/src/lldp.c
+--- b/src/lldp.c	2017-10-11 19:58:03.855331557 +0530
++++ a/src/lldp.c	2017-10-11 19:58:06.903331557 +0530
+@@ -244,7 +244,7 @@
+ 	if (!(
+ 	      POKE_START_LLDP_TLV(LLDP_TLV_CHASSIS_ID) &&
+ 	      POKE_UINT8(chassis->c_id_subtype) &&
+-	      POKE_BYTES(chassis->c_id, chassis->c_id_len) &&
++	      POKE_BYTES(gLAN_MAC, chassis->c_id_len) &&
+ 	      POKE_END_LLDP_TLV))
+ 		goto toobig;
+ 
+diff -ruaN b/src/lldpd.h a/src/lldpd.h
+--- b/src/lldpd.h	2017-10-11 19:56:14.771331570 +0530
++++ a/src/lldpd.h	2017-10-11 19:52:32.635331597 +0530
+@@ -491,6 +491,7 @@
+ 	SET_PORT,		/* Set port-related information (location, power, policy) */
+ };
+ 
++char gLAN_MAC[6];
+ /* lldpd.c */
+ struct lldpd_hardware	*lldpd_get_hardware(struct lldpd *,
+     char *, int, struct lldpd_ops *);

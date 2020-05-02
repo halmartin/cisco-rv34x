@@ -1,0 +1,38 @@
+From ba4c20bbfd4ce4c4d8b47513c544a7e0b112c35f Mon Sep 17 00:00:00 2001
+From: Manish Tiwari <manish.tiwari@nxp.com>
+Date: Tue, 5 Dec 2017 11:52:09 +0530
+Subject: [PATCH 1/2] Special character support in DHCP static mapping in Host
+ Name
+
+Signed-off-by: Manish Tiwari <manish.tiwari@nxp.com>
+---
+ src/util.c |    6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/util.c b/src/util.c
+index 2a1d448..5a70a7a 100644
+--- a/src/util.c
++++ b/src/util.c
+@@ -16,7 +16,9 @@
+ 
+ /* The SURF random number generator was taken from djbdns-1.05, by 
+    Daniel J Bernstein, which is public domain. */
+-
++/* 05/12/2017	Manish <manish.tiwari@nxp.com>
++	Special character support in DHCP static mapping in Host Name
++ */
+ 
+ #include "dnsmasq.h"
+ 
+@@ -176,7 +178,7 @@ int legal_hostname(char *name)
+ 	  (c >= '0' && c <= '9'))
+ 	continue;
+ 
+-      if (!first && (c == '-' || c == '_'))
++      if (!first && (c == '-' || c == '_' || c == ' ' || c == '\''))
+ 	continue;
+       
+       /* end of hostname part */
+-- 
+1.7.9.5
+

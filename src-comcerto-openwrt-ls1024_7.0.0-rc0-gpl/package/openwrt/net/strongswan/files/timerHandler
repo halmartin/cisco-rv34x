@@ -1,0 +1,170 @@
+#!/bin/sh 
+###########################################################################
+# *  * Copyright 2015, Freescale Semiconductor, Inc. All rights reserved. #
+###########################################################################
+
+###########################################################################
+#file:timerHandler.sh							  #
+#This file is executed only in the context of timer module. This script is#
+#  executed with connection name as an argument and it handles various    #
+#  cases of this connection and somehow(refer comments) makes the	  #
+#  tunnel live.								  #
+###########################################################################
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+local conn_name=$1
+local log_context="timer"
+
+pid_cnt=`pgrep -fl "timerHandler $conn_name"|grep -w $conn_name|wc -l`
+[ "$pid_cnt" -gt 2 ] && {
+	logger -t VPN-$log_context "Timer event for $conn_name. is already in progress, so Do nothing...!"
+	exit
+}
+
+[ -n "$2" ] && {
+	log_context="startup"
+}
+
+local left=`uci get strongswan.$conn_name.local_endpoint`
+#local leftIface=`uci get strongswan.$conn_name.wan_interface`
+#local realLeftIface
+#network_get_waniface realLeftIface $leftIface
+local right=`uci get strongswan.$conn_name.remote_endpoint`
+local backup_conn="$conn_name""_bkp"
+local profile=`uci get strongswan.$conn_name.profile`
+local ike_version=`uci get strongswan.$profile.ike_version`
+local non_rfc=`uci get strongswan.$conn_name.non_rfc`
+
+isPeerReachable()
+{
+	#isPeerReachable <localVariable> <remoteIP> <left>
+	local __remoteIP__ __iface__ __status __buf
+	local loop_num
+	__remoteIP__=$2
+	#__iface__=$3
+	__left__=$3
+
+	#__buf=$(hping3 $__remoteIP__ -I $__iface__ -c 1 -2 -p 500 -k -s 500 -d 500 --file /tmp/ipsec/isakmp.bin 2>/dev/null)
+	check_peer_alive $__remoteIP__ $__left__ 2>/dev/null
+	if [ $? -eq 0 ]
+	then
+		#echo $__buf | grep ICMP >/dev/null 2>&1
+		#if [ $? -eq 0 ]
+		#then
+		#	__status=1 #Peer reachable, but Port is Unreachable.
+		#else
+			__status=0 #Peer and Port, both are reachable.
+		#fi
+	else
+			__status=1 #Peer is unreachable. Obviously, port also unreachable.
+	fi
+
+	eval "export -- \"$1=\$__status\""
+}
+
+bringup_connection()
+{
+	local __con_name__=$1
+	#ipsec up $__con_name__ >/dev/null 2>&1 &
+	if [ "$ike_version" = 'ikev1' ] || [ "$ike_version" = 'ikev2' -a "$non_rfc" = "1" ]
+	then
+		local __count__=$(uci_get_state strongswan.core."$conn_name")
+		for i in `seq 1 $__count__`
+		do
+			ipsec up "$__con_name__"-"$i" >/dev/null 2>&1 &
+			sleep 0.5
+		done
+	else
+		ipsec up $__con_name__ >/dev/null 2>&1 &
+	fi
+}
+
+#1.Check if the current connection is UP.
+ipsec status $conn_name | grep $conn_name | grep ESTABLISHED >/dev/null 2>&1
+if [ $? -eq 0 ]
+then
+#	isPeerReachable peerStatus $right $realLeftIface
+#	if [ $peerStatus -eq 0 ]
+#	then
+#		logger -t VPN-$log_context "Timer event for $conn_name. Primary connection is already UP, so Do nothing...!"
+#	else
+#		ipsec down $conn_name >/dev/null 2>&1
+#		local isBKPenabled=`uci get strongswan.$conn_name.tunnel_backup`
+#		if [ $isBKPenabled -eq 0 ]
+#		then
+#			logger -t VPN-$log_context  "Timer event for $conn_name. Primary peer/port is not reachable. Also backup is not configured..."
+#		else
+#			logger -t VPN-$log_context  "Timer event for $conn_name. Primary peer/port is DOWN. Triggering backup...!"
+#			local remote_backup=`uci get strongswan.$conn_name.remote_backup`
+#			#local local_backup=`uci get strongswan.$conn_name.local_backup`
+#			local local_backupIface=`uci get strongswan.$conn_name.local_backup_iface`
+#			local realLocalBkpkIface
+#			network_get_waniface realLocalBkpkIface $local_backupIface
+#			isPeerReachable peerStatus $remote_backup $realLocalBkpkIface
+#			if [ $peerStatus -eq 0 ]
+#			then
+#				ipsec up $backup_conn >/dev/null 2>&1 &
+#			else
+#				logger -t VPN-$log_context "Remote backup peer/port is not reachable over local backup...!"
+#			fi
+#		fi
+#	fi
+	logger -t VPN-$log_context "Timer event for $conn_name. Primary connection is already UP, so Do nothing...!"
+else 
+	#Tunnel is down because of inactivity. Bring it up.
+	#Also check if previously we did a connection UP and if it is still running.
+
+	#echo "Primary connection is DOWN...!"
+	ipsec status $conn_name | grep $conn_name | grep CONNECTING >/dev/null 2>&1
+	if [ $? -eq 0 ]
+	then
+		logger -t VPN-$log_context  "Timer event for $conn_name. Connection UP is previously triggered, it is trying to CONNECT...!"
+	else
+		#Check if the remote is reachable...! If NOT just bring up the backup tunnel.
+		isPeerReachable peerStatus $right $left
+		if [ $peerStatus -eq 0 ]
+		then
+			logger -t VPN-$log_context  "Timer event for $conn_name. Bringing up primary connection..."
+			ipsec down $backup_conn >/dev/null 2>&1  #irrespective do a down of it and bring-up the primary.
+			#ipsec up $conn_name >/dev/null 2>&1 &
+			bringup_connection $conn_name
+		else
+			#Bring-up  backup connection if configured. Check if it is already UPed also.
+			local isBKPenabled=`uci get strongswan.$conn_name.tunnel_backup`
+			if [ $isBKPenabled -eq 0 ] 
+			then
+				logger -t VPN-$log_context  "Timer event for $conn_name. Primary is not reachable. Also backup is not configured..."
+			else
+				ipsec status $backup_conn | grep $backup_conn | grep CONNECTING >/dev/null 2>&1
+				if [ $? -eq 0 ]
+				then
+					logger -t VPN-$log_context  "Timer event for $conn_name. Primary is DOWN, backup connection is triggered it is trying to CONNECT...!"
+				else
+					ipsec status $backup_conn | grep $backup_conn | grep ESTABLISHED >/dev/null 2>&1
+					if [ $? -eq 0 ]
+					then
+						logger -t VPN-$log_context  "Timer event for $conn_name. Backup connection is already up. Do nothing..!"
+					else
+						logger -t VPN-$log_context  "Timer event for $conn_name. Primary is DOWN. Triggering backup...!"
+						local remote_backup=`uci get strongswan.$conn_name.remote_backup`
+						local local_backup=`uci get strongswan.$conn_name.local_backup`
+						#local local_backupIface=`uci get strongswan.$conn_name.local_backup_iface`
+						#local realLocalBkpkIface
+						#network_get_waniface realLocalBkpkIface $local_backupIface
+						#isPeerReachable peerStatus $remote_backup $realLocalBkpkIface
+						isPeerReachable peerStatus $remote_backup $local_backup
+						if [ $peerStatus -eq 0 ]
+						then
+							#ipsec up $backup_conn >/dev/null 2>&1 &
+							bringup_connection $backup_conn
+						else
+							logger -t VPN-$log_context "Remote backup is not reachable over local backup...!"
+						fi
+					fi
+				fi
+			fi
+		fi
+	fi
+fi

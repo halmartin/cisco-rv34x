@@ -1,0 +1,118 @@
+# 2017-09-07: harry.lin <harry.lin@deltaww.com>
+# Add support to get phy link status from /proc/phy/status file.
+--- linux-4.1.8/drivers/net/phy/phy_device.c.org	2017-09-07 09:06:48.898797434 +0800
++++ linux-4.1.8/drivers/net/phy/phy_device.c	2017-09-07 10:18:14.257546548 +0800
+@@ -62,7 +62,7 @@
+ };
+ 
+ static struct phy_driver genphy_driver[GENPHY_DRV_MAX];
+-static struct proc_dir_entry *phy_dir, *reg_file;
++static struct proc_dir_entry *phy_dir, *reg_file, *status_file;
+ 
+ static LIST_HEAD(phy_fixup_list);
+ static DEFINE_MUTEX(phy_fixup_lock);
+@@ -1317,7 +1317,7 @@
+ 	return count;
+ }
+ 
+-static struct file_operations phy_proc_fops =
++static struct file_operations phy_proc_reg_fops =
+ {
+ 	.owner = THIS_MODULE,
+ 	.open = proc_open_reg,
+@@ -1327,21 +1327,94 @@
+ 	.release = single_release,
+ };
+ 
++static int proc_show_status(struct seq_file *seq, void *v)
++{
++	struct phy_device *phydev = (struct phy_device *) seq->private;
++	int status;
++
++	/* Do a fake read */
++	status = phy_read(phydev, MII_BMSR);
++	if(status < 0)
++		return status;
++
++	/* Read link and autonegotiation status */
++	status = phy_read(phydev, MII_BMSR);
++	if(status < 0)
++		return status;
++
++	if((status & BMSR_LSTATUS) == 0)
++	{
++		if(phydev->drv->phy_id == 0x600d8595)
++		{
++			seq_printf(seq, "Broadcom BCM54210S: Link is Down\n");
++		}
++		else
++		{
++			seq_printf(seq, "Link is Down\n");
++		}
++	}
++	else
++	{
++		if(phydev->drv->phy_id == 0x600d8595)
++		{
++			phy_write(phydev, 0x1e, 0x21);
++			status = phy_read(phydev, 0x1f);
++			if((status & (1 << 6)) == (1 << 6))
++			{
++				seq_printf(seq, "Broadcom BCM54210S: SFP is Connected\n");
++			}
++			else if((status & (1 << 7)) == (1 << 7))
++			{
++				seq_printf(seq, "Broadcom BCM54210S: COPPER is Connected\n");
++			}
++			else
++			{
++				seq_printf(seq, "Broadcom BCM54210S: Link is Down\n");
++			}
++		}
++		else
++		{
++			seq_printf(seq, "Link is Up\n");
++		}
++	}
++
++	return 0;
++}
++
++static int proc_open_status(struct inode *inode, struct file *file)
++{
++	return single_open(file, proc_show_status, PDE_DATA(inode));
++}
++
++static struct file_operations phy_proc_status_fops =
++{
++	.owner = THIS_MODULE,
++	.open = proc_open_status,
++	.read = seq_read,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
+ static int phy_proc_fs_create(struct phy_device *phydev)
+ {
+ 	phy_dir = proc_mkdir("phy", NULL);
+ 	if(!phy_dir)
+ 		return -ENOMEM;
+-	reg_file = proc_create_data("reg", 0644, phy_dir, &phy_proc_fops, phydev);
++	reg_file = proc_create_data("reg", 0644, phy_dir, &phy_proc_reg_fops, phydev);
+ 	if(!reg_file)
+ 		return -ENOMEM;
+ 
++	status_file = proc_create_data("status", 0644, phy_dir, &phy_proc_status_fops, phydev);
++	if(!status_file)
++		return -ENOMEM;
++
+ 	return 0;
+ }
+ 
+ static int phy_proc_fs_destroy(void)
+ {
+ 	remove_proc_entry("phy/reg", NULL);
++	remove_proc_entry("phy/status", NULL);
+ 	remove_proc_entry("phy", NULL);
+ 
+ 	return 0;

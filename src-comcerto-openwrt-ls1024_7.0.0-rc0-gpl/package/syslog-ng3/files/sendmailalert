@@ -1,0 +1,36 @@
+#!/bin/sh
+
+filename="$1"
+
+#Subject=`uci get syslog.email.subject` >/dev/null 2>&1
+#[ -z "$Subject" ] && Subject="Log Message"
+Subject="Email Alert"
+
+PID=`uci get systeminfo.sysinfo.pid`
+SERIAL=`uci get systeminfo.sysinfo.serial_number`
+FROM=`uci get email.email_settings.from_email_address1`
+To1=`uci get email.email_settings.to_email_address1`
+To2=""
+hostname=`uci get systemconfig.system.hostname`
+uci_email2=`uci get email.email_settings.to_email_address2` >/dev/null 2>&1
+if [ -n "$uci_email2" ];then
+	To2="$uci_email2"
+fi
+
+`sed -i "1i" "$filename"`
+`sed -i "1i Subject: \"$hostname($SERIAL) $Subject\"" "$filename"`
+if [ -n "$To2" ];then
+	`sed -i "1i To: $To2" "$filename"`
+fi
+
+`sed -i "1i To: $To1" "$filename"`
+`sed -i "1i From: \"$PID($SERIAL)\" <$FROM>" "$filename"`
+
+
+if [ -n "$To2" ];then
+	cat $filename | msmtp $To1 $To2 --syslog >/dev/null 2>&1
+else
+	cat $filename | msmtp $To1 --syslog >/dev/null 2>&1
+fi
+
+rm -rf $filename

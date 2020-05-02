@@ -1,0 +1,32 @@
+#!/bin/sh
+
+[ "$DEVICE" == "lo" ] && exit 0
+
+case "$INTERFACE" in *vlan*) exit 0 ;; esac
+
+board=$(uci get systeminfo.sysinfo.pid | awk -F '-' '{print $1}')
+if [ "$board" = "RV160" ] || [ "$board" = "RV160W" ]; then
+	case "$ACTION" in
+		ifup|ifdown)
+			#TODO:Here we may need to have a logic to skip connections that are inter-vlan.
+			isIPv6=$(uci get network.$INTERFACE.ipv6)
+			if [ "$isIPv6" != "1" ]; then
+				/usr/bin/clearconnection_v4.sh 2>&- >&-
+			fi
+		;;
+	esac
+	exit 0
+fi
+
+case "$ACTION" in
+        ifup)
+		mwan3-clear-connections $INTERFACE &
+        ;;
+
+        ifdown)
+		packet_mark=$(cat /tmp/mwan3downmark)
+		conntrack -D -m $packet_mark
+		rm /tmp/mwan3downmark
+		logger -t mwan3 -p info "Interface $INTERFACE is DOWN/Offline"
+        ;;
+esac

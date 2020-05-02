@@ -1,0 +1,50 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Fix phy can not work issue.
+--- linux-4.1.8/drivers/net/phy/broadcom.c.org	2017-01-17 14:34:22.215252822 +0800
++++ linux-4.1.8/drivers/net/phy/broadcom.c	2017-01-17 14:36:31.098377924 +0800
+@@ -258,6 +258,16 @@
+ 	return 0;
+ }
+ 
++static int bcm54210s_config_aneg(struct phy_device *phydev)
++{
++	int ret;
++
++	ret = genphy_config_aneg(phydev);
++	bcm54210s_config_init(phydev);
++
++	return ret;
++}
++
+ static int bcm5482_config_init(struct phy_device *phydev)
+ {
+ 	int err, reg;
+@@ -557,7 +567,7 @@
+ 			SUPPORTED_Pause | SUPPORTED_Asym_Pause,
+ 	.flags      = PHY_HAS_MAGICANEG | PHY_HAS_INTERRUPT,
+ 	.config_init    = bcm54210s_config_init,
+-	.config_aneg    = genphy_config_aneg,
++	.config_aneg    = bcm54210s_config_aneg,
+ 	.read_status    = genphy_read_status,
+ 	.ack_interrupt  = bcm54xx_ack_interrupt,
+ 	.config_intr    = bcm54xx_config_intr,
+--- linux-4.1.8/arch/arm/mach-comcerto/reset.c.org	2017-01-17 14:07:16.588378084 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/reset.c	2017-01-17 14:12:57.918377996 +0800
+@@ -29,6 +29,7 @@
+ #include <linux/spinlock.h>
+ 
+ #include <linux/gpio.h>
++#include <linux/delay.h>
+ 
+ static unsigned int i2cspi_state = 0x3, dus_state = 0xf;
+ static spinlock_t reset_lock;
+@@ -549,4 +550,9 @@
+ 	spin_lock_init(&reset_lock);
+ 
+ 	/* Do Any boottime Reset/Out-Of-Reset to devices if required*/
++	/* RV160W/RV160 reset GPIO 44 for Phy */
++	writel(readl(COMCERTO_GPIO_63_32_PIN_SELECT) | 0x00001000, COMCERTO_GPIO_63_32_PIN_SELECT);
++	writel(readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) & ~0x00001000, COMCERTO_GPIO_63_32_PIN_OUTPUT);
++	mdelay(1000);
++	writel(readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) | 0x00001000, COMCERTO_GPIO_63_32_PIN_OUTPUT);
+ }

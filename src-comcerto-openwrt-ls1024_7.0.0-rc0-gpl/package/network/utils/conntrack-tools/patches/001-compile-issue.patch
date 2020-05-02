@@ -1,0 +1,106 @@
+diff -aurN '--exclude-from=./exclude-file' conntrack-tools-0.9.12-orig/doc/stats/conntrackd.conf.rej conntrack-tools-0.9.12/doc/stats/conntrackd.conf.rej
+--- conntrack-tools-0.9.12-orig/doc/stats/conntrackd.conf.rej	2009-02-09 01:13:25.000000000 +0530
++++ conntrack-tools-0.9.12/doc/stats/conntrackd.conf.rej	1970-01-01 05:30:00.000000000 +0530
+@@ -1,23 +0,0 @@
+-*************** Sync {
+-*** 1,6 ****
+-  #
+-  General {
+-  	#
+-  	# Number of buckets in the cache hashtable. The bigger it is,
+-  	# the closer it gets to O(1) at the cost of consuming more memory.
+-  	# Read some documents about tuning hashtables for further reference.
+---- 1,14 ----
+-  #
+-  General {
+-  	#
+-+ 	# Set the nice value of the process, this value goes from -20
+-+ 	# (most favorable scheduling) to 19 (least favorable). Using a
+-+ 	# negative value reduces the chances to lose state-change events.
+-+ 	# Default is 0. See man nice(1) for more information.
+-+ 	#
+-+ 	Nice -1
+-+ 
+-+ 	#
+-  	# Number of buckets in the cache hashtable. The bigger it is,
+-  	# the closer it gets to O(1) at the cost of consuming more memory.
+-  	# Read some documents about tuning hashtables for further reference.
+diff -aurN '--exclude-from=./exclude-file' conntrack-tools-0.9.12-orig/doc/sync/alarm/conntrackd.conf.rej conntrack-tools-0.9.12/doc/sync/alarm/conntrackd.conf.rej
+--- conntrack-tools-0.9.12-orig/doc/sync/alarm/conntrackd.conf.rej	2009-01-25 17:55:43.000000000 +0530
++++ conntrack-tools-0.9.12/doc/sync/alarm/conntrackd.conf.rej	1970-01-01 05:30:00.000000000 +0530
+@@ -1,30 +0,0 @@
+-*************** Sync {
+-*** 23,36 ****
+-  
+-  		#
+-  		# If the firewall replica goes from primary to backup,
+-- 		# the conntrackd -t command is invoked in the script. 
+-- 		# This command resets the timers of the conntracks that
+-- 		# live in the kernel to this new value. This is useful
+-- 		# to purge the connection tracking table of zombie entries
+-- 		# and avoid clashes with old entries if you trigger 
+-- 		# several consecutive hand-overs.
+-  		#
+-- 		PurgeTimeout 15
+-  
+-  		# Set the acknowledgement window size. If you decrease this
+-  		# value, the number of acknowlegdments increases. More
+---- 23,35 ----
+-  
+-  		#
+-  		# If the firewall replica goes from primary to backup,
+-+ 		# the conntrackd -t command is invoked in the script.
+-+ 		# This command schedules a flush of the table in N seconds.
+-+ 		# This is useful to purge the connection tracking table of
+-+ 		# zombie entries and avoid clashes with old entries if you
+-+ 		# trigger several consecutive hand-overs. Default is 60 seconds.
+-  		#
+-+ 		# PurgeTimeout 60
+-  
+-  		# Set the acknowledgement window size. If you decrease this
+-  		# value, the number of acknowlegdments increases. More
+diff -aurN '--exclude-from=./exclude-file' conntrack-tools-0.9.12-orig/doc/sync/notrack/conntrackd.conf.rej conntrack-tools-0.9.12/doc/sync/notrack/conntrackd.conf.rej
+--- conntrack-tools-0.9.12-orig/doc/sync/notrack/conntrackd.conf.rej	2009-01-25 17:57:21.000000000 +0530
++++ conntrack-tools-0.9.12/doc/sync/notrack/conntrackd.conf.rej	1970-01-01 05:30:00.000000000 +0530
+@@ -1,30 +0,0 @@
+-*************** Sync {
+-*** 23,36 ****
+-  
+-  		#
+-  		# If the firewall replica goes from primary to backup,
+-- 		# the conntrackd -t command is invoked in the script. 
+-- 		# This command resets the timers of the conntracks that
+-- 		# live in the kernel to this new value. This is useful
+-- 		# to purge the connection tracking table of zombie entries
+-- 		# and avoid clashes with old entries if you trigger 
+-- 		# several consecutive hand-overs.
+-  		#
+-- 		PurgeTimeout 15
+-  
+-  		# Set the acknowledgement window size. If you decrease this
+-  		# value, the number of acknowlegdments increases. More
+---- 23,35 ----
+-  
+-  		#
+-  		# If the firewall replica goes from primary to backup,
+-+ 		# the conntrackd -t command is invoked in the script.
+-+ 		# This command schedules a flush of the table in N seconds.
+-+ 		# This is useful to purge the connection tracking table of
+-+ 		# zombie entries and avoid clashes with old entries if you
+-+ 		# trigger several consecutive hand-overs. Default is 60 seconds.
+-  		#
+-+ 		# PurgeTimeout 60
+-  
+-  		# Set the acknowledgement window size. If you decrease this
+-  		# value, the number of acknowlegdments increases. More
+diff -aurN '--exclude-from=./exclude-file' conntrack-tools-0.9.12-orig/src/parse.c conntrack-tools-0.9.12/src/parse.c
+--- conntrack-tools-0.9.12-orig/src/parse.c	2009-03-19 06:12:48.000000000 +0530
++++ conntrack-tools-0.9.12/src/parse.c	2017-08-22 16:05:59.140934356 +0530
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include "network.h"
++#include <stdlib.h>
+ 
+ #include <libnetfilter_conntrack/libnetfilter_conntrack.h>
+ 

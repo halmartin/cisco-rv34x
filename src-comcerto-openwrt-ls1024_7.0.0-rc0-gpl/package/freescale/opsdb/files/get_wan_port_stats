@@ -1,0 +1,216 @@
+#!/bin/sh
+
+# For PORT_STATS ("PORT, IFACE, LINK_STATUS, PORT_ACTIVITY, SPEED_STATUS, DUPLEX_STATUS, AUTO_NEG, In_unicast_pkts, in_broadcase_pkts, in_multicast_pkts, in_octets, in_errors, out_unicast_pkts, out_broadcase_pkts, out_multicast_pkts, out_octets, out_errors, lldp_status,ifindex")
+
+pid="$1"
+index="$2"
+phyIfStats="/tmp/phyIfStatswan1"
+WANPORT_STATS_FILE="/tmp/stats/wanport_stats"
+
+# FOR 1st physical port (wan1)
+case $pid in
+        *340* | *345*)
+	phy_interface1=`uci get network.wan1.ifname | sed -e "s/eth3.[0-9]*//g" | sed -e "s/^ *//g"`
+	;;
+
+        *160* | *260*)
+	phy_interface1=`uci get network.wan1.ifname | awk -F '.' '{print $1}'`
+	;;
+esac
+
+
+[ -n "$phy_interface1" ] && {
+        wan1_linkstatus=0
+        wan1_speedstatus=0
+        wan1_dupstatus=0
+        wan1_autoneg=0
+	transceiver=0
+        wan1_lldp_status=`uci get lldpd.config.wan1` >/dev/null 2>&1
+        portactivity=`uci get wanport.wan1.status` >/dev/null 2>&1
+
+	ethtool_out=$(ethtool $phy_interface1) >/dev/null 2>&1
+
+	port_type=$(cat /proc/phy/status) >/dev/null 2>&1
+        if [ $(echo $port_type | grep "COPPER is Connected" | wc -l) = 1 ]; then
+                transceiver=0;
+        elif [ $(echo $port_type | grep "SFP is Connected" | wc -l) = 1 ]; then
+                transceiver=1;
+        elif [ $(echo $port_type | grep "Link is Down" | wc -l) = 1 ]; then
+                transceiver=0;
+        fi
+
+	case $ethtool_out in 
+		*"Link detected: yes"*)
+			wan1_linkstatus=1
+			if [ "$transceiver" = "1" ]; then
+				wan1_speedstatus=1000
+			else
+				wan1_speedstatus=${ethtool_out##*Speed: }
+				wan1_speedstatus=${wan1_speedstatus%%Mb/s*}
+			fi
+		;;
+	esac
+
+	if [ "$transceiver" = "1" ]; then
+		wan1_dupstatus=1
+		wan1_autoneg=1
+	fi
+	
+	case $ethtool_out in 
+		*"Duplex: Full"*)
+			wan1_dupstatus=1
+		;;
+	esac
+	
+	case $ethtool_out in
+		*"Auto-negotiation: on"*)
+			wan1_autoneg=1
+		;;
+	esac
+
+	case $portactivity in
+		1)
+			wan1_portactivity=0
+		;;
+		0)
+			wan1_portactivity=1
+			wan1_linkstatus=2
+		;;
+	esac
+	
+	`ethtool -S ${phy_interface1} > $phyIfStats`
+        wan1_in_error=`awk '/errors/ && /rx-/{sum+=$NF} END {print sum}' $phyIfStats`
+        wan1_out_error=`awk '/errors/ && /tx-/{sum+=$NF} END {print sum}' $phyIfStats`
+	wan1_in_unicast_pkts=`awk '/rx- packets:/{print $NF}' $phyIfStats`
+	wan1_in_broadcast_pkts=`awk '/rx- broadcast:/{print $NF}' $phyIfStats`
+	wan1_in_multicast_pkts=`awk '/rx- multicast:/{print $NF}' $phyIfStats`
+	wan1_in_octets=`awk '/rx- octets:/{print $NF}' $phyIfStats`
+	wan1_out_unicast_pkts=`awk '/tx- packets:/{print $NF}' $phyIfStats`
+	wan1_out_broadcast_pkts=`awk '/tx- broadcast:/{print $NF}' $phyIfStats`
+	wan1_out_multicast_pkts=`awk '/tx- multicast:/{print $NF}' $phyIfStats`
+	wan1_out_octets=`awk '/tx- octets:/{print $NF}' $phyIfStats`
+
+	IFCONFIG="/sbin/ifconfig ${phy_interface1}"
+	status=`$IFCONFIG | grep "UP" | wc -l`;
+	if test $status -gt 0;
+	then
+		admin_status=1;
+	else
+		admin_status=2;
+	fi
+	op_state=$(cat /sys/class/net/${phy_interface1}/operstate)
+	if [ "$op_state" = "up" ]; then
+		oper_status=1;
+	elif [ "$op_state" = "down" ]; then
+		oper_status=2;
+	elif [ "$op_state" = "testing" ]; then
+		oper_status=3;
+	elif [ "$op_state" = "unknown" ]; then
+		oper_status=4;
+	elif [ "$op_state" = "dormant" ]; then
+		oper_status=5;
+	elif [ "$op_state" = "not-present" ]; then
+		oper_status=6;
+	elif [ "$op_state" = "lower-layer-down" ]; then
+		oper_status=7;
+	fi
+
+	echo "WAN_PORT1,$wan1_linkstatus,$wan1_portactivity,$wan1_speedstatus,$wan1_dupstatus,$wan1_autoneg,$wan1_in_unicast_pkts,$wan1_in_broadcast_pkts,$wan1_in_multicast_pkts,$wan1_in_octets,$wan1_in_error,$wan1_out_unicast_pkts,$wan1_out_broadcast_pkts,$wan1_out_multicast_pkts,$wan1_out_octets,$wan1_out_error,$wan1_lldp_status,$index,$admin_status,$oper_status,$transceiver," > $WANPORT_STATS_FILE
+}
+
+index=$((index+1))
+
+case $pid in
+        *340* | *345*)
+
+	phyIfStats="/tmp/phyIfStatswan2"
+
+# FOR 2st physical port (wan2)
+	phy_interface2=`uci get network.wan2.ifname | sed -e "s/eth3.[0-9]*//g" | sed -e "s/^ *//g"`
+	[ -n "$phy_interface2" ] && {
+		wan2_linkstatus=0
+			wan2_speedstatus=
+			wan2_dupstatus=0
+			wan2_autoneg=0
+			wan2_lldp_status=`uci get lldpd.config.wan2` >/dev/null 2>&1
+			portactivity=`uci get wanport.wan2.status` >/dev/null 2>&1
+
+			ethtool_out=$(ethtool $phy_interface2) >/dev/null 2>&1
+
+			case $ethtool_out in 
+			*"Link detected: yes"*)
+			wan2_linkstatus=1
+			;;
+		esac
+
+			case $ethtool_out in 
+			*"Duplex: Full"*)
+			wan2_dupstatus=1
+			;;
+		esac
+
+			case $ethtool_out in
+			*"Auto-negotiation: on"*)
+			wan2_autoneg=1
+			;;
+		esac
+
+			case $portactivity in
+			1)
+			wan2_portactivity=0
+			;;
+		0)
+			wan2_portactivity=1
+			wan2_linkstatus=2
+			;;
+		esac
+
+			wan2_speedstatus=${ethtool_out##*Speed: }
+		wan2_speedstatus=${wan2_speedstatus%%Mb/s*}
+
+		`ethtool -S ${phy_interface2} > $phyIfStats`
+			wan2_in_error=`awk '/errors/ && /rx-/{sum+=$NF} END {print sum}' $phyIfStats`
+			wan2_out_error=`awk '/errors/ && /tx-/{sum+=$NF} END {print sum}' $phyIfStats`
+			wan2_in_unicast_pkts=`awk '/rx- packets:/{print $NF}' $phyIfStats`
+			wan2_in_broadcast_pkts=`awk '/rx- broadcast:/{print $NF}' $phyIfStats`
+			wan2_in_multicast_pkts=`awk '/rx- multicast:/{print $NF}' $phyIfStats`
+			wan2_in_octets=`awk '/rx- octets:/{print $NF}' $phyIfStats`
+			wan2_out_unicast_pkts=`awk '/tx- packets:/{print $NF}' $phyIfStats`
+			wan2_out_broadcast_pkts=`awk '/tx- broadcast:/{print $NF}' $phyIfStats`
+			wan2_out_multicast_pkts=`awk '/tx- multicast:/{print $NF}' $phyIfStats`
+			wan2_out_octets=`awk '/tx- octets:/{print $NF}' $phyIfStats`
+
+	IFCONFIG="/sbin/ifconfig ${phy_interface2}"
+	status=`$IFCONFIG | grep "UP" | wc -l`;
+	if test $status -gt 0;
+	then
+		admin_status=1;
+	else
+		admin_status=2;
+	fi
+	op_state=$(cat /sys/class/net/${phy_interface2}/operstate)
+	if [ "$op_state" = "up" ]; then
+		oper_status=1;
+	elif [ "$op_state" = "down" ]; then
+		oper_status=2;
+	elif [ "$op_state" = "testing" ]; then
+		oper_status=3;
+	elif [ "$op_state" = "unknown" ]; then
+		oper_status=4;
+	elif [ "$op_state" = "dormant" ]; then
+		oper_status=5;
+	elif [ "$op_state" = "not-present" ]; then
+		oper_status=6;
+	elif [ "$op_state" = "lower-layer-down" ]; then
+		oper_status=7;
+	fi
+
+	echo "WAN_PORT2,$wan2_linkstatus,$wan2_portactivity,$wan2_speedstatus,$wan2_dupstatus,$wan2_autoneg,$wan2_in_unicast_pkts,$wan2_in_broadcast_pkts,$wan2_in_multicast_pkts,$wan2_in_octets,$wan2_in_error,$wan2_out_unicast_pkts,$wan2_out_broadcast_pkts,$wan2_out_multicast_pkts,$wan2_out_octets,$wan2_out_error,$wan2_lldp_status,$index,$admin_status,$oper_status" >> $WANPORT_STATS_FILE
+}
+			index=$((index+1))
+	;;
+	*)
+	;;
+esac
+
+exit $index

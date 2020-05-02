@@ -1,0 +1,151 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Fix i2c read issue.
+--- linux-4.1.8/drivers/i2c/busses/i2c-comcerto.c.org	2017-01-18 09:35:02.075253579 +0800
++++ linux-4.1.8/drivers/i2c/busses/i2c-comcerto.c	2017-01-18 10:21:46.998378084 +0800
+@@ -40,6 +40,9 @@
+ #define SPEED_FULL_KHZ		400
+ #define SPEED_NORMAL_KHZ	100
+ 
++static int fstround = 1;
++static int read_cycle = 0;
++
+ static int force_poll = 0;
+ static struct clk *clk_i2c;
+ module_param(force_poll, bool, S_IRUGO);
+@@ -64,6 +67,7 @@
+ 	int			msg_status;	/* < 0: error, == 0: success, > 0: message in progress */
+ 	int			msg_len;
+ 	int			msg_retries;
++	int			restart;
+ };
+ 
+ #define REG_ADDR(i2c, offset)		((i2c)->membase + (offset))
+@@ -177,7 +181,13 @@
+ static inline void comcerto_i2c_message_complete(struct comcerto_i2c *i2c, int status)
+ {
+ 	i2c->msg_status = status;
+-	WR_CNTR(i2c, CNTR_STP);
++
++	mdelay(10);
++
++	if ((fstround) && (read_cycle))
++		WR_CNTR(i2c, CNTR_STA);
++	else
++		WR_CNTR(i2c, CNTR_STP);
+ }
+ 
+ static inline int comcerto_i2c_message_in_progress(struct comcerto_i2c *i2c)
+@@ -196,6 +206,7 @@
+ 	if (i2c->irq < 0) {
+ 		ulong jiffies_mark = jiffies + comcerto_i2c_calculate_timeout(i2c, i2c->msg);
+ 
++		mdelay(10);
+ 		WR_CNTR(i2c, cntr);
+ 		while ((RD_CNTR(i2c) & CNTR_IFLG) == 0) {
+ 			if (need_resched())
+@@ -223,7 +234,8 @@
+ 		i2c->msg_state = TR_ADDR_ACK;
+ 	}
+ 	else {
+-		*cntr = CNTR_STP|CNTR_STA;	/* SPT|STA to auto recover from bus error state transparently at the start of the transfer */
++		if (fstround)
++			*cntr = CNTR_STA;	/* SPT|STA to auto recover from bus error state transparently at the start of the transfer */
+ 		i2c->msg_state = TR_START_ACK;
+ 	}
+ }
+@@ -245,6 +257,7 @@
+ 		if (i2c->msg->flags & I2C_M_REV_DIR_ADDR)
+ 			addr ^= 1;		/* invert RW bit if it's requested */
+ 
++		mdelay(10);
+ 		WR_DATA(i2c, addr);		/* write address and read/write bit */
+ 	} else {
+ 		dev_dbg(i2c->dev, "%s: unexpected state (%#x) on start phase, %s\n",
+@@ -283,6 +296,9 @@
+ 			/* check whether we should ignore NACK */
+ 			if (status == STAT_DATA_RD_NACK && (i2c->msg->flags & I2C_M_IGNORE_NAK))
+ 				status = STAT_DATA_RD_ACK;
++
++			if (status == STAT_ADDR_RD_NACK)
++				status = STAT_ADDR_RD_ACK;
+ 		}
+ 
+ 		if (likely(status == STAT_ADDR_RD_ACK)) {
+@@ -373,6 +389,9 @@
+ 			status = RD_STAT(i2c);
+ 			if (status == STAT_DATA_WR_NACK && (i2c->msg->flags & I2C_M_IGNORE_NAK))
+ 				status = STAT_DATA_WR_ACK;
++
++			if (status == STAT_ADDR_WR_NACK)
++				status = STAT_ADDR_WR_ACK;
+ 		}
+ 
+ 		if (likely(status == STAT_ADDR_WR_ACK)) {
+@@ -382,6 +401,7 @@
+ 			i2c->msg_state = TR_DATA_ACK;
+ 			i2c->msg_len = 0;
+ 			if (likely(i2c->msg->len != 0)) {
++				mdelay(10);
+ 				WR_DATA(i2c, i2c->msg->buf[i2c->msg_len++]);
+ 				//printk("comcerto_i2c_tx: i2c->msg->buf[i2c->msg_len - 1]=%d\n", i2c->msg->buf[i2c->msg_len - 1]);
+ 			}
+@@ -406,9 +426,14 @@
+ 		if (status == STAT_DATA_WR_NACK && (i2c->msg->flags & I2C_M_IGNORE_NAK))
+ 			status = STAT_DATA_WR_ACK;
+ 
++		if (status == STAT_DATA_WR_NACK)
++			status = STAT_DATA_WR_ACK;
++
+ 		if (likely(status == STAT_DATA_WR_ACK)) {
+-			if (i2c->msg->len > i2c->msg_len)
++			if (i2c->msg->len > i2c->msg_len) {
++				mdelay(10);
+ 				WR_DATA(i2c, i2c->msg->buf[i2c->msg_len++]);
++			}
+ 			else
+ 				comcerto_i2c_message_complete(i2c, 0);
+ 		}
+@@ -451,8 +476,18 @@
+ static void comcerto_i2c_message_process(struct comcerto_i2c *i2c, struct i2c_msg *msg)
+ {
+ 	i2c->msg = msg;
+-	i2c->msg_state = TR_IDLE;
+-	i2c->msg_status = 1;
++
++	if (fstround == 1)
++	{
++		i2c->msg_state = TR_IDLE;
++		i2c->msg_status = 1;
++	}
++	else
++	{
++		i2c->msg_state = TR_START_ACK;
++		i2c->msg_status = 2;
++	}
++
+ 	i2c->msg_retries = i2c->adapter->retries;
+ 
+ polling_mode:
+@@ -499,10 +534,22 @@
+ 
+ 	dev_dbg(i2c->dev, "%s: %d messages to process\n", __FUNCTION__, num);
+ 
++	if (num == 2)
++		read_cycle = 1;
++	else
++		read_cycle = 0;
++
+ 	for (i = 0; i < num; i++) {
+ 		dev_dbg(i2c->dev, "%s: message #%d: addr=%#x, flags=%#x, len=%u\n", __FUNCTION__,
+ 			i, msgs[i].addr, msgs[i].flags, msgs[i].len);
+ 
++		i2c->restart = (i != (num-1));
++
++		if ((i2c->restart) || (num == 1))
++			fstround = 1;
++		else
++			fstround = 0;
++
+ 		comcerto_i2c_message_process(i2c, &msgs[i]);
+ 
+ 		if (i2c->msg_status < 0) {

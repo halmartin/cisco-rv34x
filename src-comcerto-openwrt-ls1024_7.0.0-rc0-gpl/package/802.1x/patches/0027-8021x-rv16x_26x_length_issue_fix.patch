@@ -1,0 +1,103 @@
+diff -ruaN a/src/source/config.c b/src/source/config.c
+--- a/src/source/config.c	2017-07-05 17:25:33.942607957 +0530
++++ b/src/source/config.c	2017-07-17 12:28:16.774208515 +0530
+@@ -17,9 +17,7 @@
+ #include "ieee802_1x.h"
+ #include "md5.h"
+ 
+-extern char LAN_IFACE_NAME[10];
+-
+-
++#define LAN_IFACE_PP "eth2"
+ 
+ unsigned char BtoH(
+     unsigned char ch)
+@@ -440,8 +438,8 @@
+ 	// initial default EAP IF name and Pre-Auth IF name	as "br0"
+ 	conf->num_eap_if = 1;	
+ 	conf->num_preauth_if = 1;	
+-	strcpy(conf->eap_if_name[0], LAN_IFACE_NAME);	
+-	strcpy(conf->preauth_if_name[0],LAN_IFACE_NAME);
++	strcpy(conf->eap_if_name[0], LAN_IFACE_PP);	
++	strcpy(conf->preauth_if_name[0],LAN_IFACE_PP);
+ 	
+ 
+ 	// Get parameters from deiver through IOCTL cmd
+@@ -1055,14 +1053,14 @@
+ 	// initial default EAP IF name and Pre-Auth IF name	as "eth0"
+ 	conf->num_eap_if = 1;	
+ 	conf->num_preauth_if = 1;	
+-	strcpy(conf->eap_if_name[0], LAN_IFACE_NAME);	
+-	strcpy(conf->preauth_if_name[0], LAN_IFACE_NAME);
++	strcpy(conf->eap_if_name[0], LAN_IFACE_PP);	
++	strcpy(conf->preauth_if_name[0], LAN_IFACE_PP);
+ 
+-	sprintf(s, "ip link set %s promisc on", LAN_IFACE_NAME);
++	sprintf(s, "ip link set %s promisc on", LAN_IFACE_PP);
+ 	fp = popen(s,"r"); //TCK: Ideally Add group multicast desitnation receive on the interface.
+ 	if(fp == NULL)
+ 	{
+-		DBGPRINT(RT_DEBUG_ERROR, "Unable to set promiscous mode on LAN interface %s. Cannot receive group MAC packets. 8021x setting failed", LAN_IFACE_NAME);			
++		DBGPRINT(RT_DEBUG_ERROR, "Unable to set promiscous mode on LAN interface %s. Cannot receive group MAC packets. 8021x setting failed", LAN_IFACE_PP);			
+ 		return NULL;
+ 	}
+ 	else
+diff -ruaN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2017-06-13 18:19:08.302834393 +0530
++++ b/src/source/ieee802_1x.c	2017-07-17 12:26:35.398208527 +0530
+@@ -232,6 +232,8 @@
+ 
+ static void ieee802_1x_send_with_bcm_cputag(rtapd *rtapd, struct sta_info *sta, u8 type, u8 *data, size_t datalen)
+ {
++	char str[MAX_LINE_SIZE];
++	FILE *fp = NULL;
+ 	char *buf;
+ 	struct ieee8023_hdr_with_bcm_cputag *hdr3;
+ 	struct ieee802_1x_hdr *xhdr;
+@@ -239,6 +241,8 @@
+ 	u8 *pos;
+    
+ 	len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen;
++	if (len < 64)
++		len = 64;
+ 	buf = (char *) malloc(len);
+ 	if (buf == NULL)
+ 	{
+@@ -267,7 +271,7 @@
+ 		xhdr->version = EAPOL_VERSION;
+ 	xhdr->type = type;
+ 	xhdr->length = htons(datalen);
+-
++	
+ 	if (datalen > 0 && data != NULL)
+ 		memcpy(pos + LENGTH_8021X_HDR, data, datalen);
+ 	if (sta->ethertype == ETH_P_PRE_AUTH)
+@@ -282,7 +286,6 @@
+ 			perror("send[WPA2 eap]");
+ 		DBGPRINT(RT_DEBUG_INFO,"ieee802_1x_send_with_bcm_cputag::WPA2, eap, len=%d Ether-Type %x\n", len,hdr3->eth_type);
+ 	}
+-
+ 	free(buf);
+ 	return;
+ }
+@@ -425,9 +428,9 @@
+ 	}
+ 	else if (rv_prod_type_g  == PROD_TYPE_RV_160 || rv_prod_type_g  == PROD_TYPE_RV_260)
+         {
+-                sprintf(str, "/usr/sbin/bcmssdk -D -p %d -a %d\n",sta->aid,authorized);
++                /* Enable the traffic on port using bcm_auth_egress_set(0,port,0) as per BRCM */
++                sprintf(str, "/usr/sbin/bcmssdk -D -p %d -e %d\n",sta->aid,0);
+         }
+-
+ 	else
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Invalid PID");
+@@ -1356,7 +1359,7 @@
+   int rsock;
+   int action;
+   
+-       confd_init_vsn(NULL,NULL,4,0x06020000);
++       confd_init_vsn(NULL,NULL,4,0x06040000);
+        addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+        addr.sin_family = AF_INET;
+        addr.sin_port = htons(4565);

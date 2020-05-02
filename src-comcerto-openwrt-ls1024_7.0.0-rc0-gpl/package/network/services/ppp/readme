@@ -1,0 +1,16 @@
+CHANGES : 
+1. www directory : www directory added under ppp package files directory for GUI support.
+2. Makefile : GUI support changes.
+3. The following directories have  added back, since they are used by the OpenWRT netifd framework.
+   package/ppp/files/etc/ppp/ip-down.d/
+   package/ppp/files/etc/ppp/ip-up.d
+4. A file l2tp.sh has been added fresh to the package to send  signal SIGUSR2 to 
+   the xl2tpdaemon, when ever a ppp link comes up.
+   package/ppp/files/etc/ppp/ip-up.d/l2tp.sh
+5. The default PPP/options file has been altered to take ip-up-script/ip-down-script params as the
+   netifd/ppp-up and ppp-down script, overwriting the default ip-up and ip-down, that we no longer support.
+6. PPP options are now setup by ppp.sh, remove hard maxfail setting so that it will use the option defined
+   in /etc/ppp/options
+   This avoids the pppd to exit when it cannot connect (creates eth0 interface to toggle continuously) 
+
+

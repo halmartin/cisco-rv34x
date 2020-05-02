@@ -1,0 +1,27 @@
+From c1ebbb2c6ff9647d7b7a8ce2e75a072f8eeb5fd8 Mon Sep 17 00:00:00 2001
+From: user <abdul.moiz@nxp.com>
+Date: Mon, 27 Jun 2016 18:18:39 +0530
+Subject: [PATCH 47/60] SBR-1568 Update part no to m86208 for correct ARM
+ frequency print
+
+Signed-off-by: user <abdul.moiz@nxp.com>
+---
+ common/version.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/common/version.c b/common/version.c
+index 94954b4..6ed29a0 100644
+--- a/common/version.c
++++ b/common/version.c
+@@ -16,7 +16,7 @@ void barebox_banner (void)
+ #ifdef	CONFIG_COMCERTO_BOOTLOADER
+ 	printf(RELOC("Board: " CONFIG_BOARDINFO "\n"));
+ #else
+-#ifdef CONFIG_M86201
++#ifdef CONFIG_M86208
+ 	printf(RELOC("Board: " CONFIG_BOARDINFO "  1200 MHz\n"));
+ #else
+ 	printf(RELOC("Board: " CONFIG_BOARDINFO "  900 MHz\n"));
+-- 
+2.7.4
+

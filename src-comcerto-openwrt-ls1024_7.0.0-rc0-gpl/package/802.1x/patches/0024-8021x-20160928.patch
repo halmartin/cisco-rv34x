@@ -1,0 +1,119 @@
+diff -aur a/src/header/rtdot1x.h b/src/header/rtdot1x.h
+--- a/src/header/rtdot1x.h	2016-09-28 03:29:25.856444548 +0530
++++ b/src/header/rtdot1x.h	2016-09-27 02:37:07.319784479 +0530
+@@ -192,6 +192,7 @@
+ u16	RTMPCompareMemory(void *pSrc1,void *pSrc2, u16 Length);
+ void Handle_term(int sig, void *eloop_ctx, void *signal_ctx);
+ int RT_ioctl(int sid, int param, char  *data, int data_len, char *prefix_name, unsigned char apidx, int flags);
++int get_physical_portno(uint16_t nas_port);
+ 
+ #ifdef CONFIG_RV34X_8021X 
+ void nk_802_1x_init(rtapd *apd);
+diff -aur a/src/source/eapol_sm.c b/src/source/eapol_sm.c
+--- a/src/source/eapol_sm.c	2016-09-28 03:27:13.864443575 +0530
++++ b/src/source/eapol_sm.c	2016-09-28 03:32:51.124446061 +0530
+@@ -12,8 +12,6 @@
+ #include "eloop.h"
+ 
+ extern u8 rv_prod_type_g;
+-extern int get_physical_portno(uint16_t nas_port);
+-
+ 
+ 
+ /* TODO:
+@@ -635,12 +633,9 @@
+ 			pclose(fp);
+ 			return 0;
+ 		}
++		pclose(fp);
+ 	}
+-	else
+-		return -1;
+-
+-	pclose(fp);
+-	return status;
++	return -1;
+ }
+ 
+ int rv_get_portControl(int aid)
+@@ -668,11 +663,9 @@
+ 			pclose(fp);
+ 			return 1;
+ 		}
++		pclose(fp);
+ 	}
+-	else
+-		return -1;
+-	pclose(fp);
+-	return status;
++	return -1;
+ }
+ 
+ struct eapol_state_machine *
+diff -aur a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2016-09-28 03:27:13.864443575 +0530
++++ b/src/source/rtdot1x.c	2016-09-28 03:34:32.236446807 +0530
+@@ -422,7 +422,7 @@
+ 	rtapd *rtapd = eloop_ctx;
+ 	int len;
+ 	unsigned int buf[2];
+-        struct sta_info *sta;
++        struct sta_info *sta, *free_sta;
+ 	u8	GroupMac[6] = {0x01, 0x80, 0xc2, 0x00, 0x00, 0x03};
+ 
+ 	memset(&buf, 0 , sizeof(buf));	
+@@ -433,7 +433,8 @@
+ 		return;
+ 	}
+ 
+-	DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: port_id = %d, port_event = %d\n",buf[0], buf[1]);
++	DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: LAN%d, Event = %s\n",
++				get_physical_portno(buf[0]), (buf[1] == 0)?"DOWN":"UP");
+ 	if (((rv_prod_type_g  == PROD_TYPE_RV_340) && (buf[0] > total_ports_g)) ||
+ 	    ((rv_prod_type_g  == PROD_TYPE_RV_345) && (buf[0] >= total_ports_g)) || (buf[1] > 1))
+ 	{
+@@ -443,22 +444,36 @@
+        	sta = rtapd->sta_list;
+ 	while (sta)
+ 	{
+-		DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: STA port_id = %d, state = %d\n",
+-					sta->aid, sta->eapol_sm->auth_pae.state);
+-		if((sta->aid == buf[0]) && sta->eapol_sm && (sta->eapol_sm->portEnabled != buf[1]))
++		DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: LAN%d, SM state = %d\n",
++					get_physical_portno(sta->aid), sta->eapol_sm->auth_pae.state);
++		if(sta->aid == buf[0])
+ 		{
+ 			if (buf[1] == 0) /* DOWN */
+ 			{
+-				memcpy(sta->addr, GroupMac, 6);
+-				sta->eapol_sm->portEnabled = FALSE;
+-				DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: PORT DISABLED, state(%d)\n",sta->eapol_sm->auth_pae.state);
++				if(memcmp(sta->addr, GroupMac, 6) == 0)
++				{
++					sta->eapol_sm->portEnabled = FALSE;
++					DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: LAN%d DOWN, MAC("MACSTR"), state(%d)\n",
++						get_physical_portno(sta->aid), MAC2STR(sta->addr),sta->eapol_sm->auth_pae.state);
++				}
++				else
++				{
++					DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: LAN%d DOWN, MAC("MACSTR"), STA FREED\n",
++						get_physical_portno(sta->aid), MAC2STR(sta->addr));
++
++					free_sta = sta;
++					sta = free_sta->next;
++					Ap_free_sta(rtapd, free_sta);
++					continue;
++				}
+ 			}
+ 			else /* UP */
+ 			{
+ 				sta->eapol_sm->portEnabled = TRUE;
+-				DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: PORT ENABLED, state(%d) \n",sta->eapol_sm->auth_pae.state);
++				eapol_sm_initialize(sta->eapol_sm);
++				DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: LAN%d UP, MAC("MACSTR"), state (%d)\n",
++					get_physical_portno(sta->aid), MAC2STR(sta->addr),sta->eapol_sm->auth_pae.state);
+ 			}
+-			break;
+ 		}
+ 		sta = sta->next;
+ 	}

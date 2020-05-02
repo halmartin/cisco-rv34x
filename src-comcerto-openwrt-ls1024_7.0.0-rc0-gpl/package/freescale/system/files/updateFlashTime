@@ -1,0 +1,5 @@
+#!/bin/sh 
+. /etc/boardInfo
+
+clockTime=`date "+%Y.%m.%d-%H:%M:%S"`
+echo "$clockTime" > $TimeFile

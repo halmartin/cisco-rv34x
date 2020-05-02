@@ -1,0 +1,269 @@
+#!/usr/bin/perl -w
+###########################################################################
+# *  * Copyright 2015, Freescale Semiconductor, Inc. All rights reserved. #
+###########################################################################
+
+###########################################################################
+#									  #
+#file: vpnTimer.pl							  #
+#This version of timer module is with proper naming conventions and works #
+#	good. Also it supports upto 60mins.				  #
+###########################################################################
+
+use IO::Socket::INET;
+use IO::Select;
+
+# flush after every write
+$| = 1;
+
+my ($socket,$message);
+
+$socket = new IO::Socket::INET (
+        LocalAddr => '127.0.0.1',
+        LocalPort => '9999',
+        Proto => 'udp',
+) or die "ERROR in Socket Creation : $!\n";
+
+my $select = new IO::Select();
+$select->add($socket);
+
+my @sockets_ready;
+
+my $socket_new = new IO::Socket::INET ();
+
+my $log=0;
+%conn_time=();			# Hash table to store the connection name and the time in seconds.
+%conn_time_floating=();		# Hash table to store the connection name and the relative sec at which it should be processed.
+@wheel_time_sec=();		# An array where each element itself is another array. We store the connection names that we want to process. 
+@wheel_time_min=();
+
+$cur_sec=0;	# Pointer that points to the array element that we are processing in seconds wheel.
+$cur_min=0;	# Pointer that points to the array element that we are processing in minutes wheel.
+
+$SIG{USR1}  = \&signal_handler;
+
+sub signal_handler()
+{
+	system("logger","-t VPN-timer-debug","Printing Timers");
+	printtimers();
+	system("logger","-t VPN-timer-debug","Printing Hashes");
+	printhashes();
+}
+
+#---------------------------------------------------------------#
+#Function:	printtimers					#
+#Task:		This function just prints the timer related 	#
+#		data.						#
+#---------------------------------------------------------------#
+
+sub printtimers()
+{
+	print("Printing Sec Array\n");
+	for $i ( 0 .. $#wheel_time_sec) {
+		for $j ( 0 .. $#{ $wheel_time_sec[$i] } ) {
+			print "$i sec \# $j is $wheel_time_sec[$i][$j]\n";
+			system("logger","-t VPN-timer-debug","$i sec \# $j is $wheel_time_sec[$i][$j]");
+		}
+	}
+	print("Printing mins Array\n");
+	for $i ( 0 .. $#wheel_time_min) {
+		for $j ( 0 .. $#{ $wheel_time_min[$i] } ) {
+			print "$i minute is $wheel_time_min[$i][$j]\n";
+			system("logger","-t VPN-timer-debug","$i minute is $wheel_time_min[$i][$j]");
+		}
+	}
+}
+
+#---------------------------------------------------------------#
+#Function:	printhashes					#
+#Task:		This function print the floating conn-time values.#
+#---------------------------------------------------------------#
+
+sub printhashes()
+{
+	print("Printing Hash\r\n");
+	my @conns = keys %conn_time_floating;
+	for my $key (@conns){
+		print "$key: values is :$conn_time_floating{$key}\n";
+		system("logger","-t VPN-timer-debug","$key: values is :$conn_time_floating{$key}");
+	}
+}
+
+#---------------------------------------------------------------#
+#Function:	addtimer					#
+#Task:		This function adds timers to the appropriate 	#
+#		wheels.						#
+#---------------------------------------------------------------#
+
+sub addtimer($$$)
+{
+	use integer;
+	my $conname = $_[0];	#Accessing first argument from the function parameters.
+	my $time = $_[1];
+	my $isRandomize = $_[2]; #boolean to decide on randomization of connection addition. This is done only during first addition.
+	my $hashkey_min = 0;
+
+	if($isRandomize == 0){
+		$hashkey_min = ($cur_sec + $time) / 60;
+		#print "hashkey_min is $hashkey_min\r\n";
+	} else {
+		#Now, randomize the addition to the timer wheels.
+		my $random_feed = int rand(10);
+		$hashkey_min = ($cur_sec + $time + $random_feed) / 60;
+		#print "hashkey_min is $hashkey_min\r\n";
+	}
+
+	if($hashkey_min == 0){
+		my $hashkey_sec = ($cur_sec + $time) % 60;
+		#print "hashkey_sec is $hashkey_sec\r\n";
+		push @{$wheel_time_sec[$hashkey_sec]},$conname;
+		if ($log == 1) {
+			system("logger","-t VPN-timer","Scheduling $conname timer for $hashkey_sec sec.");
+		}
+	} else {
+		my $hashkey_sec = ($cur_sec + $time) % 60;
+		my $hashkey_min_wrap = ($hashkey_min + $cur_min) % 60;
+		#print "hashkey_min_wrap is $hashkey_min_wrap and pushing it $conname \r\n";
+		push @{$wheel_time_min[$hashkey_min_wrap]},$conname;
+		$conn_time_floating{$conname}=$hashkey_sec;
+		if ($log == 1) {
+			system("logger","-t VPN-timer","Scheduling $conname timer for $hashkey_min_wrap min at $hashkey_sec sec.");
+		}
+	}
+}
+
+#---------------------------------------------------------------#
+#Function:	deltimer					#
+#Task:		This function dels timers 			#
+#References:	http://www.perlmonks.org/?node_id=1871		#
+#---------------------------------------------------------------#
+
+sub deltimer($)
+{
+	my $conname = $_[0];
+	#my $time = $_[1];
+
+	#Task is to find the connection and delete from everyplace.
+	delete $conn_time{$conname};
+	delete $conn_time_floating{$conname};
+
+	for $i ( 0 .. $#wheel_time_sec) {
+		for $j ( 0 .. $#{ $wheel_time_sec[$i] } ) {
+			if ($conname eq $wheel_time_sec[$i][$j]){
+				splice @wheel_time_sec[$i], $j, 1;
+				if ($log == 1) {
+					system("logger","-t VPN-timer","$conname is deleted from wheel_time_sec");
+				}
+				return 0;
+			}
+		}
+	}
+
+	for $i ( 0 .. $#wheel_time_min) {
+		for $j ( 0 .. $#{ $wheel_time_min[$i] } ) {
+			if ($conname eq $wheel_time_min[$i][$j]){
+				splice @wheel_time_min[$i], $j, 1;
+				if ($log == 1) {
+					system("logger","-t VPN-timer","$conname is deleted from wheel_time_min");
+				}
+				return 0;
+			}
+		}
+	}
+	return -1;
+}
+
+#------------------------------------------------------------#
+#Function:	process_timers                               #
+#Task:		This function is the main function for us.   #
+#                It processes all the array elements in it.  #
+#References:	http://archive.oreilly.com/pub/a/perl/excerpts/9780596000271/data-structures.html #
+#------------------------------------------------------------#
+
+sub process_timer()
+{
+	while(1){
+		@sockets_ready = $select->can_read(1);
+		if (! scalar(@sockets_ready)) {
+			#print("$cur_min : $cur_sec\n");
+			#print "Timeout\n";
+		} else {
+			#print("$cur_min : $cur_sec\n");
+			foreach $socket_new (@sockets_ready) {
+				if (! recv($socket_new, $message,1024,0)) {
+					print "Error reading from socket: $!\n";
+				} else {
+					# We receive the connection name from our client.
+					if ($log == 1) {
+						system("logger","-t VPN-timer","Message read: $message");
+					}
+					my $temp=substr($message,1,);
+					#print "$temp\n"; #contains connection name
+
+					if (index(substr($message,0,1),"+") == 0){
+					        #print "It is for ADD\n";
+						#Now, check if it is for TVPNC or S2S.
+						my $isTVPNC=`uci get strongswan.$temp`;
+						chomp $isTVPNC;
+						if ($isTVPNC eq "client"){
+							system("tvpnc_timer $temp &");
+						} else {
+							my $interval=`uci get strongswan.$temp.keep_alive_interval`;
+							chomp $interval;
+							$conn_time{$temp}=$interval;
+							addtimer($temp,$interval,1);
+						}
+					} elsif (index(substr($message,0,1),"-") == 0){
+					        #print "It is for DEL\n";
+						deltimer($temp);
+					} else {
+						print "This should not occur\n";
+					}
+				}
+			}
+			select(undef, undef, undef, 0.5);	#virtual timeout of 500milli sec;
+		}
+
+		my $no_of_ele = $#{$wheel_time_sec[$cur_sec]} + 1;
+		if($no_of_ele != 0){
+			#Traverse and fulfil our job here. 
+			#print("No. of ele is $no_of_ele\n");
+			for $i (0 .. ($no_of_ele-1)){
+				#$conn_name = $wheel_time_sec[$cur_sec][$i];
+				$conn_name = shift(@wheel_time_sec[$cur_sec]);
+				$conn_name_time = $conn_time{"$conn_name"};
+				#print("Data is  $conn_name,$conn_name_time\n");
+				#Reschedule this timer and fulfill its job below.
+				if ($log == 1) {
+					system("logger","-t VPN-timer","Processing and rescheduling $conn_name");
+				}
+				addtimer("$conn_name","$conn_name_time",0);
+
+				system("timerHandler $conn_name &");
+				#printtimers();
+				#printhashes();
+			}
+		}
+		#else case you just increment and sleep for a second.
+		if (($cur_sec + 1) == 60){
+			$cur_sec = ($cur_sec + 1) % 60;
+			$cur_min = ($cur_min + 1) % 60;
+			my $no_of_ele_1 = $#{$wheel_time_min[$cur_min]} + 1;
+			for $i (0 .. ($no_of_ele_1-1)){
+				$conn_name = shift(@wheel_time_min[$cur_min]);
+				$conn_name_time = $conn_time_floating{"$conn_name"};
+				addtimer("$conn_name","$conn_name_time",0);
+			}
+		} else {
+			$cur_sec = ($cur_sec + 1) % 60;
+		}
+	}
+}
+
+
+#printtimers();
+#printhashes();
+process_timer();
+
+$socket->close();
+

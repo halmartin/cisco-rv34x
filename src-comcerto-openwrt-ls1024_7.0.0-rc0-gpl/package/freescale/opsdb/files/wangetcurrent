@@ -1,0 +1,35 @@
+#!/bin/sh
+
+# This script only calls frequent data which we need.
+
+index=1
+STATUSFILE="/tmp/stats/wanstatscomplete"
+WAN_OUTFILE_FINAL="/tmp/stats/wanstats"
+WAN_OUTFILE="/tmp/stats/wanstats.tmp"
+WAN_OUTFILE_TMP1="/tmp/stats/wanstats.tmp1"
+WAN_OUTFILESTATUS="/tmp/stats/wanstats_status"
+LOCKWANSCRIPT="/tmp/.wanscriptLock"
+
+pid=`uci get systeminfo.sysinfo.pid` >/dev/null 2>&1
+pid=${pid%%-*}
+
+rm -rf $STATUSFILE
+
+/usr/bin/get_port_stats $pid $index &
+
+# Make sure that all backgroud scripts are done.
+while [ ! -f "$STATUSFILE" ] 
+do
+	sleep .01
+done
+
+# Check the status of wan script completion
+lock $LOCKWANSCRIPT
+script_completed=`cat $WAN_OUTFILESTATUS` 2>&1 >/dev/null
+if [ "$script_completed" -eq 1 ]
+then
+	cp -f $WAN_OUTFILE $WAN_OUTFILE_FINAL
+else
+	cp $WAN_OUTFILE_TMP1 $WAN_OUTFILE_FINAL
+fi
+lock -u $LOCKWANSCRIPT

@@ -1,0 +1,213 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add gpio init support.
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-01-17 16:56:56.088377775 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-01-17 17:09:16.788377799 +0800
+@@ -64,6 +64,7 @@
+ #include <mach/gpio.h>
+ #include <asm/suspend.h>
+ #include <linux/leds.h>
++#include <linux/delay.h>
+ 
+ 
+ //#include <mach/comcerto-2000/timer.h>
+@@ -116,18 +117,22 @@
+ 	c2k_gpio_pin_stat.c2k_gpio_pins_0_31 |= NOR_GPIO_PIN;
+ #endif
+ 
+-	/* Configure USB_EN1 and USB_EN2 GPIO pins for RV160W */
+-	writel((readl(COMCERTO_GPIO_63_32_PIN_SELECT) | USB_GPIO_PIN), COMCERTO_GPIO_63_32_PIN_SELECT);
+-	writel((readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) | USB_GPIO_PIN), COMCERTO_GPIO_63_32_PIN_OUTPUT);
+-	c2k_gpio_pin_stat.c2k_gpio_pins_32_63 |= USB_GPIO_PIN;
+-
+-	/*
+-	 * Configure LEDs connected to GPIO[63:32] pins
+-	 *
+-	 * Do not set GPIO of LEDs in "c2k_gpio_pin_stat". Otherwise,
+-	 * "leds-gpio" will be unable to use LEDs.
+-	 */
++	/* Configure LEDs connected to GPIO[63:32] and GPIO[31:0] pins */
+ 	writel(readl(COMCERTO_GPIO_63_32_PIN_SELECT) | ALL_GPIO_63_32_LED_PINS, COMCERTO_GPIO_63_32_PIN_SELECT);
++	writel(readl(COMCERTO_GPIO_OE_REG) | ALL_GPIO_31_0_LED_PINS, COMCERTO_GPIO_OE_REG);
++
++	/* Configure OTHER connected to GPIO[63:32] and GPIO[31:0] pins */
++	writel(readl(COMCERTO_GPIO_63_32_PIN_SELECT) | ALL_GPIO_63_32_OTHER_PINS, COMCERTO_GPIO_63_32_PIN_SELECT);
++	writel(readl(COMCERTO_GPIO_OE_REG) | ALL_GPIO_31_0_OTHER_PINS, COMCERTO_GPIO_OE_REG);
++
++	/* USB ENABLE */
++	writel(readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) | USB_EN_GPIO_PIN , COMCERTO_GPIO_63_32_PIN_OUTPUT);
++	c2k_gpio_pin_stat.c2k_gpio_pins_32_63 |= USB_EN_GPIO_PIN;
++
++	/* POE & PCIE RESET */
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~(POE_RESET_GPIO_PIN | PCIE_1RST_GPIO_PIN | PCIE_2RST_GPIO_PIN), COMCERTO_GPIO_OUTPUT_REG);
++	mdelay(1000);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | (POE_RESET_GPIO_PIN | PCIE_1RST_GPIO_PIN | PCIE_2RST_GPIO_PIN), COMCERTO_GPIO_OUTPUT_REG);
+ }
+ 
+ /* --------------------------------------------------------------------
+@@ -175,6 +180,26 @@
+ 		.default_trigger    = "none",
+ 		.gpio           = DIAG_RLED_GPIO_NUM,
+ 		.active_low     = 0,
++	},{
++		.name           = "rv160w::pse_led1",
++		.default_trigger    = "none",
++		.gpio           = PSE_LED1_GPIO_NUM,
++		.active_low     = 0,
++	},{
++		.name           = "rv160w::pse_led2",
++		.default_trigger    = "none",
++		.gpio           = PSE_LED2_GPIO_NUM,
++		.active_low     = 0,
++	},{
++		.name           = "rv160w::pse_led3",
++		.default_trigger    = "none",
++		.gpio           = PSE_LED3_GPIO_NUM,
++		.active_low     = 0,
++	},{
++		.name           = "rv160w::pse_led4",
++		.default_trigger    = "none",
++		.gpio           = PSE_LED4_GPIO_NUM,
++		.active_low     = 0,
+ 	},
+ };
+ 
+--- linux-4.1.8/arch/arm/mach-comcerto/include/mach/comcerto-2000/gpio.h.org	2017-01-17 16:56:40.098378097 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/include/mach/comcerto-2000/gpio.h	2017-01-17 16:59:45.378378052 +0800
+@@ -298,40 +298,115 @@
+ #define NOR_BUS			(GPIO25_EXP_ALE | GPIO26_EXP_RDY)
+ #define NOR_GPIO_PIN		(GPIO_PIN_25 | GPIO_PIN_26)
+ 
+-#define USB_GPIO_PIN        (GPIO_PIN_52)
+-
+ #define C2K_GPIO_NR_GPIOS	64
+-
+ #define ARCH_NR_GPIOS		C2K_GPIO_NR_GPIOS
+ 
+ /* Power LED, green (Output Pin/Active HIGH) */
+ #define POWER_GLED_GPIO_NUM     59
+ #define POWER_GLED_GPIO_PIN     GPIO_PIN_59
+-/* USB2.0_2 LED, amber (Output Pin/Active HIGH) */
+-#define USB2_2_ALED_GPIO_NUM 53
+-#define USB2_2_ALED_GPIO_PIN GPIO_PIN_53
+-/* USB2.0_2 LED, green (Output Pin/Active HIGH) */
+-#define USB2_2_GLED_GPIO_NUM 54
+-#define USB2_2_GLED_GPIO_PIN GPIO_PIN_54
+-/* VPN LED, amber (Output Pin/Active HIGH) */
+-#define VPN_ALED_GPIO_NUM 57
+-#define VPN_ALED_GPIO_PIN GPIO_PIN_57
+ /* VPN LED, green (Output Pin/Active HIGH) */
+-#define VPN_GLED_GPIO_NUM 58
+-#define VPN_GLED_GPIO_PIN GPIO_PIN_58
++#define VPN_GLED_GPIO_NUM       58
++#define VPN_GLED_GPIO_PIN       GPIO_PIN_58
++/* VPN LED, amber (Output Pin/Active HIGH) */
++#define VPN_ALED_GPIO_NUM       57
++#define VPN_ALED_GPIO_PIN       GPIO_PIN_57
+ /* DIAG LED, red (Output Pin/Active HIGH) */
+-#define DIAG_RLED_GPIO_NUM 56
+-#define DIAG_RLED_GPIO_PIN GPIO_PIN_56
++#define DIAG_RLED_GPIO_NUM      56
++#define DIAG_RLED_GPIO_PIN      GPIO_PIN_56
++/* DMZ LED, green (Output Pin/Active HIGH) */
++#define DMZ_GLED_GPIO_NUM       55
++#define DMZ_GLED_GPIO_PIN       GPIO_PIN_55
++/* USB2.0_2 LED, green (Output Pin/Active HIGH) */
++#define USB2_2_GLED_GPIO_NUM    54
++#define USB2_2_GLED_GPIO_PIN    GPIO_PIN_54
++/* USB2.0_2 LED, amber (Output Pin/Active HIGH) */
++#define USB2_2_ALED_GPIO_NUM    53
++#define USB2_2_ALED_GPIO_PIN    GPIO_PIN_53
+ /* WLAN5.0G LED, green (Output Pin/Active HIGH) */
+-#define WLAN5G_GLED_GPIO_NUM 48
+-#define WLAN5G_GLED_GPIO_PIN GPIO_PIN_48
++#define WLAN5G_GLED_GPIO_NUM    48
++#define WLAN5G_GLED_GPIO_PIN    GPIO_PIN_48
+ /* WLAN5.0G LED, green (Output Pin/Active HIGH) */
+-#define WLAN2G_GLED_GPIO_NUM 47
+-#define WLAN2G_GLED_GPIO_PIN GPIO_PIN_47
++#define WLAN2G_GLED_GPIO_NUM    47
++#define WLAN2G_GLED_GPIO_PIN    GPIO_PIN_47
+ 
+ #define ALL_GPIO_63_32_LED_PINS ( POWER_GLED_GPIO_PIN | USB2_2_ALED_GPIO_PIN | USB2_2_GLED_GPIO_PIN \
+-                                | WLAN2G_GLED_GPIO_PIN | WLAN5G_GLED_GPIO_PIN | VPN_ALED_GPIO_PIN \
+-                                | VPN_GLED_GPIO_PIN | DIAG_RLED_GPIO_PIN )
++                                | WLAN2G_GLED_GPIO_PIN | WLAN5G_GLED_GPIO_PIN | VPN_ALED_GPIO_PIN | VPN_GLED_GPIO_PIN \
++                                | DIAG_RLED_GPIO_PIN | DMZ_GLED_GPIO_PIN )
++
++/* USB ENABLE (Output Pin/Active HIGH) */
++#define USB_EN_GPIO_NUM         52
++#define USB_EN_GPIO_PIN         GPIO_PIN_52
++/* BCM53 RESET (Output Pin/Active HIGH) */
++#define BCM53_RST_GPIO_NUM      45
++#define BCM53_RST_GPIO_PIN      GPIO_PIN_45
++/* BCM54 RESET (Output Pin/Active HIGH) */
++#define BCM54_RST_GPIO_NUM      44
++#define BCM54_RST_GPIO_PIN      GPIO_PIN_44
++
++#define ALL_GPIO_63_32_OTHER_PINS ( USB_EN_GPIO_PIN | BCM53_RST_GPIO_PIN | BCM54_RST_GPIO_PIN )
++
++/* POE RESET (Output Pin/Active HIGH) */
++#define POE_RESET_GPIO_NUM      15
++#define POE_RESET_GPIO_PIN      GPIO_PIN_15
++/* RF DISABLE 1 (Output Pin/Active HIGH) */
++#define RF_1DISABLE_GPIO_NUM    14
++#define RF_1DISABLE_GPIO_PIN    GPIO_PIN_14
++/* RF DISABLE 2 (Output Pin/Active HIGH) */
++#define RF_2DISABLE_GPIO_NUM    13
++#define RF_2DISABLE_GPIO_PIN    GPIO_PIN_13
++/* PCIE RST 1 (Output Pin/Active HIGH) */
++#define PCIE_1RST_GPIO_NUM      12
++#define PCIE_1RST_GPIO_PIN      GPIO_PIN_12
++/* PCIE RST 2 (Output Pin/Active HIGH) */
++#define PCIE_2RST_GPIO_NUM      11
++#define PCIE_2RST_GPIO_PIN      GPIO_PIN_11
++
++#define ALL_GPIO_31_0_OTHER_PINS ( POE_RESET_GPIO_PIN | RF_1DISABLE_GPIO_PIN | RF_2DISABLE_GPIO_PIN \
++		                 | PCIE_1RST_GPIO_PIN |PCIE_2RST_GPIO_PIN )
++
++/* PSE LED 1, green (Output Pin/Active HIGH) */
++#define PSE_LED1_GPIO_NUM       5
++#define PSE_LED1_GPIO_PIN       GPIO_PIN_5
++/* PSE LED 2, green (Output Pin/Active HIGH) */
++#define PSE_LED2_GPIO_NUM       4
++#define PSE_LED2_GPIO_PIN       GPIO_PIN_4
++/* PSE LED 3, green (Output Pin/Active HIGH) */
++#define PSE_LED3_GPIO_NUM       1
++#define PSE_LED3_GPIO_PIN       GPIO_PIN_1
++/* PSE LED 4, green (Output Pin/Active HIGH) */
++#define PSE_LED4_GPIO_NUM       0
++#define PSE_LED4_GPIO_PIN       GPIO_PIN_0
++
++#define ALL_GPIO_31_0_LED_PINS  ( PSE_LED1_GPIO_PIN | PSE_LED2_GPIO_PIN | PSE_LED3_GPIO_PIN | PSE_LED4_GPIO_PIN )
++
++/* FW3 (Input Pin/Active HIGH) */
++#define FW3_GPIO_NUM            51
++#define FW3_GPIO_PIN            GPIO_PIN_51
++/* SYS RESET (Input Pin/Active HIGH) */
++#define SYS_RESET_GPIO_NUM      46
++#define SYS_RESET_GPIO_PIN      GPIO_PIN_46
++/* PCIE WAKE 2.4G (Output Pin/Active HIGH) */
++#define PCIE_2WAKE_GPIO_NUM     10
++#define PCIE_2WAKE_GPIO_PIN     GPIO_PIN_10
++/* PCIE CLKREQ 2.4G (Output Pin/Active HIGH) */
++#define PCIE_2CLKREQ_GPIO_NUM   9
++#define PCIE_2CLKREQ_GPIO_PIN   GPIO_PIN_9
++/* PCIE WAKE 5G (Output Pin/Active HIGH) */
++#define PCIE_5WAKE_GPIO_NUM     8
++#define PCIE_5WAKE_GPIO_PIN     GPIO_PIN_8
++/* PCIE CLKREQ 5G (Output Pin/Active HIGH) */
++#define PCIE_5CLKREQ_GPIO_NUM   7
++#define PCIE_5CLKREQ_GPIO_PIN   GPIO_PIN_7
++/* WIFI ENABLE (Output Pin/Active HIGH) */
++#define WIFI_ENABLE_GPIO_NUM    6
++#define WIFI_ENABLE_GPIO_PIN    GPIO_PIN_6
++/* FW2 (Input Pin/Active HIGH) */
++#define FW2_GPIO_NUM            3
++#define FW2_GPIO_PIN            GPIO_PIN_3
++/* FW1 (Input Pin/Active HIGH) */
++#define FW1_GPIO_NUM            2
++#define FW1_GPIO_PIN            GPIO_PIN_2
++
+ 
+ #ifndef __ASSEMBLY__
+ /* This is a temporary bit mask for avoiding usage of reserved gpio pins. */

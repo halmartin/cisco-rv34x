@@ -1,0 +1,60 @@
+From cd7b8033ee6b7bad871ecb362d6e4f42591f0c95 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Thu, 15 Nov 2018 13:05:34 +0530
+Subject: [PATCH 2/2] Added changes for case insensitive comparision of
+ option43 value from client. Signed-off-by: nageshkoneti
+ <b47094@freescale.com>
+
+---
+ rfc2131.c |   34 ++++++++++++++++++++--------------
+ 1 file changed, 20 insertions(+), 14 deletions(-)
+
+diff --git a/src/rfc2131.c b/src/rfc2131.c
+index 2ba0999..ca077dd 100644
+--- a/src/rfc2131.c
++++ b/src/rfc2131.c
+@@ -2006,21 +2006,27 @@ static struct dhcp_opt *option_find2(int opt)
+    config-supplied vendor class */
+ static void match_vendor_opts(unsigned char *opt, struct dhcp_opt *dopt)
+ {
+-  for (; dopt; dopt = dopt->next)
++    for (; dopt; dopt = dopt->next)
+     {
+-      dopt->flags &= ~DHOPT_VENDOR_MATCH;
+-      if (opt && (dopt->flags & DHOPT_VENDOR))
+-	{
+-	  int i, len = 0;
+-	  if (dopt->u.vendor_class)
+-	    len = strlen((char *)dopt->u.vendor_class);
+-	  for (i = 0; i <= (option_len(opt) - len); i++)
+-	    if (len == 0 || memcmp(dopt->u.vendor_class, option_ptr(opt, i), len) == 0)
+-	      {
+-		dopt->flags |= DHOPT_VENDOR_MATCH;
+-		break;
+-	      }
+-	}
++        dopt->flags &= ~DHOPT_VENDOR_MATCH;
++        if (opt && (dopt->flags & DHOPT_VENDOR))
++        {
++            int i, len = 0;
++            if (dopt->u.vendor_class)
++                len = strlen((char *)dopt->u.vendor_class);
++            for (i = 0; i <= (option_len(opt) - len); i++) 
++            {
++                if(dopt->opt == 43 && ((len == 0) || (strncasecmp(dopt->u.vendor_class,option_ptr(opt, i),len) == 0)))
++                {
++                    dopt->flags |= DHOPT_VENDOR_MATCH;
++                    break;
++                }else if (len == 0 || memcmp(dopt->u.vendor_class, option_ptr(opt, i), len) == 0)
++                {
++                    dopt->flags |= DHOPT_VENDOR_MATCH;
++                    break;
++                }
++            }
++        }
+     }
+ }
+ 
+-- 
+1.7.9.5
+

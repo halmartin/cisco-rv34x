@@ -1,0 +1,225 @@
+--- syslog-ng-3.0.8_Orig/src/affile.h	2016-04-19 18:55:46.163843680 +0530
++++ syslog-ng-3.0.8/src/affile.h	2016-04-19 18:38:29.225627300 +0530
+@@ -74,6 +74,7 @@ typedef struct _AFFileDestDriver
+   gboolean use_time_recvd;
+   gint time_reap;
+   guint reap_timer;
++  off_t size_limit;
+ } AFFileDestDriver;
+ 
+ LogDriver *affile_dd_new(gchar *filename, guint32 flags);
+@@ -90,5 +91,6 @@ void affile_dd_set_create_dirs(LogDriver
+ void affile_dd_set_fsync(LogDriver *s, gboolean enable);
+ void affile_dd_set_overwrite_if_older(LogDriver *s, gint overwrite_if_older);
+ void affile_dd_set_local_time_zone(LogDriver *s, const gchar *local_time_zone);
++void affile_dd_set_file_size_limit(LogDriver *s, off_t file_size_limit);
+ 
+ #endif
+--- syslog-ng-3.0.8_Orig/src/cfg.c	2016-04-19 18:55:46.163843680 +0530
++++ syslog-ng-3.0.8/src/cfg.c	2016-04-19 18:38:29.225627300 +0530
+@@ -300,6 +300,7 @@ cfg_new(gchar *fname)
+   self->file_uid = 0;
+   self->file_gid = 0;
+   self->file_perm = 0600;
++  self->file_size_limit = 0;
+   self->dir_uid = 0;
+   self->dir_gid = 0;
+   self->dir_perm = 0700;
+--- syslog-ng-3.0.8_Orig/src/cfg-grammar.y	2016-04-19 18:55:46.163843680 +0530
++++ syslog-ng-3.0.8/src/cfg-grammar.y	2016-04-19 18:38:29.241635300 +0530
+@@ -156,6 +156,7 @@ cfg_check_template(LogTemplate *template
+ %token KW_FOLLOW_FREQ
+ %token KW_OVERWRITE_IF_OLDER
+ %token KW_DEFAULT_FACILITY KW_DEFAULT_LEVEL
++%token KW_FILE_SIZE_LIMIT KW_SIZE_LIMIT
+ 
+ /* socket related options */
+ %token KW_KEEP_ALIVE KW_MAX_CONNECTIONS
+@@ -810,6 +811,7 @@ dest_affile_option
+ 	| KW_OVERWRITE_IF_OLDER '(' LL_NUMBER ')'	{ affile_dd_set_overwrite_if_older(last_driver, $3); }
+ 	| KW_FSYNC '(' yesno ')'		{ affile_dd_set_fsync(last_driver, $3); }
+ 	| KW_LOCAL_TIME_ZONE '(' string ')'     { affile_dd_set_local_time_zone(last_driver, $3); free($3); }
++	| KW_SIZE_LIMIT '(' LL_NUMBER ')'	{ affile_dd_set_file_size_limit(last_driver, $3); }
+ 	;
+ 
+ dest_afpipe
+@@ -1161,6 +1163,7 @@ options_item
+ 	| KW_RECV_TIME_ZONE '(' string ')'      { configuration->recv_time_zone = g_strdup($3); free($3); }
+ 	| KW_SEND_TIME_ZONE '(' string ')'      { configuration->send_time_zone = g_strdup($3); free($3); }
+ 	| KW_LOCAL_TIME_ZONE '(' string ')'     { configuration->local_time_zone = g_strdup($3); free($3); }
++	| KW_FILE_SIZE_LIMIT '(' LL_NUMBER ')'  { configuration->file_size_limit = $3; }
+ 	;
+ 
+ /* BEGIN MARK: tls */
+--- syslog-ng-3.0.8_Orig/src/cfg.h	2016-04-19 18:55:46.163843680 +0530
++++ syslog-ng-3.0.8/src/cfg.h	2016-04-19 18:38:29.257643300 +0530
+@@ -80,6 +80,7 @@ struct _GlobalConfig
+   gint file_uid;
+   gint file_gid;
+   gint file_perm;
++  off_t file_size_limit;
+   
+   gint dir_uid;
+   gint dir_gid;
+--- syslog-ng-3.0.8_Orig/src/cfg-lex.l	2016-04-19 18:55:46.163843680 +0530
++++ syslog-ng-3.0.8/src/cfg-lex.l	2016-04-19 18:38:29.257643300 +0530
+@@ -128,6 +128,8 @@ static struct keyword keywords[] = {
+         { "local_time_zone",    KW_LOCAL_TIME_ZONE },
+         { "use_time_recvd",	KW_USE_TIME_RECVD, KWS_OBSOLETE, "Use R_ or S_ prefixed macros in templates" },
+         { "use_fqdn",           KW_USE_FQDN },
++	{ "size_limit",        KW_SIZE_LIMIT },
++	{ "file_size_limit",   KW_FILE_SIZE_LIMIT },
+ 	{ "use_dns",		KW_USE_DNS },
+   	{ "gc_threshold",	KW_GC_BUSY_THRESHOLD },
+   	{ "gc_busy_threshold",	KW_GC_BUSY_THRESHOLD },
+--- syslog-ng-3.0.8_Orig/src/logtransport.c	2016-04-19 18:55:46.163843680 +0530
++++ syslog-ng-3.0.8/src/logtransport.c	2016-04-19 18:38:29.257643300 +0530
+@@ -55,6 +55,8 @@ typedef struct _LogTransportPlain LogTra
+ struct _LogTransportPlain
+ {
+   LogTransport super;
++  LogTransportCallback callback;
++  void *context;
+ };
+ 
+ static gssize
+@@ -140,12 +142,14 @@ log_transport_plain_write_method(LogTran
+         fsync(self->super.fd);
+     }
+   while (rc == -1 && errno == EINTR);
++  if ((self->callback != NULL) && (rc > 0))
++    self->callback(self->super.fd, self->context);
+   return rc;
+ }
+ 
+ 
+ LogTransport *
+-log_transport_plain_new(gint fd, guint flags)
++log_transport_plain_new_with_callback(gint fd, guint flags, LogTransportCallback callback, void *context)
+ {
+   LogTransportPlain *self = g_new0(LogTransportPlain, 1);
+   
+@@ -155,7 +159,13 @@ log_transport_plain_new(gint fd, guint f
+   self->super.read = log_transport_plain_read_method;
+   self->super.write = log_transport_plain_write_method;
+   self->super.free_fn = log_transport_free_method;
++  self->callback = callback;
++  self->context = context;
+   return &self->super;
+ }
+ 
+-
++LogTransport *
++log_transport_plain_new(gint fd, guint flags)
++{
++  return log_transport_plain_new_with_callback(fd, flags, NULL, NULL);
++}
+--- syslog-ng-3.0.8_Orig/src/logtransport.h	2016-04-19 18:55:46.163843680 +0530
++++ syslog-ng-3.0.8/src/logtransport.h	2016-04-19 18:38:29.257643300 +0530
+@@ -59,6 +59,8 @@ log_transport_read(LogTransport *self, g
+   return self->read(self, buf, count, sa);
+ }
+ 
++typedef void (*LogTransportCallback)(gint fd, void *context);
++LogTransport *log_transport_plain_new_with_callback(gint fd, guint flags, LogTransportCallback callback, void *context);
+ LogTransport *log_transport_plain_new(gint fd, guint flags);
+ void log_transport_free(LogTransport *s);
+ void log_transport_free_method(LogTransport *s);
+--- syslog-ng-3.0.8_Orig/src/affile.c	2016-04-19 18:55:46.163843680 +0530
++++ syslog-ng-3.0.8/src/affile.c	2016-04-19 18:52:13.881754376 +0530
+@@ -435,10 +435,36 @@ affile_dw_reapable(AFFileDestWriter *sel
+ }
+ 
+ static gboolean
++affile_dw_open_file(AFFileDestWriter *self, int *fd)
++{
++  return affile_open_file(self->filename->str, (self->owner->flags & AFFILE_PIPE)?
++                            (O_RDWR | O_NOCTTY | O_NONBLOCK | O_LARGEFILE):
++                            (O_WRONLY | O_CREAT | O_NOCTTY | O_NONBLOCK | O_LARGEFILE),
++                          self->owner->file_uid, self->owner->file_gid, self->owner->file_perm,
++                          self->owner->dir_uid, self->owner->dir_gid, self->owner->dir_perm,
++                          !!(self->owner->flags & AFFILE_CREATE_DIRS), FALSE, !!(self->owner->flags & AFFILE_PIPE), fd);
++}
++
++static void
++affile_dw_transport_callback(gint fd, void *context)
++{
++  AFFileDestWriter *self = (AFFileDestWriter *) context;
++  off_t size = lseek(fd, 0, SEEK_CUR);
++  char createBkFile[256];
++  if ((size > 0) && (size >= self->owner->size_limit))
++    {
++      /* Our requirement is to rename syslog to syslogBK */
++      memset (createBkFile, 0, sizeof(createBkFile));
++      snprintf (createBkFile,sizeof (createBkFile),"cp -f %s %sBK;echo \"\" > %s",self->filename->str,self->filename->str,self->filename->str);
++      system(createBkFile);
++    }
++}
++
++static gboolean
+ affile_dw_init(LogPipe *s)
+ {
+   AFFileDestWriter *self = (AFFileDestWriter *) s;
+-  int fd, flags;
++  int fd;
+   struct stat st;
+   GlobalConfig *cfg = log_pipe_get_config(s);
+ 
+@@ -461,16 +487,8 @@ affile_dw_init(LogPipe *s)
+       unlink(self->filename->str);
+     }
+ 
+-  if (self->owner->flags & AFFILE_PIPE)
+-    flags = O_RDWR | O_NOCTTY | O_NONBLOCK | O_LARGEFILE;
+-  else
+-    flags = O_WRONLY | O_CREAT | O_NOCTTY | O_NONBLOCK | O_LARGEFILE;
+-
+   self->last_open_stamp = time(NULL);
+-  if (affile_open_file(self->filename->str, flags, 
+-                       self->owner->file_uid, self->owner->file_gid, self->owner->file_perm, 
+-                       self->owner->dir_uid, self->owner->dir_gid, self->owner->dir_perm, 
+-                       !!(self->owner->flags & AFFILE_CREATE_DIRS), FALSE, !!(self->owner->flags & AFFILE_PIPE), &fd))
++  if (affile_dw_open_file(self, &fd))
+     {
+       guint write_flags;
+       
+@@ -489,7 +507,7 @@ affile_dw_init(LogPipe *s)
+           return FALSE;
+         }
+       write_flags = ((self->owner->flags & AFFILE_FSYNC) ? LTF_FSYNC : 0) | LTF_APPEND;
+-      log_writer_reopen(self->writer, log_proto_plain_new_client(log_transport_plain_new(fd, write_flags)));
++      log_writer_reopen(self->writer, log_proto_plain_new_client(((self->owner->size_limit > 0) && !(self->owner->flags & AFFILE_PIPE))? log_transport_plain_new_with_callback(fd, write_flags, affile_dw_transport_callback, self): log_transport_plain_new(fd, write_flags)));
+     }
+   else
+     {
+@@ -685,6 +703,14 @@ affile_dd_set_local_time_zone(LogDriver
+   self->local_time_zone = g_strdup(local_time_zone);
+ }
+ 
++void
++affile_dd_set_file_size_limit(LogDriver *s, off_t file_size_limit)
++{
++  AFFileDestDriver *self = (AFFileDestDriver *) s;
++
++  self->size_limit = file_size_limit;
++}
++
+ static inline gchar *
+ affile_dd_format_persist_name(AFFileDestDriver *self)
+ {
+@@ -773,6 +799,8 @@ affile_dd_init(LogPipe *s)
+     self->dir_perm = cfg->dir_perm;
+   if (self->time_reap == -1)
+     self->time_reap = cfg->time_reap;
++  if (self->size_limit == -1)
++    self->size_limit = cfg->file_size_limit;
+   
+   self->use_time_recvd = cfg->use_time_recvd;
+ 
+@@ -980,5 +1008,6 @@ affile_dd_new(gchar *filename, guint32 f
+       self->flags |= AFFILE_NO_EXPAND;
+     }
+   self->time_reap = -1;
++  self->size_limit = -1;
+   return &self->super;
+ }

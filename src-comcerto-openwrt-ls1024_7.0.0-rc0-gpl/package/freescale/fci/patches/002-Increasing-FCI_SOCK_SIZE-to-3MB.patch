@@ -1,0 +1,27 @@
+From e81a556c7ba8cb77471c94435ac828321abcc2e8 Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Thu, 28 Feb 2019 10:54:34 +0530
+Subject: [PATCH] Increasing FCI_SOCK_SIZE to 5MB
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ lib/src/libfci.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/lib/src/libfci.c b/lib/src/libfci.c
+index 7a8e495..df1bc88 100644
+--- a/lib/src/libfci.c
++++ b/lib/src/libfci.c
+@@ -28,7 +28,8 @@
+ 
+ #include "libfci.h"
+ 
+-#define FCI_SOCK_SIZE 1048576
++//#define FCI_SOCK_SIZE 1048576
++#define FCI_SOCK_SIZE 3145728	//3MB
+ 
+ #ifndef NETLINK_FF
+ #define NETLINK_FF 30
+-- 
+1.9.1
+

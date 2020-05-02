@@ -1,0 +1,37 @@
+config type 'ANY'
+	list os 'ANY'
+
+config type 'Camera'
+	list os 'ANY'
+	list os 'Android'
+	list os 'Other'
+
+config type 'Computer'
+	list os 'ANY'
+	list os 'Linux'
+	list os 'Mac_OS_X'
+	list os 'Windows'
+	list os 'Other'
+
+config type 'Game_Console'
+	list os 'ANY'
+	list os 'Other'
+
+config type 'Media_Player'
+	list os 'ANY'
+	list os 'Android'
+	list os 'iOS'
+	list os 'Other'
+
+config type 'Mobile'
+	list os 'ANY'
+	list os 'Android'
+	list os 'BlackBerry'
+	list os 'Windows'
+	list os 'iOS'
+	list os 'Other'
+
+config type 'VoIP'
+	list os 'ANY'
+	list os 'Other'
+

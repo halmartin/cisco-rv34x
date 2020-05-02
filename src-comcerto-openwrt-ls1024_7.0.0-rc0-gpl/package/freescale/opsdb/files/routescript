@@ -1,0 +1,172 @@
+#!/bin/sh
+
+. /lib/functions/network.sh
+rm -rf /tmp/stats/routestats
+touch /tmp/stats/routestats
+
+# Maintain interface mapping
+routingIfaceMapping="/tmp/routeNameMapping"
+rm -rf $routingIfaceMapping
+touch $routingIfaceMapping
+ubus list network.interface.* | cut -f 3 -d "." | grep  -v 'loopback\|usb[12]_[46]' | grep -v "_PD" > /tmp/routemapping
+while read oper
+do
+	phy_ifname=
+	iface_confd=
+	usb_conn=
+	new=	
+	iface_type=
+	network_get_device phy_ifname $oper
+	
+	# for some interfaces we dont have l3_device 
+	[ -z "$phy_ifname" ] && {
+		network_get_physdev phy_ifname $oper
+	}
+	
+	[ -n "$phy_ifname" ] && {
+		# Get the confd name
+		case "$oper" in
+			vlan*)
+				oper=$(echo $oper | awk '{print toupper($0)}')
+			;;
+			wan16* | wan26* | wan1_tun1 | wan2_tun1 | wan1_tun2 | wan2_tun2 | *_PD)
+				if [ `echo $oper | grep -E "_PD$"` ];then
+					oper=$oper
+	        	        elif [ `echo $oper | grep -E "_tun1|_tun2"` ];then
+        		                oper=$(echo $oper | sed 's/\_/-/g' | awk '{print toupper($0)}')
+                		else
+                			new="$(echo $oper | grep "6p\?_" | sed 's/6p\?\_/./g' | awk '{print toupper($0)}')"
+                			if [ -z "$new" ];then
+                				oper="$(echo $oper | grep "6p\?" | sed 's/6p\?//g' | awk '{print toupper($0)}')"
+                			else
+                				oper=$new
+                			fi
+                		fi
+			;;
+			*)
+				iface_type=`uci get network.$oper.type` >/dev/null 2>&1
+				# Check for gre interfaces
+				check_gre=`echo $oper | grep "^gre[0-9]*"`
+				if [ -n "$check_gre" ];then
+					tmp=`echo $oper | grep "_static$"`
+					[ -n "$tmp" ] && continue
+					oper=`uci show strongswan | grep "gre_interface_name.*${oper}"|cut -d '.' -f 2|cut -f 2 -d '_'`
+				else
+                	        	oper="$(echo $oper | awk '{print toupper($0)}' | sed s/_/./g | sed s/P//g)"
+    					# Check for bridge interfaces
+                			#[ "$iface_type" = "bridge" ] && {
+                        		#       oper="$oper-BRIDGE"
+                			#}
+				fi
+			;;
+		esac
+		[ -n "$oper" ] && {
+			echo "$oper,$phy_ifname" >> $routingIfaceMapping
+		}
+	}
+done</tmp/routemapping
+
+rm -rf /tmp/routemapping
+
+ip route show > /tmp/tmprouteoutput
+sed -i "s/  */ /g" /tmp/tmprouteoutput
+while read line
+do
+	dest=""
+	nhop=""
+	hcount=""
+	iface=""
+	source=""
+	parse_elem=`echo $line | cut -f1 -d' '`
+	if [ "$parse_elem" = "default" ]; then
+		dest="0.0.0.0,0"
+	else
+		check=`echo $parse_elem | grep "/"`
+		[ -z "$check" ] && parse_elem="$parse_elem/32"
+		dest=`echo $parse_elem | sed -e "s#/#,#g"`
+	fi
+	nhop=`echo $line | awk '{for (I=1;I<=NF;I++) if ($I == "via") {print $(I+1)};}'`
+	hcount=`echo $line | awk '{for (I=1;I<=NF;I++) if ($I == "metric") {print $(I+1)};'}`
+	iface=`echo $line | awk '{for (I=1;I<=NF;I++) if ($I == "dev") {print $(I+1)};'}`
+	if [ "$iface" = "eth3" ];then
+		continue
+	fi
+	# Get the GUI name
+		if [ -n "$(echo $iface | grep wl[0\|1])" ];then
+			iface="$(nvram get ${iface}_bridge)"
+		fi
+        iface_gui=`cat $routingIfaceMapping | grep ",${iface}$" | head -n 1 | cut -d , -f 1`
+        if [ -n "$iface_gui" ];then
+                iface=$iface_gui
+        else
+	        iface=`echo $iface | awk -F - '{print $2}' | sed 's/_/./g' | sed 's/p//g' | awk '{print toupper($0)}'`
+        fi
+
+	if [ "$iface" = "" ];then
+		iface=`echo $line | awk '{for (I=1;I<=NF;I++) if ($I == "dev") {print $(I+1)};'}`
+	fi
+
+	source=`echo $line | grep  "scope link"`
+	if [ -n "$source" ];then
+		source="connected"
+	else
+		source=`echo $line | grep "zebra"`
+		if [ -n "$source" ];then
+			source="rip"
+		else
+			source="static"
+		fi
+	fi
+	echo "v4,$dest,$nhop,$hcount,$iface,$source," >>/tmp/stats/routestats
+done</tmp/tmprouteoutput
+
+ip -6 route show | grep -v "dev lo"> /tmp/tmprouteoutput
+sed -i "s/  */ /g" /tmp/tmprouteoutput
+while read line
+do
+	dest=""
+	nhop=""
+	hcount=""
+	iface=""
+	source=""
+	parse_elem=`echo $line | cut -f1 -d' '`
+	if [ "$parse_elem" = "default" ]; then
+		dest="0.0.0.0,0"
+	else
+		check=`echo $parse_elem | grep "/"`
+		[ -z "$check" ] && parse_elem="$parse_elem/128"
+		dest=`echo $parse_elem | sed -e "s#/#,#g"`
+	fi
+	nhop=`echo $line | awk '{for (I=1;I<=NF;I++) if ($I == "via") {print $(I+1)};}'`
+	hcount=`echo $line | awk '{for (I=1;I<=NF;I++) if ($I == "metric") {print $(I+1)};'}`
+	iface=`echo $line | awk '{for (I=1;I<=NF;I++) if ($I == "dev") {print $(I+1)};'}`
+	if [ "$iface" = "eth3" ];then
+		continue
+	fi
+	# Get the GUI name
+		if [ -n "$(echo $iface | grep wl[0\|1])" ];then
+			iface="$(nvram get ${iface}_bridge)"
+		fi
+        iface_gui=`cat $routingIfaceMapping | grep ",${iface}$" | head -n 1 | cut -d , -f 1`
+        if [ -n "$iface_gui" ];then
+                iface=$iface_gui
+        else
+	        iface=`echo $iface | awk -F - '{print $2}' | sed 's/_/./g' | sed 's/6p//g' | awk '{print toupper($0)}'`
+        fi
+
+	source=`echo $line | grep "proto kernel"`
+	if [ -n "$source" ];then
+		source="connected"
+	else
+		source=`echo $line | grep "zebra"`
+		if [ -n "$source" ];then
+			source="rip"
+		else	
+			source="static"
+			[[ "$hcount" -gt "256" ]] && {
+				hcount=$(($hcount - 256))
+			}
+		fi
+	fi
+	echo "v6,$dest,$nhop,$hcount,$iface,$source," >>/tmp/stats/routestats
+done</tmp/tmprouteoutput

@@ -1,0 +1,41 @@
+
+From bde5baa5476cd8d7d33afc42170dc984f3717e14 Mon Sep 17 00:00:00 2001
+From: Jetchko Jekov <jetchko.jekov@nokia.com>
+Date: Thu, 21 May 2015 16:32:24 +0200
+Subject: gre: raising the size of the buffer holding nl messages.
+
+Now it matches the size for the answer defined in rtnl_talk()
+and prevents stack corruption with answer > 1024 bytes.
+---
+FSL : The original commit is updated to include a change for grev6 as well.
+      The following two patches would also need to be bought in the future to 
+      prevent nl messages corruption problem in other cases. 
+      Currently these patches don't apply well directly on 4.0.0
+
+      https://git.kernel.org/cgit/linux/kernel/git/shemminger/iproute2.git/commit/?id=c079e121a73a		
+      https://git.kernel.org/cgit/linux/kernel/git/shemminger/iproute2.git/commit/?id=ed108cfc0260b6b751647982b77d6363b1defb15 
+---
+--- a/ip/link_gre.c
++++ b/ip/link_gre.c
+@@ -53,7 +53,7 @@ static int gre_parse_opt(struct link_util *lu, int argc, char **argv,
+ 	struct {
+ 		struct nlmsghdr n;
+ 		struct ifinfomsg i;
+-		char buf[1024];
++		char buf[16384];
+ 	} req;
+ 	struct ifinfomsg *ifi = (struct ifinfomsg *)(n + 1);
+ 	struct rtattr *tb[IFLA_MAX + 1];
+
+
+--- a/ip/link_gre6.c	2015-04-13 21:25:11.000000000 +0530
++++ b/ip/link_gre6.c	2016-04-27 17:48:11.204952000 +0530
+@@ -63,7 +63,7 @@
+ 	struct {
+ 		struct nlmsghdr n;
+ 		struct ifinfomsg i;
+-		char buf[1024];
++		char buf[16384];
+ 	} req;
+ 	struct ifinfomsg *ifi = (struct ifinfomsg *)(n + 1);
+ 	struct rtattr *tb[IFLA_MAX + 1];

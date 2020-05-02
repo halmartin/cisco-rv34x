@@ -1,0 +1,17 @@
+
+config interface 'vlan1'
+	option interface 'vlan1'
+	option AdvSendAdvert '0'
+	option AdvManagedFlag '0'
+	option AdvOtherConfigFlag '0'
+	option UnicastOnly '0'
+	option AdvDefaultPreference 'high'
+	option AdvLinkMTU '1500'
+	option AdvDefaultLifetime '3600'
+	option MaxRtrAdvInterval '30'
+
+config prefix 'prefix_vlan1_0'
+	option interface 'vlan1'
+	list prefix 'fec0::/64'
+	option AdvPreferredLifetime '3600'
+

@@ -1,0 +1,27 @@
+From 40de1da86cca3f71cb07cd51da2e7fc204950eaa Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Thu, 5 Nov 2015 12:50:31 +0530
+Subject: [PATCH 24/60] SBR-126 Rootfs Size Top-UP with Un-used NAND Flash
+ Space
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/env/config | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index b64eab0..37a2558 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -38,7 +38,7 @@ fast_spi_device="spi1.0"
+ fast_spi_parts="128k(uloader)ro,512k(barebox),128k(env),128k(boardinfo)ro"
+ 
+ nand_device="comcertonand"
+-nand_parts="512k(barebox),512k(bareboxfact)ro,128k(env),8M(kernel1),72M(rootfs1),128k(reserved_dtb1),8M(kernel2),72M(rootfs2),128k(reserved_dtb2),2M(configcert),12M(avcsign),32M(webrootdb),1M(license)"
++nand_parts="512k(barebox),512k(bareboxfact)ro,128k(env),8M(kernel1),92M(rootfs1),128k(reserved_dtb1),8M(kernel2),92M(rootfs2),128k(reserved_dtb2),2M(configcert),12M(avcsign),32M(webrootdb),2M(license)"
+ 
+ autoboot_timeout=3
+ 
+-- 
+2.7.4
+

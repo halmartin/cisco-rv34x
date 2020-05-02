@@ -1,0 +1,33 @@
+--- lldpd-0.6.0_Orig/src/interfaces.c	2016-04-05 14:11:41.838796572 +0530
++++ lldpd-0.6.0/src/interfaces.c	2016-04-05 14:13:15.186796689 +0530
+@@ -1057,6 +1057,9 @@ lldpd_ifh_mgmt(struct lldpd *cfg, struct
+ 	size_t sin_addr_size;
+ 	int af;
+ 	int allnegative = 0;
++    	char ifname[64]={0};
++    	char cmd[64]={0};
++    	FILE *fp=NULL;
+ 
+ 	lldpd_chassis_mgmt_cleanup(LOCAL_CHASSIS(cfg));
+ 
+@@ -1086,6 +1089,20 @@ lldpd_ifh_mgmt(struct lldpd *cfg, struct
+ 			if (ifa->ifa_addr->sa_family != lldpd_af(af))
+ 				continue;
+ 
++			/* We have requirement to use vlan1 as management interface */
++          		sprintf(cmd,"uci get network.vlan1.ifname");
++          		fp=popen(cmd,"r");
++        		if(fgets(ifname, sizeof(ifname), fp) == NULL)
++        		{
++				LLOG_INFO("unable to get interface name for vlan1");
++         			pclose(fp);
++         			return;
++        		}
++        		pclose(fp);
++			ifname[strcspn(ifname, "\n")] = 0;			
++			if (strcmp (ifa->ifa_name,ifname) != 0)
++				continue;
++
+ 			switch (af) {
+ 			case LLDPD_AF_IPV4:
+ 				sin_addr_ptr = &((struct sockaddr_in *)ifa->ifa_addr)->sin_addr;

@@ -1,0 +1,354 @@
+--- dnscrypt-proxy-1.9.5_orig/src/plugins/vendor-specific/example-ldns-opendns-deviceid/example-ldns-opendns-deviceid.c	2018-05-16 22:55:58.137912652 +0530
++++ dnscrypt-proxy-1.9.5_modified/src/plugins/vendor-specific/example-ldns-opendns-deviceid/example-ldns-opendns-deviceid.c	2018-05-28 21:03:54.046529020 +0530
+@@ -13,8 +13,11 @@
+ 
+ DCPLUGIN_MAIN(__FILE__);
+ 
+-#define EDNS_HEADER "0004000f4f70656e444e53"
++//#define EDNS_HEADER "0004000f4f70656e444e53"
++/* Umbrella EDNS header consist opt-code(6942)+length(000f)+"opendns"(i.e 4f70656e444e53) */
++#define OPENDNS_EDNS_HEADER "6942000f4f70656e444e53"
+ #define EDNS_DEV_ID "cafebabedeadbeef"
++#define OPENDNS_DEVICE_ID_FILE	"/mnt/configcert/umbrella/device-id"
+ 
+ const char *
+ dcplugin_description(DCPlugin * const dcplugin)
+@@ -64,40 +67,168 @@
+     return device_id;
+ }
+ 
++static int devid_ctox(char *cdevid, uint8_t *xdevid)
++{
++  int len, i;
++  char twochar[3] = {};
++  char *str;
++
++    cdevid[16] = '\0';
++    len = strlen(cdevid);
++    if (len > 16)
++    {
++        puts("\n Device ID:%s is > 8 octets..");
++        return -1;
++    }
++    str = cdevid;
++    for(i=0; i<(len/2); i++){
++        strncpy(twochar, str, 2);
++        //xdevid[i] = ctohex(twochar);
++        xdevid[i] = (uint8_t)strtol(twochar, NULL, 16);
++
++        str += 2;
++    }
++
++#ifdef DEVID_DEBUG
++    puts("\n Sting in hexa decimal format: \n");
++    for (i=0; i < (len/2); i++)
++    {
++         printf("%x",xdevid[i]);
++    }
++    puts("\n");
++#endif
++    return 0;
++}
++
++
++ldns_rdf *load_edns_hdr_n_data(char *cdev_id)
++{
++  ldns_rdf *edns_data;
++  uint8_t  odns_tag[] = {0x4f,0x70,0x65,0x6e,0x44,0x4e,0x53};//opendns tag
++  uint16_t optcode = 0x6942;
++  uint16_t optlen = 0x000f;
++  uint8_t  *opt_rr, *buf, *xdev_id;
++  uint16_t tag_len, cdevid_len, xdevid_len;
++  uint16_t optrr_sz, rd_len = 0, i;
++
++  tag_len = sizeof(odns_tag);
++  cdevid_len = strlen(cdev_id);
++  xdevid_len = (cdevid_len/2);
++  
++  xdev_id = (uint8_t *)malloc(xdevid_len);
++  if (!xdev_id) return NULL;
++
++  if (devid_ctox(cdev_id, xdev_id) != 0)
++  {
++      printf("\n Converting dev_id=%s to hex failed",cdev_id);
++      free(xdev_id);
++      return NULL;
++  }
++
++  optrr_sz = 4 + tag_len + xdevid_len;
++  opt_rr = (uint8_t *)malloc(optrr_sz);
++  if (!opt_rr) {
++      free(xdev_id);
++      return NULL;
++  }
++
++#ifdef DEVID_DEBUG
++  printf("\n %s: sizeof ednshdr=%d szoftag=%d devidxlen=%d",__func__,optrr_sz,tag_len,xdevid_len);
++  printf("\n devid=%s",cdev_id);
++#endif
++
++  buf = opt_rr;
++  /* option code */ 
++  *((uint16_t *)buf) = htons(optcode);
++  buf += 2;
++  rd_len += 2;
++  
++  /* option length */
++  *((uint16_t *)buf) = htons(optlen);
++  buf += 2;
++  rd_len += 2;
++  
++  /* opendns tag */ 
++  memcpy(buf, odns_tag, tag_len); 
++  buf += tag_len;
++  rd_len += tag_len;
++ 
++  /* device id */ 
++  memcpy(buf, xdev_id, xdevid_len); 
++  rd_len += xdevid_len;
++  /* copied the contents of xdevid, need to free now */
++  free(xdev_id);
++
++#ifdef DEVID_DEBUG
++  printf("\n######## RDF details: %d octes ##################\n",rd_len);
++  for (i=0; i < optrr_sz; i++)
++  {
++       printf("%x",opt_rr[i]);
++  }
++#endif
++
++  edns_data = (ldns_rdf *)malloc(sizeof(ldns_rdf));
++
++  edns_data->_data = opt_rr;
++  edns_data->_size = rd_len;
++  edns_data->_type = LDNS_RDF_TYPE_HEX;
++
++  return edns_data;
++}
++
+ int
+ dcplugin_init(DCPlugin * const dcplugin, int argc, char *argv[])
+ {
+     char   *device_id = NULL;
+     char   *device_id_env = NULL;
+     char   *edns_hex;
+-    size_t  edns_hex_size = sizeof EDNS_HEADER EDNS_DEV_ID;
++    size_t  edns_hex_size = sizeof OPENDNS_EDNS_HEADER EDNS_DEV_ID;
+ 
+-    edns_hex = malloc(sizeof EDNS_HEADER EDNS_DEV_ID);
+-    dcplugin_set_user_data(dcplugin, edns_hex);
++    assert(sizeof EDNS_DEV_ID - 1U == (size_t) 16U);
++    
++    edns_hex = malloc(edns_hex_size);
+     if (edns_hex == NULL) {
++        printf("\n%s:%d malloc fail...",__func__,__LINE__);
+         return -1;
+     }
+-    memcpy(edns_hex, EDNS_HEADER EDNS_DEV_ID, edns_hex_size);
+-    assert(sizeof EDNS_DEV_ID - 1U == (size_t) 16U);
+-    if (argc == 2U) {
++    dcplugin_set_user_data(dcplugin, edns_hex);
++    memcpy(edns_hex, OPENDNS_EDNS_HEADER EDNS_DEV_ID, edns_hex_size);
++
++    if (argc == 2U)	{
+         device_id = load_device_id_from_file(argv[1]);
+     }
++    else	{
++        device_id = load_device_id_from_file(OPENDNS_DEVICE_ID_FILE);
++    }
++       
+     if (device_id == NULL) {
++#ifdef DEVID_DEBUG
++        printf("\n%s:%d could not load devid from file it is null try getting from env",__func__,__LINE__); 
++#endif
+         if ((device_id_env = getenv("OPENDNS_DEVICE_ID")) == NULL) {
++            free(edns_hex);
+             return -1;
+         }
+         if ((device_id = strdup(device_id_env)) == NULL) {
++            printf("\n%s:%d deviceid null is null in env",__func__,__LINE__);
++            free(edns_hex);
+             return -1;
+         }
+     }
++
+     if (device_id != NULL) {
+-        memcpy(edns_hex + sizeof EDNS_HEADER - (size_t) 1U,
++        device_id[16] = '\0';
++        memcpy(edns_hex + sizeof OPENDNS_EDNS_HEADER - (size_t) 1U,
+                device_id, sizeof EDNS_DEV_ID);
+         free(device_id);
+     }
+     if (device_id_env != NULL) {
+         memset(device_id_env, 0, strlen(device_id_env));
+     }
++
++#ifdef DEVID_DEBUG
++    printf("\n%s:%d plugin init success..",__func__,__LINE__);
++#endif
+     return 0;
+ }
+ 
+@@ -109,34 +240,160 @@
+     return 0;
+ }
+ 
++int get_router_id()
++{
++  char buff[50]={};
++  char value_id[10]={};
++  FILE *fp_pid;
++
++    sprintf(buff, "uci get umbrella.global_config_0.router_id");
++    if ((fp_pid = popen(buff, "r")) == NULL)
++    {
++         printf("\n %s:%d fail ",__func__,__LINE__);
++         return -1;
++    }
++    if (fgets(value_id, sizeof(value_id), fp_pid) == NULL) {
++        pclose(fp_pid);
++         printf("\n %s:%d fail ",__func__,__LINE__);
++        return -1;
++    }
++   
++#ifdef DEVID_DEBUG
++    printf("\n %s:%d returning route_id=%d ",__func__,__LINE__,atoi(value_id));
++#endif
++    return atoi(value_id);
++}
++
+ DCPluginSyncFilterResult
+ dcplugin_sync_pre_filter(DCPlugin *dcplugin, DCPluginDNSPacket *dcp_packet)
+ {
++    char   *device_id = NULL;
++    char   *edns_rdata;
+     uint8_t  *new_packet;
+     ldns_rdf *edns_data;
+     ldns_pkt *packet = NULL;
+     size_t    new_packet_size;
++    int       router_id;
++    uint8_t  *edata;
++    int       esz, ii;
++    unsigned char *pkt = dcplugin_get_wire_data(dcp_packet);
++
++    /* if umbrella network device option is not opted then no need to embbed device-id just return */
++    router_id = get_router_id();
++    if (router_id == 1)	{
++        #ifdef DEVID_DEBUG
++         printf("\n %s:%d Router Identity is Network, just bypass this plugin",__func__,__LINE__,router_id);
++        #endif
++        return DCP_SYNC_FILTER_RESULT_OK;
++    }
++    #ifdef DEVID_DEBUG
++    printf("\n %s:%d routerid=%d option ",__func__,__LINE__,router_id);
++    #endif
+ 
+     if (ldns_wire2pkt(&packet, dcplugin_get_wire_data(dcp_packet),
+                       dcplugin_get_wire_data_len(dcp_packet))
+         != LDNS_STATUS_OK) {
++        printf("\n %s:%d wire2pkt failed... ",__func__,__LINE__);
+         return DCP_SYNC_FILTER_RESULT_ERROR;
+     }
+ 
+-    edns_data = ldns_rdf_new_frm_str(LDNS_RDF_TYPE_HEX,
+-                                     dcplugin_get_user_data(dcplugin));
++    #ifdef DEVID_DEBUG
++     printf("\n %s:%d incoming pktsz=%d",__func__,__LINE__,ldns_pkt_size(packet));
++    #endif
++
++
++    /* As device-id can be changed in run time and the same will be upated in file:OPENDNS_DEVICE_ID_FILE */ 
++    /* It is better to load device-id from the file */
++    device_id = load_device_id_from_file(OPENDNS_DEVICE_ID_FILE);
++    if (device_id != NULL) {
++        device_id[16] = '\0';
++  
++        if (strlen(device_id) != 16) {
++	    printf("\n%s: devid=%s of sz=%d is != 16",__func__,device_id,sizeof(device_id));
++            return DCP_SYNC_FILTER_RESULT_ERROR;
++        }
++    }
++    else {
++        printf("\n%s:%d mem alloc to device_id is failed",__func__,__LINE__);
++        return DCP_SYNC_FILTER_RESULT_ERROR;
++    }
++
++
++    /* convert the edns rdata from ascii hex to network format to update in the packet */
++    edns_data = load_edns_hdr_n_data(device_id);
++
++    if (!edns_data)
++    {
++        printf("\n edns_data is null...\n");
++        /*free deviceid once its contents copied to edns_rdata */
++        free(device_id);
++        ldns_pkt_free(packet);
++        return DCP_SYNC_FILTER_RESULT_ERROR;
++    }
++    #ifdef DEVID_DEBUG
++    else
++    {
++    	edata = (uint8_t *)(edns_data->_data);
++    	esz = edns_data->_size;
++
++        printf("\n ##############PKT DUMP EDNS data-sz=%d###############\n",esz);
++        for(ii=0; ii < esz; ii++) {
++           if ((ii % 16) == 0) {
++            printf("\n");
++            printf ("  %04x ", ii);
++          }
++          printf("%02x ", *(edata + ii));
++        }
++        printf("\n ################End###########################");
++    }
++    #endif
++
+     ldns_pkt_set_edns_data(packet, edns_data);
+ 
+     if (ldns_pkt2wire(&new_packet, packet, &new_packet_size)
+         != LDNS_STATUS_OK) {
++        printf("\n %s:%d pkt2wire failed... ",__func__,__LINE__);
++        /*free deviceid once its contents copied to edns_rdata */
++        free(device_id);
+         return DCP_SYNC_FILTER_RESULT_ERROR;
+     }
++    #ifdef DEVID_DEBUG
++     printf("\n %s:%d newpkt_size=%d... ",__func__,__LINE__,new_packet_size);
++    #endif
+     if (dcplugin_get_wire_data_max_len(dcp_packet) >= new_packet_size) {
+         dcplugin_set_wire_data(dcp_packet, new_packet, new_packet_size);
+     }
++    else
++    {
++       #ifdef DEVID_DEBUG
++        printf("\n %s: newpkt_sz=%d > max_size=%d... ",
++               __func__,new_packet_size,dcplugin_get_wire_data_max_len(dcp_packet));
++       #endif
++        /*free deviceid once its contents copied to edns_rdata */
++        free(device_id);
++        return DCP_SYNC_FILTER_RESULT_ERROR;
++    }
++
++    #ifdef DEVID_DEBUG
++    printf("\n PKT DUMP  AFTER EDNS #########################");
++    for(ii=0; ii < new_packet_size; ii++) {
++        if ((ii % 16) == 0) {
++            printf("\n");
++            printf ("  %04x ", ii);
++        }
++        printf("%02x ", *(new_packet + ii));
++    }
++    printf("\n ###############################################");
++    #endif
+ 
++    /*free deviceid once its contents copied to edns_rdata */
++    free(device_id);
+     free(new_packet);
+     ldns_pkt_free(packet);
+ 
++    #ifdef DEVID_DEBUG
++     printf("\n %s:%d returning DCP_SYNC_FILTER_RESULT_OK",__func__,__LINE__); 
++    #endif
+     return DCP_SYNC_FILTER_RESULT_OK;
+ }
++

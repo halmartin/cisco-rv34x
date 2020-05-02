@@ -1,0 +1,18 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+WAN_IFACE=$1
+#If ppp daemon for that WAN is not UP, then bringup the interface.
+sleep 7 #after say 7sec, check for the pppd daemon related to it.
+for p_id in `pgrep pppd`
+do
+	is_up=$(cat /proc/$p_id/cmdline | xargs -0 | grep -w $WAN_IFACE)
+	[ -n "$is_up" ] && break;
+done
+
+[ -n "$is_up" ] || {
+	#This means that there is no daemon running on it.
+	logger -t WAN-cfg "Interface bring up:$WAN_IFACE"
+	ifup $WAN_IFACE
+}

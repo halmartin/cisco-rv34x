@@ -1,0 +1,249 @@
+diff -aurN a/src/header/config.h b/src/header/config.h
+--- a/src/header/config.h	2016-04-29 19:08:05.938251618 +0530
++++ b/src/header/config.h	2016-04-29 19:04:42.002255113 +0530
+@@ -6,9 +6,21 @@
+ /*Porting changes here */
+ #define LAN_IFACE_NAME "eth3"
+ #define MAX_LINE_SIZE 80
+-#define RV34xx_NUM_LAN_PORTS 4
+ #define RV34xx_LAN_IFIDX 3
+ 
++
++#define RV340
++
++#ifdef RV340
++#define RV34xx_NUM_LAN_PORTS 4
++
++#endif
++
++#ifdef RV345
++#define RV34xx_NUM_LAN_PORTS 16
++
++#endif
++
+ typedef u8 macaddr[ETH_ALEN];
+ 
+ struct hostapd_radius_server {
+diff -aurN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-04-29 19:08:19.502251385 +0530
++++ b/src/source/ieee802_1x.c	2016-04-29 19:36:03.826222863 +0530
+@@ -1,5 +1,8 @@
+ 
+ #include <stdlib.h>
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <netinet/in.h>
+ #include <stdio.h>
+ #include <unistd.h>
+ #include <netinet/in.h>
+@@ -29,6 +32,111 @@
+ #include <confd_lib.h>
+ #include <confd_cdb.h>
+ 
++
++#include <sys/types.h>
++#include <arpa/inet.h>
++
++#define SIZE 256
++
++int get_NAS_port(uint16_t *nas_port)
++{
++
++int status = 0;
++  
++#ifdef RV340
++
++        switch(*nas_port)
++        {
++         case 1 :  *nas_port = 4;
++                  break;
++         case 2 : *nas_port = 3;
++                  break;
++         case 3 : *nas_port = 2;
++                  break;
++         case 4 : *nas_port = 1;
++                  break;
++         default :
++                  DBGPRINT(RT_DEBUG_ERROR,"Invalid NAS-Port\n");
++                  status = -1;
++                  break;
++        }
++
++#endif
++
++#ifdef RV345
++/** TODO - Add code for other router ports **/
++#endif
++
++  return status;
++}
++
++int get_NAS_ip_address(struct in_addr *server, unsigned long *nasIP, char *dev, char *mac)
++{
++  FILE *fp=NULL;
++  char cmd[SIZE];
++  char *token, *ptr,last_token[SIZE];
++
++/** Get the NAS IP address **/
++  sprintf(cmd,"ip r get ");
++  strcat(cmd,inet_ntoa(*server));
++
++  if((fp = popen(cmd,"r"))!=NULL)
++  {
++    memset(cmd,0,SIZE);
++    fgets(cmd,SIZE,fp);
++    ptr = (char *)strdup(cmd);
++    token = strsep(&ptr, " ");
++
++    while(token != NULL)
++    {
++      token = strsep(&ptr," ");
++      if(strcmp(token, "dev") == 0)
++      {
++        token = strsep(&ptr," ");
++	strcpy(dev,token);
++	DBGPRINT(RT_DEBUG_INFO,"Interface = %s\n", dev);
++      }
++      if(strcmp(token, "src") == 0)
++      {
++        token = strsep(&ptr," ");
++	DBGPRINT(RT_DEBUG_INFO,"Interface IP = %s\n", token);
++        break;
++      }
++    }
++  }
++  else
++  {
++    DBGPRINT(RT_DEBUG_ERROR, "Open output stream failed with popen\n");
++    return -1;				
++  }
++  pclose(fp);
++
++  if(token != NULL)
++    inet_aton(token, (struct in_addr *)nasIP);
++  else
++    DBGPRINT(RT_DEBUG_ERROR, "Failed to get nasIP Address\n");
++
++  DBGPRINT(RT_DEBUG_INFO,"RADIUS NAS IP Address = %04x\n", ntohl(*nasIP));
++
++/** Get the interface name and RADIUS called-station-id **/
++
++  sprintf(cmd,"cat /sys/class/net/%s/address | sed 's/:/-/g'",dev);
++  if((fp = popen(cmd,"r"))!=NULL)
++  {
++    memset(cmd,0,SIZE);
++    fgets(cmd,SIZE,fp);
++    strcpy(mac,cmd);
++  }
++  else
++  {
++    DBGPRINT(RT_DEBUG_ERROR, "Open output stream failed with popen\n");
++    return -1;				
++  }
++  
++  pclose(fp);
++  return 0;
++}
++ 
+ static void ieee802_1x_send(rtapd *rtapd, struct sta_info *sta, u8 type, u8 *data, size_t datalen)
+ {
+ 	char *buf;
+@@ -96,6 +204,7 @@
+ #ifdef CONFIG_RV34X_8021X 
+ 	char str[MAX_LINE_SIZE];
+ 	FILE *fp = NULL;
++        uint16_t port = sta->aid;
+ 	//rv340x_802_1x_SetPortStatus(sta->aid, authorized);
+ 	sprintf(str, "rtkssdk dot1x -p %d -a %d\n",sta->aid,authorized);
+ 	fp = popen(str, "r"); //system(str);
+@@ -106,6 +215,12 @@
+ 	}
+ 	else
+ 		fclose(fp);
++
++            
++        if( (get_NAS_port(&port)) != 0)
++        {
++		DBGPRINT(RT_DEBUG_ERROR,"Could not add NAS-PORT\n");
++        }
+ 	DBGPRINT(RT_DEBUG_TRACE,"IEEE802_1X_Set_Sta_Authorized: Port %d = %d \n", sta->aid, authorized);
+ #else
+ 	switch(authorized)
+@@ -441,7 +556,11 @@
+ static void ieee802_1x_encapsulate_radius(rtapd *rtapd, struct sta_info *sta, u8 *eap, size_t len)
+ {
+ 	struct radius_msg *msg;
+-	u8 buf[128];
++	u8 buf[SIZE];
++	unsigned long own_ip;
++	char device[SIZE];
++	char mac[SIZE];
++        uint16_t nas_port = sta->aid;
+ 	int	res;
+ 
+ 	sta->radius_identifier = Radius_client_get_id(rtapd);
+@@ -459,13 +578,24 @@
+ 		DBGPRINT(RT_DEBUG_ERROR,"Could not add User-Name\n");
+ 		goto fail;
+ 	}
+-	   // apd->conf->own_ip_addr is filled according to configuration file
+-	if (!Radius_msg_add_attr(msg, RADIUS_ATTR_NAS_IP_ADDRESS, (u8 *) &rtapd->conf->own_ip_addr, 4))
++
++/** Extracting sending interface info using route get **/
++              
++        if (get_NAS_ip_address(&rtapd->conf->auth_servers->addr,&own_ip, &device, &mac) != 0)
++        {
++		DBGPRINT(RT_DEBUG_INFO,"Failed to get NAS IP address\n");
++		goto fail;
++
++        }
++	//if (!Radius_msg_add_attr(msg, RADIUS_ATTR_NAS_IP_ADDRESS, (u8 *) &rtapd->conf->own_ip_addr, 4))
++	if (!Radius_msg_add_attr(msg, RADIUS_ATTR_NAS_IP_ADDRESS, (u8 *)&own_ip, 4))
++
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Could not add NAS-IP-Address\n");
+ 		goto fail;
+ 	}
+ 
++	   // apd->conf->own_ip_addr is filled according to configuration file
+ 	if ((rtapd->conf->nasId_len[sta->ApIdx] > 0) &&
+ 	    !Radius_msg_add_attr(msg, RADIUS_ATTR_NAS_IDENTIFIER,
+ 				 rtapd->conf->nasId[sta->ApIdx],
+@@ -475,14 +605,21 @@
+ 		goto fail;
+ 	}
+ 
+-	if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT, sta->aid))
++        if( (get_NAS_port(&nas_port)) != 0)
++        {
++		DBGPRINT(RT_DEBUG_ERROR,"Could not add NAS-PORT\n");
++        }
++//      if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT, sta->aid))
++        if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT, nas_port))
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Could not add NAS-Port\n");
+ 		goto fail;
+ 	}
+ 	
+-	snprintf((char *)&buf, sizeof(buf), RADIUS_802_1X_ADDR_FORMAT, MAC2STR(rtapd->own_addr[sta->ApIdx]));
+-	if (!Radius_msg_add_attr(msg, RADIUS_ATTR_CALLED_STATION_ID, buf, strlen((char *)&buf)))
++//	snprintf((char *)&buf, sizeof(buf), RADIUS_802_1X_ADDR_FORMAT, MAC2STR(rtapd->own_addr[sta->ApIdx]));
++//	if (!Radius_msg_add_attr(msg, RADIUS_ATTR_CALLED_STATION_ID, buf, strlen((char *)&buf)))
++
++	if (!Radius_msg_add_attr(msg, RADIUS_ATTR_CALLED_STATION_ID, (u8 *)mac, (strlen(mac) - 1)))
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Could not add Called-Station-Id\n");
+ 		goto fail;
+@@ -506,8 +643,11 @@
+ #ifdef CONFIG_NK_802_1X
+ 	if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT_TYPE, RADIUS_NAS_PORT_TYPE_ETHERNET))
+ #else
+-	if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT_TYPE, RADIUS_NAS_PORT_TYPE_IEEE_802_11))
++//	if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT_TYPE, RADIUS_NAS_PORT_TYPE_IEEE_802_11))
++	if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT_TYPE, RADIUS_NAS_PORT_TYPE_ETHERNET))
+ #endif
++
++	if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT_TYPE, RADIUS_NAS_PORT_TYPE_ETHERNET))
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Could not add NAS-Port-Type\n");
+ 		goto fail;

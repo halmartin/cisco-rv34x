@@ -1,0 +1,32 @@
+From d542a1a8ea38f63d96e3c1d902f7f47d35d599f6 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy <ganesh.reddy@nxp.com>
+Date: Mon, 1 Oct 2018 15:31:53 +0530
+Subject: [PATCH] Barebox-version change to track barebox updated as part of
+ MR1 image etc
+
+Signed-off-by: Ganesh Reddy <ganesh.reddy@nxp.com>
+---
+ commands/version_rv340.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/commands/version_rv340.c b/commands/version_rv340.c
+index 779251e..7b22f7b 100644
+--- a/commands/version_rv340.c
++++ b/commands/version_rv340.c
+@@ -24,7 +24,12 @@
+ #include <common.h>
+ #include <command.h>
+ 
+-const char version_string_rv340[] = "1.0.00.06";
++/*
++* 1.0.00.06 - This was the latest release version of barebox from BB2-MR0 code.
++* 1.0.02.01 - This version indicates the barebox is from bb2_dev branch of PP code.
++*
++*/
++const char version_string_rv340[] = "1.0.02.01";
+ 
+ static int do_version_rv340(struct command *cmdtp, int argc, char *argv[])
+ {
+-- 
+1.9.1
+

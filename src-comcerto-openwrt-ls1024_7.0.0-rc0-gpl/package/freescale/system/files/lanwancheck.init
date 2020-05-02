@@ -1,0 +1,155 @@
+#!/bin/sh /etc/rc.common
+
+extra_help() {
+	cat <<EOF
+	lan_wan_work_around <opt> To check and perform work-around 
+EOF
+}
+
+EXTRA_COMMANDS="lan_wan_work_around <opt>"
+EXTRA_HELP="$(extra_help)"
+
+reinit_pfe_and_dep_all() {
+	# To check, if any 
+	/etc/init.d/avc stop
+	logger -t system -p local0.notice " avc stop done!!"
+	/etc/init.d/cmm stop
+	logger -t system -p local0.notice " cmm stop done!!"
+	/etc/init.d/fci stop
+	logger -t system -p local0.notice " fci stop done!!"
+	echo 0 > /sys/devices/platform/pfe.0/vwd_route_hook_enable
+	rmmod pfe
+	logger -t system -p local0.notice " rmmod done!!"
+	sleep 2
+	insmod pfe lro_mode=0 tx_qos=0 vwd_ofld=2
+	logger -t system " before Retry!!"
+	[ "$(dmesg | grep "pe_load_ddr_section: load address" | wc -l)" == "1" ] && {
+		rmmod pfe
+		insmod pfe lro_mode=0 tx_qos=0 vwd_ofld=2
+		logger -t system " Retry!!"
+	}
+	[ "$(ifconfig eth2 | grep "inet")" ] || {
+		/etc/init.d/network restart
+		logger -t system " only loopback!!"
+		sleep 5
+	}
+	/etc/init.d/fci start
+	/etc/init.d/cmm start
+	/etc/init.d/avc start
+	/etc/init.d/webfilter start
+	/etc/init.d/qos restart
+
+	check_rule=$(ip rule show | grep "^220:" | wc -l)
+	[ "$check_rule" == "0" ] && {
+		ip rule add pref 220 lookup 220
+	}
+}
+
+reinit_pfe_and_dep() {
+	/etc/init.d/cmm stop
+	logger -t system -p local0.notice " cmm stop done!!"
+	/etc/init.d/fci stop
+	logger -t system -p local0.notice " fci stop done!!"
+	echo 0 > /sys/devices/platform/pfe.0/vwd_route_hook_enable
+	rmmod pfe
+	logger -t system -p local0.notice " rmmod done!!"
+	sleep 2
+	insmod pfe lro_mode=0 tx_qos=0 vwd_ofld=2
+	logger -t system " before Retry!!"
+	[ "$(dmesg | grep "pe_load_ddr_section: load address" | wc -l)" == "1" ] && {
+		rmmod pfe
+		insmod pfe lro_mode=0 tx_qos=0 vwd_ofld=2
+		logger -t system " Retry!!"
+	}
+	[ "$(ifconfig eth2 | grep "inet")" ] || {
+		/etc/init.d/network restart
+		logger -t system " only loopback!!"
+		sleep 5
+	}
+	/etc/init.d/fci start
+	/etc/init.d/cmm start
+}
+
+lan_wan_work_around() {
+	logger -t system -p local0.notice "argument:$1"
+	# echo $1
+	if [ "$1" == "all" ]; then
+	function_call="reinit_pfe_and_dep_all"
+	else
+	function_call="reinit_pfe_and_dep"
+	fi
+
+	if [ "$__this_device" = "RV345" ] || [ "$__this_device" = "RV345P" ];then
+	#{
+		# PFE reload steps to do for RV345 or RV345P only.
+		wan1_reg="2"
+		wan2_reg="2"
+		vlan_reg="02"
+		[ "$(ethtool eth2 | grep "Link detected: yes")" ] && {
+			wan1_reg=$(ethtool -d eth2 | awk -F ' ' '{print $2}' | awk 'NR==4{print}' | awk '{print substr ($0, 0, 1)}')
+		}
+		[ "$(ethtool eth0 | grep "Link detected: yes")" ] && {
+			wan2_reg=$(ethtool -d eth0 | awk -F ' ' '{print $2}' | awk 'NR==4{print}' | awk '{print substr ($0, 0, 1)}')
+		}
+		[ "$(get_lan_port_stats "$__this_device" 1 | cat /tmp/stats/lanport_stats | cut -d , -f 2 | grep 1)" ] && {
+			vlan_reg=$(ethtool -d eth3 | awk -F ' ' '{print $6}' | awk 'NR==4{print}')
+		}
+		if [[ "$wan1_reg" != "2" || "$wan2_reg" != "2" || "$vlan_reg" != "02" ]];then
+		#{
+			logger -t system -p local0.notice "#Issue occured reg values are wan1:$wan1_reg wan2:$wan2_reg vlan:$vlan_reg"
+			$function_call	
+			logger -t system -p local0.notice "#Done work around!!"
+
+			[ "$(ethtool -S eth2 | grep "tx- packets: 0")" ] || {
+				logger -t system -p local0.notice "#Packets are now transmitted from WAN1 Port"
+			}
+			[ "$(ethtool -S eth3 | grep "rx- packets: 0")" ] || {
+				logger -t system -p local0.notice "#Packets are now received to LAN Port"
+			}
+
+			# Dump the register values after the work-around
+			[ "$(ethtool eth2 | grep "Link detected: yes")" ] && {
+				wan1_reg=$(ethtool -d eth2 | awk -F ' ' '{print $2}' | awk 'NR==4{print}' | awk '{print substr ($0, 0, 1)}')
+			}
+			[ "$(ethtool eth0 | grep "Link detected: yes")" ] && {
+				wan2_reg=$(ethtool -d eth0 | awk -F ' ' '{print $2}' | awk 'NR==4{print}' | awk '{print substr ($0, 0, 1)}')
+			}
+			[ "$(get_lan_port_stats "$__this_device" 1 | cat /tmp/stats/lanport_stats | cut -d , -f 2 | grep 1)" ] && {
+				vlan_reg=$(ethtool -d eth3 | awk -F ' ' '{print $6}' | awk 'NR==4{print}')
+			}
+			logger -t system -p local0.notice "#Now, reg values are wan1:$wan1_reg wan2:$wan2_reg vlan:$vlan_reg"
+
+			if [[ "$wan1_reg" != "2" || "$wan2_reg" != "2" || "$vlan_reg" != "02" ]];then
+			#{
+				logger -t system -p local0.notice "##Issue occured reg values are wan1:$wan1_reg wan2:$wan2_reg vlan:$vlan_reg"
+				if [ "$1" = "all" ]; then
+					logger -t system -p local0.notice "## skip calling !!"
+				else
+					$function_call
+				fi
+				logger -t system -p local0.notice "##Done work around!!"
+
+				[ "$(ethtool -S eth2 | grep "tx- packets: 0")" ] || {
+					logger -t system -p local0.notice "##Packets are now transmitted from WAN1 Port"
+				}
+				[ "$(ethtool -S eth3 | grep "rx- packets: 0")" ] || {
+					logger -t system -p local0.notice "##Packets are now received to LAN Port"
+				}
+
+				# Dump the register values after the work-around
+				[ "$(ethtool eth2 | grep "Link detected: yes")" ] && {
+					wan1_reg=$(ethtool -d eth2 | awk -F ' ' '{print $2}' | awk 'NR==4{print}' | awk '{print substr ($0, 0, 1)}')
+				}
+				[ "$(ethtool eth0 | grep "Link detected: yes")" ] && {
+					wan2_reg=$(ethtool -d eth0 | awk -F ' ' '{print $2}' | awk 'NR==4{print}' | awk '{print substr ($0, 0, 1)}')
+				}
+				vlan_reg=$(ethtool -d eth3 | awk -F ' ' '{print $6}' | awk 'NR==4{print}')
+				logger -t system -p local0.notice "##Now, reg values are wan1:$wan1_reg wan2:$wan2_reg vlan:$vlan_reg"
+			#}
+			fi
+		#}
+		fi
+
+	#}
+	fi
+}

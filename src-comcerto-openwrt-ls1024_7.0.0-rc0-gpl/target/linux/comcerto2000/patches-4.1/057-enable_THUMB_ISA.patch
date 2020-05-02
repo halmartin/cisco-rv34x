@@ -1,0 +1,11 @@
+--- linux-4.1.8-old/arch/arm/configs/c2krv16x-26x_defconfig	2017-05-23 13:32:39.795893670 -0500
++++ linux-4.1.8/arch/arm/configs/c2krv16x-26x_defconfig		2017-05-24 04:30:31.810385692 -0500
+@@ -342,7 +342,7 @@
+ #
+ # CONFIG_ARM_LPAE is not set
+ # CONFIG_ARCH_PHYS_ADDR_T_64BIT is not set
+-# CONFIG_ARM_THUMB is not set
++CONFIG_ARM_THUMB=y
+ # CONFIG_ARM_THUMBEE is not set
+ CONFIG_ARM_VIRT_EXT=y
+ # CONFIG_SWP_EMULATE is not set

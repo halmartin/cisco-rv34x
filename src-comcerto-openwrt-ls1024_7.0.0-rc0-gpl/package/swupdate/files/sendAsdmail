@@ -1,0 +1,28 @@
+#!/bin/sh
+
+Subject=$1
+
+ASDFILE="/tmp/asd_email_content"
+PID=`uci get systeminfo.sysinfo.pid`
+SERIAL=`uci get systeminfo.sysinfo.serial_number`
+FROM=`uci get email.email_settings.from_email_address1`
+
+if [ -z "$Subject" ];then
+    Subject="Software Update Notification"
+fi
+
+echo "" >> $ASDFILE
+echo "This message is sent from $PID ." >> $ASDFILE
+
+BodyFile=$ASDFILE
+To1=`uci get swupdate.autoupdate.notify_emailid`
+
+# Prepare the Mail File
+`sed -i "1i " $BodyFile`
+`sed -i "1i Subject: $Subject" $BodyFile`
+`sed -i "1i To: $To1" $BodyFile`
+`sed -i "1i From: \"$PID($SERIAL)\" <$FROM>" $BodyFile`
+[ -n "$To1" ] && {
+	cat $BodyFile | msmtp $To1
+}
+

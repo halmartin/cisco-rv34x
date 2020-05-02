@@ -1,0 +1,368 @@
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/include/internal/internal.h libnetfilter_conntrack-1.0.4/include/internal/internal.h
+--- libnetfilter_conntrack-1.0.4-orig/include/internal/internal.h	2017-02-01 04:08:07.834858759 -0600
++++ libnetfilter_conntrack-1.0.4/include/internal/internal.h	2017-02-13 04:43:29.030917378 -0600
+@@ -1,4 +1,9 @@
+ /*
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
++ */
++
++/*
+  * WARNING: Do *NOT* ever include this file, only for internal use!
+  * 	    Use the set/get API in order to set/get the conntrack attributes
+  */
+@@ -9,6 +14,7 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <stdarg.h>
++#include <inttypes.h>
+ #include <string.h>
+ #include <sys/types.h>
+ #include <arpa/inet.h>
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/include/internal/object.h libnetfilter_conntrack-1.0.4/include/internal/object.h
+--- libnetfilter_conntrack-1.0.4-orig/include/internal/object.h	2017-02-01 05:30:18.139086826 -0600
++++ libnetfilter_conntrack-1.0.4/include/internal/object.h	2017-02-13 04:44:10.314919287 -0600
+@@ -1,4 +1,9 @@
+ /*
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
++ */
++
++/*
+  * WARNING: Do *NOT* ever include this file, only for internal use!
+  * 	    Use the set/get API in order to set/get the conntrack attributes
+  */
+@@ -168,6 +173,7 @@ struct nf_conntrack {
+ 	u_int32_t 	timeout;
+ 	u_int32_t	mark;
+ 	u_int32_t	secmark;
++	u_int64_t       qosconnmark;
+ 	struct __nfct_comcerto_fp_info fp_info[__DIR_MAX];
+ 	u_int32_t 	status;
+ 	u_int32_t	use;
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/include/libnetfilter_conntrack/libnetfilter_conntrack.h libnetfilter_conntrack-1.0.4/include/libnetfilter_conntrack/libnetfilter_conntrack.h
+--- libnetfilter_conntrack-1.0.4-orig/include/libnetfilter_conntrack/libnetfilter_conntrack.h	2017-02-01 05:30:18.139086826 -0600
++++ libnetfilter_conntrack-1.0.4/include/libnetfilter_conntrack/libnetfilter_conntrack.h	2017-02-13 04:44:41.434920727 -0600
+@@ -5,6 +5,10 @@
+  * under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 2 of the License, or
+  * (at your option) any later version.
++ *
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
++ *
+  */
+ 
+ #ifndef _LIBNETFILTER_CONNTRACK_H_
+@@ -143,6 +147,7 @@ enum nf_conntrack_attr {
+ 	ATTR_HELPER_INFO,			/* variable length */
+ 	ATTR_CONNLABELS,			/* variable length */
+ 	ATTR_CONNLABELS_MASK,			/* variable length */
++	ATTR_QOSCONNMARK,
+ 	ATTR_MAX
+ };
+ 
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/include/libnetfilter_conntrack/linux_nfnetlink_conntrack.h libnetfilter_conntrack-1.0.4/include/libnetfilter_conntrack/linux_nfnetlink_conntrack.h
+--- libnetfilter_conntrack-1.0.4-orig/include/libnetfilter_conntrack/linux_nfnetlink_conntrack.h	2017-02-01 05:30:18.139086826 -0600
++++ libnetfilter_conntrack-1.0.4/include/libnetfilter_conntrack/linux_nfnetlink_conntrack.h	2017-02-13 04:45:44.658923651 -0600
+@@ -1,3 +1,8 @@
++/*
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
++ */
++
+ #ifndef _IPCONNTRACK_NETLINK_H
+ #define _IPCONNTRACK_NETLINK_H
+ #include <libnfnetlink/linux_nfnetlink.h>
+@@ -57,6 +62,7 @@ enum ctattr_type {
+ 	CTA_LABELS_MASK,
+ 	CTA_COMCERTO_FP_ORIG,
+ 	CTA_COMCERTO_FP_REPLY,
++	CTA_QOSCONNMARK,
+ 	__CTA_MAX
+ };
+ #define CTA_MAX (__CTA_MAX - 1)
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/src/conntrack/build.c libnetfilter_conntrack-1.0.4/src/conntrack/build.c
+--- libnetfilter_conntrack-1.0.4-orig/src/conntrack/build.c	2017-02-01 05:30:11.947086540 -0600
++++ libnetfilter_conntrack-1.0.4/src/conntrack/build.c	2017-02-13 04:46:43.646926380 -0600
+@@ -5,6 +5,10 @@
+  * under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 2 of the License, or
+  * (at your option) any later version.
++ *
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
++ *
+  */
+ 
+ #include "internal/internal.h"
+@@ -369,6 +373,17 @@ static void __build_mark(struct nfnlhdr
+ 	nfnl_addattr32(&req->nlh, size, CTA_MARK, htonl(ct->mark));
+ }
+ 
++static void __build_qosconnmark(struct nfnlhdr *req,
++                        size_t size,
++                        const struct nf_conntrack *ct)
++{
++       /* FIXME: use __cpu_to_be64() instead which is the
++        * correct operation. This is a semantic abuse but
++        * we have no function to do it in libnfnetlink. */
++       u_int64_t qosconnmark = __be64_to_cpu(ct->qosconnmark);
++       nfnl_addattr_l(&req->nlh, size, CTA_QOSCONNMARK, &qosconnmark, sizeof(u_int64_t));
++}
++
+ static void __build_secmark(struct nfnlhdr *req,
+ 			    size_t size,
+ 			    const struct nf_conntrack *ct)
+@@ -494,6 +509,9 @@ int __build_conntrack(struct nfnl_subsys
+ 	if (test_bit(ATTR_MARK, ct->head.set))
+ 		__build_mark(req, size, ct);
+ 
++	if (test_bit(ATTR_QOSCONNMARK, ct->head.set))
++		__build_qosconnmark(req, size, ct);
++
+ 	if (test_bit(ATTR_SECMARK, ct->head.set))
+ 		__build_secmark(req, size, ct);
+ 
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/src/conntrack/compare.c libnetfilter_conntrack-1.0.4/src/conntrack/compare.c
+--- libnetfilter_conntrack-1.0.4-orig/src/conntrack/compare.c	2017-02-01 04:08:07.838858759 -0600
++++ libnetfilter_conntrack-1.0.4/src/conntrack/compare.c	2017-02-13 04:47:38.234928905 -0600
+@@ -5,6 +5,9 @@
+  * under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 2 of the License, or
+  * (at your option) any later version.
++ *
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
+  */
+ 
+ #include "internal/internal.h"
+@@ -295,6 +298,14 @@ cmp_mark(const struct nf_conntrack *ct1,
+ }
+ 
+ static int 
++cmp_qosconnmark(const struct nf_conntrack *ct1,
++	 const struct nf_conntrack *ct2,
++	 unsigned int flags)
++{
++	return (ct1->qosconnmark == ct2->qosconnmark);
++}
++
++static int 
+ cmp_timeout(const struct nf_conntrack *ct1,
+ 	    const struct nf_conntrack *ct2,
+ 	    unsigned int flags)
+@@ -423,6 +434,8 @@ static int cmp_meta(const struct nf_conn
+ 		return 0;
+ 	if (!__cmp(ATTR_MARK, ct1, ct2, flags, cmp_mark))
+ 		return 0;
++	if (!__cmp(ATTR_QOSCONNMARK, ct1, ct2, flags, cmp_qosconnmark))
++		return 0;
+ 	if (!__cmp(ATTR_TIMEOUT, ct1, ct2, flags, cmp_timeout))
+ 		return 0;
+ 	if (!__cmp(ATTR_STATUS, ct1, ct2, flags, cmp_status))
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/src/conntrack/copy.c libnetfilter_conntrack-1.0.4/src/conntrack/copy.c
+--- libnetfilter_conntrack-1.0.4-orig/src/conntrack/copy.c	2017-02-01 04:08:07.838858759 -0600
++++ libnetfilter_conntrack-1.0.4/src/conntrack/copy.c	2017-02-13 04:48:27.594931189 -0600
+@@ -5,6 +5,9 @@
+  * under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 2 of the License, or
+  * (at your option) any later version.
++ *
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
+  */
+ 
+ #include "internal/internal.h"
+@@ -308,6 +311,12 @@ static void copy_attr_mark(struct nf_con
+ 	dest->mark = orig->mark;
+ }
+ 
++static void copy_attr_qosconnmark(struct nf_conntrack *dest,
++			   const struct nf_conntrack *orig)
++{
++	dest->qosconnmark = orig->qosconnmark;
++}
++
+ static void copy_attr_secmark(struct nf_conntrack *dest,
+ 			      const struct nf_conntrack *orig)
+ {
+@@ -499,6 +508,7 @@ const copy_attr copy_attr_array[ATTR_MAX
+ 	[ATTR_DNAT_PORT]		= copy_attr_dnat_port,
+ 	[ATTR_TIMEOUT]			= copy_attr_timeout,
+ 	[ATTR_MARK]			= copy_attr_mark,
++	[ATTR_QOSCONNMARK]		= copy_attr_qosconnmark,
+ 	[ATTR_ORIG_COUNTER_PACKETS] 	= copy_attr_orig_counter_packets,
+ 	[ATTR_ORIG_COUNTER_BYTES]	= copy_attr_orig_counter_bytes,
+ 	[ATTR_REPL_COUNTER_PACKETS]	= copy_attr_repl_counter_packets,
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/src/conntrack/getter.c libnetfilter_conntrack-1.0.4/src/conntrack/getter.c
+--- libnetfilter_conntrack-1.0.4-orig/src/conntrack/getter.c	2017-02-01 05:30:18.139086826 -0600
++++ libnetfilter_conntrack-1.0.4/src/conntrack/getter.c	2017-02-13 04:49:16.342933444 -0600
+@@ -5,6 +5,9 @@
+  * under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 2 of the License, or
+  * (at your option) any later version.
++ *
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
+  */
+ 
+ #include "internal/internal.h"
+@@ -224,6 +227,11 @@ static const void *get_attr_mark(const s
+ 	return &ct->mark;
+ }
+ 
++static const void *get_attr_qosconnmark(const struct nf_conntrack *ct)
++{
++	return &ct->qosconnmark;
++}
++
+ static const void *get_attr_secmark(const struct nf_conntrack *ct)
+ {
+ 	return &ct->secmark;
+@@ -416,6 +424,7 @@ const get_attr get_attr_array[ATTR_MAX]
+ 	[ATTR_DNAT_PORT]		= get_attr_dnat_port,
+ 	[ATTR_TIMEOUT]			= get_attr_timeout,
+ 	[ATTR_MARK]			= get_attr_mark,
++	[ATTR_QOSCONNMARK]		= get_attr_qosconnmark,
+ 	[ATTR_ORIG_COUNTER_PACKETS] 	= get_attr_orig_counter_packets,
+ 	[ATTR_ORIG_COUNTER_BYTES]	= get_attr_orig_counter_bytes,
+ 	[ATTR_REPL_COUNTER_PACKETS]	= get_attr_repl_counter_packets,
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/src/conntrack/parse.c libnetfilter_conntrack-1.0.4/src/conntrack/parse.c
+--- libnetfilter_conntrack-1.0.4-orig/src/conntrack/parse.c	2017-02-01 05:30:18.139086826 -0600
++++ libnetfilter_conntrack-1.0.4/src/conntrack/parse.c	2017-02-13 04:50:01.102935514 -0600
+@@ -5,6 +5,9 @@
+  * under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 2 of the License, or
+  * (at your option) any later version.
++ *
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
+  */
+ 
+ #include "internal/internal.h"
+@@ -603,6 +606,11 @@ void __parse_conntrack(const struct nlms
+ 		set_bit(ATTR_MARK, ct->head.set);
+ 	}
+ 
++	if (cda[CTA_QOSCONNMARK-1]) {
++		ct->qosconnmark = __be64_to_cpu(*(u_int64_t *)NFA_DATA(cda[CTA_QOSCONNMARK-1]));
++		set_bit(ATTR_QOSCONNMARK, ct->head.set);
++	}
++
+ 	if (cda[CTA_SECMARK-1]) {
+ 		ct->secmark = ntohl(*(u_int32_t *)NFA_DATA(cda[CTA_SECMARK-1]));
+ 		set_bit(ATTR_SECMARK, ct->head.set);
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/src/conntrack/setter.c libnetfilter_conntrack-1.0.4/src/conntrack/setter.c
+--- libnetfilter_conntrack-1.0.4-orig/src/conntrack/setter.c	2017-02-01 04:08:07.838858759 -0600
++++ libnetfilter_conntrack-1.0.4/src/conntrack/setter.c	2017-02-13 04:50:38.862937261 -0600
+@@ -5,6 +5,9 @@
+  * under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 2 of the License, or
+  * (at your option) any later version.
++ *
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
+  */
+ 
+ #include "internal/internal.h"
+@@ -259,6 +262,12 @@ set_attr_mark(struct nf_conntrack *ct, c
+ }
+ 
+ static void
++set_attr_qosconnmark(struct nf_conntrack *ct, const void *value)
++{
++       ct->qosconnmark = *((u_int64_t *) value);
++}
++
++static void
+ set_attr_secmark(struct nf_conntrack *ct, const void *value, size_t len)
+ {
+ 	ct->secmark = *((u_int32_t *) value);
+@@ -471,6 +480,7 @@ const set_attr set_attr_array[ATTR_MAX]
+ 	[ATTR_DNAT_PORT]	= set_attr_dnat_port,
+ 	[ATTR_TIMEOUT]		= set_attr_timeout,
+ 	[ATTR_MARK]		= set_attr_mark,
++	[ATTR_QOSCONNMARK]      = set_attr_qosconnmark,
+ 	[ATTR_ORIG_COUNTER_PACKETS]	= set_attr_do_nothing,
+ 	[ATTR_REPL_COUNTER_PACKETS]	= set_attr_do_nothing,
+ 	[ATTR_ORIG_COUNTER_BYTES]	= set_attr_do_nothing,
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/src/conntrack/snprintf_default.c libnetfilter_conntrack-1.0.4/src/conntrack/snprintf_default.c
+--- libnetfilter_conntrack-1.0.4-orig/src/conntrack/snprintf_default.c	2017-02-01 04:08:07.838858759 -0600
++++ libnetfilter_conntrack-1.0.4/src/conntrack/snprintf_default.c	2017-02-13 04:53:01.186943844 -0600
+@@ -5,6 +5,9 @@
+  * under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 2 of the License, or
+  * (at your option) any later version.
++ *
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
+  */
+ 
+ #include "internal/internal.h"
+@@ -212,6 +215,12 @@ __snprintf_mark(char *buf, unsigned int
+ }
+ 
+ static int
++__snprintf_qosconnmark(char *buf, unsigned int len, const struct nf_conntrack *ct)
++{
++	return (snprintf(buf, len, "qosconnmark=0x%" PRIx64 " ", ct->qosconnmark));
++}
++
++static int
+ __snprintf_secmark(char *buf, unsigned int len, const struct nf_conntrack *ct)
+ {
+ 	return (snprintf(buf, len, "secmark=%u ", ct->secmark));
+@@ -430,6 +439,11 @@ int __snprintf_conntrack_default(char *b
+ 		BUFFER_SIZE(ret, size, len, offset);
+ 	}
+ 
++	if (test_bit(ATTR_QOSCONNMARK, ct->head.set)) {
++		ret = __snprintf_qosconnmark(buf+offset, len, ct);
++		BUFFER_SIZE(ret, size, len, offset);
++	}
++
+ 	if (test_bit(ATTR_SECMARK, ct->head.set)) {
+ 		ret = __snprintf_secmark(buf+offset, len, ct);
+ 		BUFFER_SIZE(ret, size, len, offset);
+diff -aurpN '--exclude-from=./exclude-files.txt' libnetfilter_conntrack-1.0.4-orig/src/conntrack/snprintf_xml.c libnetfilter_conntrack-1.0.4/src/conntrack/snprintf_xml.c
+--- libnetfilter_conntrack-1.0.4-orig/src/conntrack/snprintf_xml.c	2017-02-01 04:08:07.838858759 -0600
++++ libnetfilter_conntrack-1.0.4/src/conntrack/snprintf_xml.c	2017-02-13 04:53:29.674945162 -0600
+@@ -5,6 +5,9 @@
+  * under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 2 of the License, or
+  * (at your option) any later version.
++ *
++ * Changes:
++ *	13/02/2017	NXP	Changes to support qosconnmark 
+  */
+ 
+ #include "internal/internal.h"
+@@ -409,6 +412,7 @@ int __snprintf_conntrack_xml(char *buf,
+ 	    test_bit(ATTR_DCCP_STATE, ct->head.set) ||
+ 	    test_bit(ATTR_TIMEOUT, ct->head.set) ||
+ 	    test_bit(ATTR_MARK, ct->head.set) ||
++	    test_bit(ATTR_QOSCONNMARK, ct->head.set) ||
+ 	    test_bit(ATTR_SECMARK, ct->head.set) ||
+ 	    test_bit(ATTR_ZONE, ct->head.set) ||
+ 	    test_bit(ATTR_USE, ct->head.set) ||
+@@ -462,6 +466,11 @@ int __snprintf_conntrack_xml(char *buf,
+ 		BUFFER_SIZE(ret, size, len, offset);
+ 	}
+ 
++	if (test_bit(ATTR_QOSCONNMARK, ct->head.set)) {
++		ret = snprintf(buf+offset, len, "<qosconnmark>%" PRIu64 "</qosconnmark>", ct->qosconnmark);
++		BUFFER_SIZE(ret, size, len, offset);
++	}
++
+ 	if (test_bit(ATTR_SECMARK, ct->head.set)) {
+ 		ret = snprintf(buf+offset, len, 
+ 				"<secmark>%u</secmark>", ct->secmark);
+@@ -535,6 +544,7 @@ int __snprintf_conntrack_xml(char *buf,
+ 	    test_bit(ATTR_DCCP_STATE, ct->head.set) ||
+ 	    test_bit(ATTR_TIMEOUT, ct->head.set) ||
+ 	    test_bit(ATTR_MARK, ct->head.set) ||
++	    test_bit(ATTR_QOSCONNMARK, ct->head.set) ||
+ 	    test_bit(ATTR_SECMARK, ct->head.set) ||
+ 	    test_bit(ATTR_ZONE, ct->head.set) ||
+ 	    test_bit(ATTR_USE, ct->head.set) ||

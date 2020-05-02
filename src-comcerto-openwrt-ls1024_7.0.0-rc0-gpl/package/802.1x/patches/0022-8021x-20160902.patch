@@ -1,0 +1,127 @@
+diff -ruaN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-09-02 11:05:19.758226354 +0530
++++ b/src/source/ieee802_1x.c	2016-09-02 11:06:40.022228312 +0530
+@@ -83,7 +83,7 @@
+ 	}
+ }
+ 
+-int get_NAS_ip_address(struct in_addr *server, unsigned long *nasIP, char *dev, char *mac)
++int get_NAS_ip_address(struct in_addr *server, unsigned int *nasIP, char *dev, char *mac)
+ {
+   FILE *fp=NULL;
+   char cmd[SIZE];
+@@ -674,7 +674,7 @@
+ {
+ 	struct radius_msg *msg;
+ 	u8 buf[SIZE];
+-	unsigned long own_ip;
++	unsigned int own_ip;
+ 	char device[SIZE];
+ 	char mac[SIZE];
+ 	int	res;
+diff -ruaN a/src/source/radius_client.c b/src/source/radius_client.c
+--- a/src/source/radius_client.c	2016-09-02 11:05:19.758226354 +0530
++++ b/src/source/radius_client.c	2016-09-02 11:06:40.022228312 +0530
+@@ -300,7 +300,7 @@
+ 		DBGPRINT(RT_DEBUG_ERROR,"Possibly too long UDP frame for our buffer - dropping it\n");
+ 		return;
+ 	}
+-	
++/*	
+ 	if(buf[0]!=0xff)
+ 	{
+ 		int i;
+@@ -309,7 +309,7 @@
+ 			DBGPRINT(RT_DEBUG_INFO," %02x", buf[i]);
+ 		DBGPRINT(RT_DEBUG_INFO,"\n");
+ 	}
+-
++*/
+ 	msg = Radius_msg_parse(buf, len);
+ 	if (msg == NULL)
+ 	{
+@@ -428,7 +428,7 @@
+ 			 struct hostapd_radius_server *oserv, int sock, int auth)
+ {
+ 	struct sockaddr_in serv;
+-	unsigned long own_ip;
++	unsigned int own_ip;
+ 	char device[SIZE];
+ 	char mac[SIZE];
+ 
+@@ -722,6 +722,8 @@
+         if (eloop_register_read_sock(rtapd->radius->auth_serv_sock, Radius_client_receive, rtapd, (void *) RADIUS_AUTH))
+         {
+                 DBGPRINT(RT_DEBUG_ERROR,"Radius_client_retry_init: Could not register read socket for authentication server\n");
++		close(rtapd->radius->auth_serv_sock);
++		rtapd->radius->auth_serv_sock = -1;
+                 return -1;
+         }
+ 
+diff -ruaN a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2016-09-02 11:05:19.758226354 +0530
++++ b/src/source/rtdot1x.c	2016-09-02 11:06:40.022228312 +0530
+@@ -423,6 +423,7 @@
+ 	int len;
+ 	unsigned int buf[2];
+         struct sta_info *sta;
++	u8	GroupMac[6] = {0x01, 0x80, 0xc2, 0x00, 0x00, 0x03};
+ 
+ 	memset(&buf, 0 , sizeof(buf));	
+ 	len = recv(sock, buf, sizeof(buf), 0);
+@@ -441,21 +442,22 @@
+        	sta = rtapd->sta_list;
+ 	while (sta)
+ 	{
+-		if((sta->ApIdx == buf[0]) && sta->eapol_sm && (sta->eapol_sm->portControl == 2) &&
+-		   (sta->eapol_sm->portEnabled != buf[1]))
++		DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: STA port_id = %d, state = %d\n",
++					sta->aid, sta->eapol_sm->auth_pae.state);
++		if((sta->aid == buf[0]) && sta->eapol_sm && (sta->eapol_sm->portEnabled != buf[1]))
+ 		{
+ 			if (buf[1] == 0) /* DOWN */
+ 			{
++				memcpy(sta->addr, GroupMac, 6);
+ 				sta->eapol_sm->portEnabled = FALSE;
+-				eapol_sm_step(sta->eapol_sm);
+-				DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: PORT DISABLED\n");
++				DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: PORT DISABLED, state(%d)\n",sta->eapol_sm->auth_pae.state);
+ 			}
+ 			else /* UP */
+ 			{
+ 				sta->eapol_sm->portEnabled = TRUE;
+-				eapol_sm_step(sta->eapol_sm);
+-				DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: PORT ENABLED\n");
++				DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: PORT ENABLED, state(%d) \n",sta->eapol_sm->auth_pae.state);
+ 			}
++			break;
+ 		}
+ 		sta = sta->next;
+ 	}
+@@ -811,7 +813,7 @@
+ 	int i;
+ 	struct sta_info *sta;
+ 
+-	DBGPRINT(RT_DEBUG_TRACE,"Reloading configuration\n");
++	DBGPRINT(RT_DEBUG_TRACE,"Handle_usr1: Reloading RADIUS Configuration\n");
+ 	for (i = 0; i < rtapds->count; i++)
+ 	{
+ 		rtapd *rtapd = rtapds->rtapd[i];
+@@ -856,7 +858,7 @@
+ 				sta->eapol_sm->auth_pae.reAuthCount = 0;
+ 				sta->eapol_sm->reAuthenticate = TRUE;
+ 				eapol_sm_step(sta->eapol_sm);
+-				DBGPRINT(RT_DEBUG_TRACE,"Removing station " MACSTR "\n", MAC2STR(sta->addr));
++				DBGPRINT(RT_DEBUG_TRACE,"Set Port(%d) to Re-Authention, State (%d)\n", sta->aid, sta->eapol_sm->auth_pae.state);
+ 			}
+ 			sta = sta->next;
+ 		}
+@@ -871,7 +873,7 @@
+         struct sta_info *s;
+ 	rtapd *apd;
+ 
+-	DBGPRINT(RT_DEBUG_TRACE,"Handle_usr2: Entry\n");
++	DBGPRINT(RT_DEBUG_TRACE,"Handle_usr2: Updating Port Control Configuration\n");
+ 	apd = (rtapd *)signal_ctx;
+ 	if(apd == NULL)
+ 	{

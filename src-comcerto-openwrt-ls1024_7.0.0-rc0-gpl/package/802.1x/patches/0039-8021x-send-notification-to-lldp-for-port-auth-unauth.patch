@@ -1,0 +1,212 @@
+From 790da9acd03983156584f80dcafe8524af0a9b6a Mon Sep 17 00:00:00 2001
+From: Manish Tiwari <manish.tiwari@nxp.com>
+Date: Fri, 11 May 2018 18:58:38 +0530
+Subject: [PATCH] 8021x send notification to lldp for port auth or unauth
+ Signed-off-by: Manish Tiwari <manish.tiwari@nxp.com>
+
+---
+ src/source/ieee802_1x.c |  125 ++++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 119 insertions(+), 6 deletions(-)
+
+diff --git a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+index 1a41dd9..a812339 100644
+--- a/src/source/ieee802_1x.c
++++ b/src/source/ieee802_1x.c
+@@ -1,3 +1,8 @@
++/* 11/05/2018   Manish <manish.tiwari@nxp.com>
++   8021x send notification for port AUTH/UNAUTH to LLDP
++*/
++
++
+ /* 31/01/2018   Manish <manish.tiwari@nxp.com>
+    vlan support added for RV16x/RV26x
+ */
+@@ -31,6 +36,7 @@
+ #include <sys/types.h>
+ #include <arpa/inet.h>
+ 
++#define DOT1X_LLDP_PORT 27877
+ #define SIZE 256
+ extern u8 rv_prod_type_g;
+ 
+@@ -39,6 +45,90 @@ struct dot1x_vlan_hdr {
+ 	u16 eth_type;
+ };
+ 
++
++uint8_t  bitmap;
++uint16_t rv345_bitmap;
++
++/* This function will be called when a port status change (AUTH/UNAUTH).
++ * When port status change it will notify to LLDP daemon.
++ */
++
++int send_auth_info_to_lldp(int auth_port, int auth)
++{
++	int clientSocket, nBytes;
++	struct sockaddr_in serverAddr;
++	socklen_t addr_size;
++
++	/*Create UDP socket*/
++	clientSocket = socket(PF_INET, SOCK_DGRAM, 0);
++	if (clientSocket < 0)
++        {
++                perror("socket");
++                return -1;
++        }
++
++	/*Configure settings in address struct*/
++	serverAddr.sin_family = AF_INET;
++	serverAddr.sin_port = htons(DOT1X_LLDP_PORT);
++	serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
++	memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
++
++	/*Initialize size variable to be used later on*/
++	addr_size = sizeof serverAddr;
++	if (rv_prod_type_g  == PROD_TYPE_RV_345) 
++	{
++		if(auth == 1)
++			rv345_bitmap |= (1 << auth_port);
++		else
++			rv345_bitmap &= ~(1 << auth_port);
++
++		/*Send message to server*/
++		nBytes = sendto(clientSocket,&rv345_bitmap,sizeof(rv345_bitmap),0,(struct sockaddr *)&serverAddr,addr_size);
++	}
++	else
++	{
++		if(auth == 1)
++			bitmap |= (1 << auth_port);
++		else
++			bitmap &= ~(1 << auth_port);
++
++		/*Send message to server*/
++		nBytes = sendto(clientSocket,&bitmap,sizeof(bitmap),0,(struct sockaddr *)&serverAddr,addr_size);
++	}
++		 
++	if(nBytes < 0)
++	{
++		perror("sendto");
++	}
++	close(clientSocket);
++	
++	/* Writing data in a file to read by LLDP when it start for first time */	
++	FILE *fp=NULL;
++	char str[64];
++
++	if (rv_prod_type_g  == PROD_TYPE_RV_345) 
++	{
++		sprintf(str,"echo %x > /tmp/stats/Dot1xPortStatus",rv345_bitmap);
++	}
++	else
++	{
++		sprintf(str,"echo %x > /tmp/stats/Dot1xPortStatus",bitmap);
++	}
++
++	if(NULL != (fp = popen(str,"w")))
++	{
++		//DBGPRINT(RT_DEBUG_ERROR, "Written in file");
++		pclose(fp);
++	}
++	else
++	{
++		DBGPRINT(RT_DEBUG_ERROR,"Dot1xPortStatus write failed to /tmp/stats/Dot1xPortStatus");
++		pclose(fp);
++	}
++	return 0;
++}
++
++
+ int get_physical_portno(uint16_t nas_port)
+ {
+ 	if (rv_prod_type_g  == PROD_TYPE_RV_340) 
+@@ -235,6 +325,15 @@ static void ieee802_1x_insertBCM_CPUTag(u8 *pkt, u8 port_id)
+         return;
+ }
+ 
++static void ieee802_1x_insertBCM_CPUTag_untag_enforce(u8 *pkt, u8 port_id)
++{
++	pkt[0] = 0x21;
++	pkt[1] = 0x0;
++	pkt[2] = 0x0;
++	pkt[3] = 0x1 << port_id;
++	return;
++}
++
+ static void ieee802_1x_send_with_bcm_cputag(rtapd *rtapd, struct sta_info *sta, u8 type, u8 *data, size_t datalen)
+ {
+ 	char str[MAX_LINE_SIZE];
+@@ -247,12 +346,17 @@ static void ieee802_1x_send_with_bcm_cputag(rtapd *rtapd, struct sta_info *sta,
+     struct dot1x_vlan_hdr *vlan_hdr;
+    
+     if (sta->vlan_id)
++	{
+     	len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen + 4;
++		if (len < 68)
++			len = 68;
++	}
+ 	else
++	{
+ 		len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen;
+-	
+-	if (len < 64)
+-		len = 64;
++		if (len < 64)
++			len = 64;
++	}
+ 
+ 	buf = (char *) malloc(len);
+ 	if (buf == NULL)
+@@ -260,6 +364,7 @@ static void ieee802_1x_send_with_bcm_cputag(rtapd *rtapd, struct sta_info *sta,
+ 		DBGPRINT(RT_DEBUG_ERROR,"malloc() failed for ieee802_1x_send_with_bcm_cputag(len=%d)\n", len);
+ 		return;
+ 	}
++	
+ 	DBGPRINT(RT_DEBUG_TRACE,"Send to Sta(%s%d) with Identifier %d\n", rtapd->prefix_wlan_name, sta->aid,*(data+1));
+ 	memset(buf, 0, len);
+ 	hdr3 = (struct ieee8023_hdr_with_bcm_cputag *) buf;
+@@ -268,11 +373,10 @@ static void ieee802_1x_send_with_bcm_cputag(rtapd *rtapd, struct sta_info *sta,
+ 
+ 
+ //	memcpy(hdr3->sAddr, rtapd->own_addr[sta->ApIdx], ETH_ALEN);
+-
+-	ieee802_1x_insertBCM_CPUTag(hdr3->tx_cpu_tag, sta->aid);
+    	/* Insert VLAN Header */
+         if (sta->vlan_id)
+         {
++		ieee802_1x_insertBCM_CPUTag(hdr3->tx_cpu_tag, sta->aid);
+                 hdr3->eth_type = htons(ETH_P_VLAN);
+                 pos = (u8 *) (hdr3 + 1);
+ 
+@@ -288,11 +392,11 @@ static void ieee802_1x_send_with_bcm_cputag(rtapd *rtapd, struct sta_info *sta,
+         }
+         else
+         {
++			ieee802_1x_insertBCM_CPUTag_untag_enforce(hdr3->tx_cpu_tag, sta->aid);
+ 			if (sta->ethertype == ETH_P_PRE_AUTH)
+ 				(hdr3->eth_type) = htons(ETH_P_PRE_AUTH);
+ 			else
+ 				(hdr3->eth_type) = htons(ETH_P_PAE);
+-
+ 				pos = (u8 *) (hdr3 + 1);
+         }
+ 
+@@ -532,6 +636,15 @@ void ieee802_1x_set_sta_authorized(rtapd *rtapd, struct sta_info *sta, int autho
+ 		DBGPRINT(RT_DEBUG_ERROR,"Invalid PID");
+ 	}
+ 
++	if(authorized == 0)
++	{
++		send_auth_info_to_lldp(sta->aid, 0);
++	}
++	else if(authorized == 1)
++	{
++		send_auth_info_to_lldp(sta->aid, 1);
++	}
++
+ 	fp = popen(str, "r"); //system(str);
+ 	if(fp == NULL)
+ 	{
+-- 
+1.7.9.5
+

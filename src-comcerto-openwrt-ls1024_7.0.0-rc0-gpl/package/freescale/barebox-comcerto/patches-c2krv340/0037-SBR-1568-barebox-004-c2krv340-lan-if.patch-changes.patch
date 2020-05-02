@@ -1,0 +1,48 @@
+From c1e1f596bff7035791008f6ee112a9d199bcf6ed Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy K <ganeshreddy@freescale.com>
+Date: Mon, 28 Mar 2016 02:52:18 +0530
+Subject: [PATCH 37/60] SBR-1568 barebox:004-c2krv340-lan-if.patch changes
+
+Signed-off-by: Ganesh Reddy K <ganeshreddy@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/c2k_rv340.c | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+ mode change 100644 => 100755 arch/arm/boards/comcerto-rv340/c2k_rv340.c
+
+diff --git a/arch/arm/boards/comcerto-rv340/c2k_rv340.c b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+old mode 100644
+new mode 100755
+index 7440aba..7c8be28
+--- a/arch/arm/boards/comcerto-rv340/c2k_rv340.c
++++ b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+@@ -130,6 +130,19 @@ struct device_d c2000_eth1 = {
+ 	/* .size  = 16M, */
+ 	.platform_data = &eth1_pdata,
+ };
++
++struct c2000_eth_platform_data eth2_pdata = {
++	.gemac_port = 2,
++	.mac_addr = 0,
++};
++
++struct device_d c2000_eth2 = {
++	.id = 2,
++	.name = "c2000_eth",
++	.map_base = COMCERTO_AXI_HFE_CFG_BASE,
++	/* .size  = 16M, */
++	.platform_data = &eth2_pdata,
++};
+ #endif
+ 
+ static struct memory_platform_data sdram_pdata = {
+@@ -188,6 +201,7 @@ static int c2000_device_init(void)
+ #if defined(CONFIG_NET_COMCERTO_2000)
+ 	register_device(&c2000_eth0);
+ 	register_device(&c2000_eth1);
++	register_device(&c2000_eth2);
+ #endif
+ 
+ 	register_device(&usbh2_dev);
+-- 
+2.7.4
+

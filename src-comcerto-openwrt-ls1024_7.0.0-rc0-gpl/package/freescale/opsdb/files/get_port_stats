@@ -1,0 +1,24 @@
+#!/bin/sh
+
+pid="$1"
+
+iflist=$(cat /proc/net/dev_snmp6/* | grep ifIndex | awk '{ print $2 }')
+index=$(echo "$iflist" | awk 'BEGIN{x=-2147483648};$0>x{x=$0};END{print x}')
+index=$((index+1))
+STATUSFILE="/tmp/stats/wanstatscomplete"
+#rm -rf $STATUSFILE
+
+/usr/bin/get_lan_port_stats $pid $index
+index=$?
+
+/usr/bin/get_wan_port_stats $pid $index
+index=$?
+
+case $pid in
+	RV340W|RV160W|RV260W)
+		/usr/bin/get_wlan_port_stats $index
+	;;
+esac
+
+# This file indicates that all port stats are done to avod raise conditions.
+touch $STATUSFILE

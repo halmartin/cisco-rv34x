@@ -1,0 +1,12 @@
+--- a/src/pam_radius_auth.c	2015-08-17 17:50:47.701629084 +0530
++++ b/src/pam_radius_auth.c	2015-08-17 17:49:18.474750818 +0530
+@@ -411,7 +411,8 @@ static int pam_radius_extract_radresp_at
+       rlen -= alen;
+       p += alen; /* alen includes type, len, and attribute */
+    }
+-
++   /*if group is not configured in server set the group  to default group*/
++   pam_set_data( pamh, "groupattr", strdup("default") , _int_free );
+    return (-1);
+ }
+ 

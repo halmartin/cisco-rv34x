@@ -1,0 +1,113 @@
+--- a/src/Makefile	2015-11-05 12:07:36.960408756 +0530
++++ b/src/Makefile	2015-11-05 13:07:24.857688740 +0530
+@@ -11,8 +11,8 @@ CFLAGS += -02 -Wall -g
+ #If you want to support multiple radius server for multiple bssid, add following line
+ #CFLAGS +=  -DMULTIPLE_RADIUS
+ 
+-#LDADD += -lnku
+-#LDADD += -lpthread -lm
++LDADD += -lconfd
++LDADD += -lpthread
+ 
+ all: rtdot1xd 
+ 	@echo "Build complete"
+--- a/src/header/radius.h	2015-11-05 12:08:45.160411326 +0530
++++ b/src/header/radius.h	2015-11-05 13:07:15.993688406 +0530
+@@ -36,6 +36,7 @@ enum { RADIUS_ATTR_USER_NAME = 1,
+        RADIUS_ATTR_NAS_PORT = 5,
+        RADIUS_ATTR_FRAMED_MTU = 12,
+        RADIUS_ATTR_STATE = 24,
++       RADIUS_ATTR_CLASS = 25,
+        RADIUS_ATTR_VENDOR_SPECIFIC = 26,
+        RADIUS_ATTR_SESSION_TIMEOUT = 27,
+        RADIUS_ATTR_IDLE_TIMEOUT = 28,
+--- a/src/source/ieee802_1x.c	2015-11-05 12:07:15.772407956 +0530
++++ b/src/source/ieee802_1x.c	2015-11-05 13:07:47.237689584 +0530
+@@ -23,6 +23,12 @@
+ #include "eloop.h"
+ #include "sta_info.h"
+ 
++
++#include <confd.h>
++#include <confd_maapi.h>
++#include <confd_lib.h>
++#include <confd_cdb.h>
++
+ static void ieee802_1x_send(rtapd *rtapd, struct sta_info *sta, u8 type, u8 *data, size_t datalen)
+ {
+ 	char *buf;
+@@ -958,6 +964,51 @@ static void ieee802_1x_get_keys(rtapd *r
+ 	}
+ }
+ 
++int authorize (char *group)
++{
++  int retval;
++   struct sockaddr_in addr;
++  int rsock;
++  int action;
++  
++       confd_init_vsn(NULL,NULL,4,0x06000000);
++       addr.sin_addr.s_addr = inet_addr("127.0.0.1");
++       addr.sin_family = AF_INET;
++       addr.sin_port = htons(4565);
++        
++       if ((rsock = socket(PF_INET, SOCK_STREAM, 0)) < 0 )
++          {
++              return 0;
++          }
++       if (cdb_connect(rsock, CDB_READ_SOCKET, (struct sockaddr *)&addr,
++                                sizeof (struct sockaddr_in)) < 0)
++          {
++              return 0;
++          }
++       if (cdb_start_session(rsock, CDB_RUNNING) != CONFD_OK)
++          {
++              return 0;
++          }
++
++       retval = cdb_get_enum_value(rsock, &action,
++                                    "/nacm:nacm/nacm:rule-list{%s}/feature-rule{%s}/action",group,"dot1x");
++        if(retval != CONFD_OK)
++          {
++             cdb_close(rsock);
++             return 0;
++          }
++        
++         if(action == 0)
++           {
++              cdb_close(rsock);
++              return 1;
++           }
++          else
++           {
++              cdb_close(rsock);
++              return 0;
++           }
++}
+ /* Process the RADIUS frames from Authentication Server */
+ static RadiusRxResult
+ ieee802_1x_receive_auth(rtapd *rtapd, struct radius_msg *msg, struct radius_msg *req,
+@@ -967,9 +1018,22 @@ ieee802_1x_receive_auth(rtapd *rtapd, st
+ 	u32 session_timeout = 0, idle_timeout = 0, termination_action;
+ 	int session_timeout_set, idle_timeout_set; 
+ 	int	free_flag = 0;
++    char groupname[64] = {'\0'};
++    int group_authorize;
+ 
+ 	DBGPRINT(RT_DEBUG_TRACE,"Receive IEEE802_1X Response Packet From Radius Server. \n");
+ 
++    
++    Radius_msg_get_attr(msg, RADIUS_ATTR_CLASS, groupname,sizeof(groupname));
++
++    if(strcmp(groupname,"") == 0)
++         strcpy(groupname,"default");
++    
++    group_authorize = authorize(groupname);
++       
++    if(group_authorize == 0)
++        return RADIUS_RX_UNKNOWN;
++
+ 	sta = Ap_get_sta_radius_identifier(rtapd, msg->hdr->identifier);
+ 	if (sta == NULL)
+ 	{

@@ -1,0 +1,81 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+
+START=60
+STOP=40
+
+. /lib/functions.sh
+
+UCIPATH="/tmp/etc/config"
+ru_check=`uci get systeminfo.sysinfo.region 2> /dev/null`
+
+config_vpnresourcemgmt()
+{
+	local cfg="$1"
+
+	local oldPPTPCons oldIPSecCons oldSSLVPNCons
+	local newPPTPCons newIPSecCons newSSLVPNCons
+
+	oldPPTPCons=`uci get vpnresourcemgmt-bkp.global.pptp_vpn`
+	config_get newPPTPCons "$cfg" pptp_vpn
+
+	oldIPSecCons=`uci get vpnresourcemgmt-bkp.global.ipsec_vpn`
+	config_get newIPSecCons "$cfg" ipsec_vpn
+
+	oldSSLVPNCons=`uci get vpnresourcemgmt-bkp.global.ssl_vpn`
+	config_get newSSLVPNCons "$cfg" ssl_vpn
+
+#	logger -t VPN-RSC-MGMT "oldPPTPCons:$oldPPTPCons oldIPSecCons:$oldIPSecCons oldSSLVPNCons:$oldSSLVPNCons"
+#	logger -t VPN-RSC-MGMT "newPPTPCons:$newPPTPCons newIPSecCons:$newIPSecCons newSSLVPNCons:$newSSLVPNCons"
+
+	[ $oldPPTPCons = $newPPTPCons ] || {
+		logger -t VPN-RSC-MGMT "Reloading PPTP for resource management"
+		/etc/init.d/pptpd reload
+	}
+
+	[ $oldIPSecCons = $newIPSecCons ] ||  {
+		logger -t VPN-RSC-MGMT "Reloading IPSec for resource management"
+		sed -i "s/^     ikesa_limit.*/     ikesa_limit = $newIPSecCons/g" /etc/strongswan.d/charon.conf
+		ipsec restart
+	}
+
+	[ $oldSSLVPNCons = $newSSLVPNCons ] || {
+		logger -t VPN-RSC-MGMT "Reloading SSL VPN for resource management"
+		/etc/init.d/config_update.sh openvpn
+	}
+}
+
+start() {
+	if [ "$ru_check" = "RU" ]; then
+		exit 0
+	fi
+
+	cp $UCIPATH/vpnresourcemgmt $UCIPATH/vpnresourcemgmt-bkp
+	uci commit vpnresourcemgmt
+
+	config_load vpnresourcemgmt 
+
+	config_foreach config_vpnresourcemgmt resourcemgmt 
+
+	rm $UCIPATH/vpnresourcemgmt-bkp
+}
+
+boot() {
+	uci commit vpnresourcemgmt
+	echo "vpnresourcemgmt id done"
+	#TODO: Do we  need to do anything else
+}
+
+stop() {
+	if [ "$ru_check" = "RU" ]; then
+		exit 0
+	fi
+
+	echo "Stopping vpnresourcemgmt "
+	#TODO: Do we  need to do anything here
+}
+
+reload() {
+	stop
+	start	
+}

@@ -1,0 +1,174 @@
+From 2d1886a54fdfad8877f96b0b08a16f5fc4169954 Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Date: Tue, 26 Dec 2017 11:29:13 +0530
+Subject: [PATCH] Checking for redundant child SA before invoking updown API
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+---
+ src/libcharon/sa/ike_sa.c                   | 55 +++++++++++++++++++++++++++++
+ src/libcharon/sa/ike_sa.h                   |  5 +++
+ src/libcharon/sa/ikev1/tasks/quick_delete.c | 13 ++++++-
+ src/libcharon/sa/ikev1/tasks/quick_mode.c   | 13 ++++++-
+ 4 files changed, 84 insertions(+), 2 deletions(-)
+
+diff --git a/src/libcharon/sa/ike_sa.c b/src/libcharon/sa/ike_sa.c
+index 7b87918..32962d6 100644
+--- a/src/libcharon/sa/ike_sa.c
++++ b/src/libcharon/sa/ike_sa.c
+@@ -36,6 +36,9 @@
+  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  * THE SOFTWARE.
++ *
++ * 26/12/2017 Sridhar Pothuganti<sridhar.pothuganti@nxp.com>
++ *	Add a function to find out redundant child SA
+  */
+ 
+ #include <string.h>
+@@ -2638,6 +2641,57 @@ METHOD(ike_sa_t, inherit_pre, void,
+ 	this->conditions &= ~COND_REAUTHENTICATING;
+ }
+ 
++/**
++ * Check if two CHILD_SAs have the same traffic selector
++ */
++static bool have_equal_ts(child_sa_t *child1, child_sa_t *child2, bool local)
++{
++	enumerator_t *e1, *e2;
++	traffic_selector_t *ts1, *ts2;
++	bool equal = FALSE;
++
++	e1 = child1->create_ts_enumerator(child1, local);
++	e2 = child2->create_ts_enumerator(child2, local);
++	if (e1->enumerate(e1, &ts1) && e2->enumerate(e2, &ts2))
++	{
++		equal = ts1->equals(ts1, ts2);
++	}
++	e2->destroy(e2);
++	e1->destroy(e1);
++
++	return equal;
++}
++
++METHOD(ike_sa_t, redundant, bool,
++	private_ike_sa_t *this, child_sa_t *child_sa)
++{
++	enumerator_t *enumerator;
++	child_sa_t *current;
++	bool redundant = FALSE;
++
++	enumerator = create_child_sa_enumerator(this);
++	while (enumerator->enumerate(enumerator, &current))
++	{
++		if (current->get_state(current) == CHILD_INSTALLED &&
++			(current->get_spi(current, TRUE) != child_sa->get_spi(child_sa, TRUE)) &&
++			streq(current->get_name(current), child_sa->get_name(child_sa)) &&
++			have_equal_ts(current, child_sa, TRUE) &&
++			have_equal_ts(current, child_sa, FALSE))
++		{
++			DBG3(DBG_IKE, "Found redundant CHILD_SA %s{%d} for %s{%d}",
++				 child_sa->get_name(child_sa),
++				 child_sa->get_unique_id(child_sa),
++				 current->get_name(current),
++				 current->get_unique_id(current));
++			redundant = TRUE;
++			break;
++		}
++	}
++	enumerator->destroy(enumerator);
++
++	return redundant;
++}
++
+ METHOD(ike_sa_t, inherit_post, void,
+ 	private_ike_sa_t *this, ike_sa_t *other_public)
+ {
+@@ -2905,6 +2959,7 @@ ike_sa_t * ike_sa_create(ike_sa_id_t *ike_sa_id, bool initiator,
+ 			.retransmit = _retransmit,
+ 			.delete = _delete_,
+ 			.destroy = _destroy,
++			.redundant = _redundant,
+ 			.send_dpd = _send_dpd,
+ 			.send_keepalive = _send_keepalive,
+ 			.redirect = _redirect,
+diff --git a/src/libcharon/sa/ike_sa.h b/src/libcharon/sa/ike_sa.h
+index 6f5040d..aebb55b 100644
+--- a/src/libcharon/sa/ike_sa.h
++++ b/src/libcharon/sa/ike_sa.h
+@@ -1158,6 +1158,11 @@ struct ike_sa_t {
+ 	void (*reset) (ike_sa_t *this);
+ 
+ 	/**
++	 * query to know whether redundant.
++	 */
++	bool (*redundant) (ike_sa_t *this, child_sa_t *child);
++
++	/**
+ 	 * Destroys a ike_sa_t object.
+ 	 */
+ 	void (*destroy) (ike_sa_t *this);
+diff --git a/src/libcharon/sa/ikev1/tasks/quick_delete.c b/src/libcharon/sa/ikev1/tasks/quick_delete.c
+index 66ef508..af55925 100644
+--- a/src/libcharon/sa/ikev1/tasks/quick_delete.c
++++ b/src/libcharon/sa/ikev1/tasks/quick_delete.c
+@@ -32,6 +32,9 @@
+  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  * THE SOFTWARE.
++ *
++ * 26/12/2017 Sridhar Pothuganti<sridhar.pothuganti@nxp.com>
++ *	Checking for redundant child SA before calling updown plugin
+  */
+ 
+ #include "quick_delete.h"
+@@ -137,7 +140,15 @@ static bool delete_child(private_quick_delete_t *this, protocol_id_t protocol,
+ 
+ 	if (!rekeyed)
+ 	{
+-		charon->bus->child_updown(charon->bus, child_sa, FALSE);
++		if (this->ike_sa->redundant(this->ike_sa, child_sa) == FALSE)
++		{
++			DBG3(DBG_IKE, "updown called for a non-redundant CHILD_SA closing");
++			charon->bus->child_updown(charon->bus, child_sa, FALSE);
++		}
++		else
++		{
++			DBG3(DBG_IKE, "NOT calling updown for a redundant CHILD_SA delete");
++		}
+ 
+ 		if (remote_close)
+ 		{
+diff --git a/src/libcharon/sa/ikev1/tasks/quick_mode.c b/src/libcharon/sa/ikev1/tasks/quick_mode.c
+index 6b89641..51d8750 100644
+--- a/src/libcharon/sa/ikev1/tasks/quick_mode.c
++++ b/src/libcharon/sa/ikev1/tasks/quick_mode.c
+@@ -36,6 +36,9 @@
+  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+  * THE SOFTWARE.
++ *
++ * 26/12/2017 Sridhar Pothuganti<sridhar.pothuganti@nxp.com>
++ *	Checking for redundant child SA before calling updown plugin
+  */
+ 
+ #include "quick_mode.h"
+@@ -437,7 +440,15 @@ static bool install(private_quick_mode_t *this)
+ 	}
+ 	else
+ 	{
+-		charon->bus->child_updown(charon->bus, this->child_sa, TRUE);
++		if (this->ike_sa->redundant(this->ike_sa, this->child_sa) == FALSE)
++		{
++			DBG3(DBG_IKE, "updown called for a non-redundant CHILD_SA create");
++			charon->bus->child_updown(charon->bus, this->child_sa, TRUE);
++		}
++		else
++		{
++			DBG3(DBG_IKE, "NOT calling updown for a redundant CHILD_SA create");
++		}
+ 	}
+ 	schedule_inactivity_timeout(this);
+ 	this->child_sa = NULL;
+-- 
+1.9.1
+

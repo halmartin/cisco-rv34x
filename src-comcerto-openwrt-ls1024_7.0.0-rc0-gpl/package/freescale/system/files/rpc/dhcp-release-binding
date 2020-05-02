@@ -1,0 +1,29 @@
+#!/bin/sh
+
+DHCP_LEASES=/tmp/dhcp.leases
+
+errcode=1
+errstring="Invalid Arguments"
+
+macaddr=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "mac") {print $(I+1)};}'`
+if [ -n "$macaddr" ];then
+	if [ -e $DHCP_LEASES ];then
+		ipaddr=$(cat $DHCP_LEASES | grep $macaddr | cut -d " " -f 3)
+		if [ "$ipaddr" = "" ];then
+        		errstring="IP Address not found for the given MAC"
+			errcode=1
+		else
+			/usr/bin/dhcp_release $ipaddr $macaddr	>/dev/null 2>&1
+			errcode=$?
+		fi
+	else
+		errcode=1
+	fi
+fi
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errstring\""
+	exit 1
+else
+	exit 0
+fi

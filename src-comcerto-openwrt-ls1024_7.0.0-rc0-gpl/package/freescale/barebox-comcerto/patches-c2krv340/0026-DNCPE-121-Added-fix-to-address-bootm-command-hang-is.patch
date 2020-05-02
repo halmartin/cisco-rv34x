@@ -1,0 +1,111 @@
+From d429fa37892dce25cac2a8490b96db18db643e66 Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Wed, 9 Dec 2015 16:17:57 +0530
+Subject: [PATCH 26/60] DNCPE-121 Added fix to address bootm command hang issue
+
+The fix validates image lenth and NULL pointer alloc/free
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ common/image.c | 42 ++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 34 insertions(+), 8 deletions(-)
+
+diff --git a/common/image.c b/common/image.c
+index 6555e81..6b229e8 100644
+--- a/common/image.c
++++ b/common/image.c
+@@ -324,7 +324,7 @@ extern uint32_t temp_nand_ecc_errors[];
+ struct image_handle *map_image(const char *filename, int verify)
+ {
+ 	int fd;
+-	uint32_t checksum, len;
++	uint32_t checksum, len = 0;
+ 	struct image_handle *handle = NULL;
+ 	image_header_t *header;
+ 	int type;
+@@ -332,8 +332,8 @@ struct image_handle *map_image(const char *filename, int verify)
+ 	img_hdr *ssboot_hdr;
+ 	uint ssboot_hdr_len = IMAGE_HEADER_SIZE;
+ 	void *image_data = NULL;
+-	int image_flags;
+-	uint image_len;
++	int image_flags = 0;
++	uint image_len = 0;
+ #endif
+ 
+ 	fd = open(filename, O_RDONLY);
+@@ -344,15 +344,33 @@ struct image_handle *map_image(const char *filename, int verify)
+ 
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
+ 	ssboot_hdr = xzalloc(sizeof(img_hdr));
++	if (ssboot_hdr == NULL)
++	{
++	  printf("xzalloc returned NULL: %s\n", errno_str());
++	  goto err_out;
++	}
++	memset (ssboot_hdr , 0x00, (sizeof(img_hdr)));
+ 	if (read(fd, ssboot_hdr, ssboot_hdr_len) < 0) {
+-		printf("could not read: %s\n", errno_str());
+-		goto err_out;
++	  printf("could not read: %s\n", errno_str());
++	  goto err_out;
++	}
++
++	image_len = ssboot_hdr->image_len;
++	if ( image_len >= ~0 )
++	{
++	  printf("INVALID image_len = 0x%0X OR Image file = %s is BLANK!\n", image_len, filename);
++	  goto err_out;
+ 	}
+ 
+-	image_len = ssboot_hdr->image_len ;
+ 	//printf("\nimage_len = %u \n",image_len);
+ 	image_data = xmalloc(ssboot_hdr_len + image_len + RSA_KEY_LENGTH_2K + AES_128_KEY_LENGTH + 1);
+-	image_flags = IH_MALLOC;
++	if (image_data == NULL)
++	{
++	  printf("xzalloc returned NULL: %s\n", errno_str());
++	  goto err_out;
++	}
++	memset (image_data, 0x00, (ssboot_hdr_len + image_len + RSA_KEY_LENGTH_2K + AES_128_KEY_LENGTH + 1));
++	image_flags |= IH_MALLOC;
+ 
+ 	memcpy(image_data,ssboot_hdr,ssboot_hdr_len);
+ 
+@@ -370,6 +388,12 @@ struct image_handle *map_image(const char *filename, int verify)
+ 	}
+ #endif
+ 	handle = xzalloc(sizeof(struct image_handle));
++	if (handle == NULL)
++	{
++	  printf("xzalloc returned NULL: %s\n", errno_str());
++	  goto err_out;
++	}
++	memset (handle , 0x00, (sizeof(struct image_handle)));
+ 	header = &handle->header;
+ 
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
+@@ -397,6 +421,7 @@ struct image_handle *map_image(const char *filename, int verify)
+ 
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
+ 	handle->data = (void *)((unsigned long)image_data + image_get_header_size());
++  handle->flags |= IH_MALLOC;
+ #else
+ 	handle->data = memmap(fd, PROT_READ);
+ 	if (handle->data == (void *)-1) {
+@@ -457,10 +482,11 @@ struct image_handle *map_image(const char *filename, int verify)
+ err_out:
+ 	close(fd);
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
++	free (ssboot_hdr);
+ 	if(image_flags & IH_MALLOC)
+ 		free(image_data);
+ #endif
+-	if (handle->flags & IH_MALLOC)
++	if ((handle != NULL) && (handle->flags & IH_MALLOC))
+ 		free(handle->data);
+ 	free(handle);
+ 	return NULL;
+-- 
+2.7.4
+

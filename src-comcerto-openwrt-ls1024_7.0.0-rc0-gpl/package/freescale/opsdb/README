@@ -1,0 +1,23 @@
+opsdb is intended to show operational data statistics. It generates a shared library which can be used to get statistics.
+A example program (opsdb_stats) is also provided to explain the registration with the confd.
+
+Content
+=======
+files - Contains scripts which are required for the operational data.
+Makefile - Makefile to build the package
+src/annotations-yang - Annotation files for callpoint registration.
+src/header - header files
+src/source -  source files.
+
+
+Test Operation Data with example binary (stats)
+================================================
+1 - Make sure confd is running on the DUT. If not please run the confd
+	#/etc/init.d/confd start
+2 - Run the stats binary
+	#./opsdb_stats
+3 - Run the confd_cli for another shell.
+	#confd_cli
+4 - Use show commands to get operational data statistics.
+	#show dhcp-binding-state
+	#show interface-stats

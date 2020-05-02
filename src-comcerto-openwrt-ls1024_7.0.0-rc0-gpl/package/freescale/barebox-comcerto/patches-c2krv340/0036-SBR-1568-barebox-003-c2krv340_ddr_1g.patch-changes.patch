@@ -1,0 +1,204 @@
+From e7b9e6fcd8e49eb683094d059ba2e919d5a7f13c Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy K <ganeshreddy@freescale.com>
+Date: Mon, 28 Mar 2016 02:50:11 +0530
+Subject: [PATCH 36/60] SBR-1568 barebox:003-c2krv340_ddr_1g.patch changes
+
+Signed-off-by: Ganesh Reddy K <ganeshreddy@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/c2k_rv340.c |   2 +-
+ arch/arm/boards/comcerto-rv340/config.h    |   2 +-
+ arch/arm/mach-comcerto/include/mach/ddr.h  | 145 ++++++++++++++++++++++++++++-
+ 3 files changed, 146 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/c2k_rv340.c b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+index 9d23ec1..7440aba 100644
+--- a/arch/arm/boards/comcerto-rv340/c2k_rv340.c
++++ b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+@@ -141,7 +141,7 @@ static struct device_d sdram_dev = {
+ 	.id = -1,
+ 	.name = "mem",
+ 	.map_base = 0x00000000,
+-	.size = SZ_512M,
++	.size = SZ_1G,
+ 	.platform_data = &sdram_pdata,
+ };
+ 
+diff --git a/arch/arm/boards/comcerto-rv340/config.h b/arch/arm/boards/comcerto-rv340/config.h
+index 02e432a..02d1eed 100644
+--- a/arch/arm/boards/comcerto-rv340/config.h
++++ b/arch/arm/boards/comcerto-rv340/config.h
+@@ -3,7 +3,7 @@
+ 
+ #define CONFIG_LBA48
+ 
+-#define DDR_SIZE        SZ_512M
++#define DDR_SIZE        SZ_1G
+ 
+ #define CFG_I2C_EEPROM0_ADDR     0x50
+ #define I2C_EEPROM0_DEVICE_NAME	"eeprom0"
+diff --git a/arch/arm/mach-comcerto/include/mach/ddr.h b/arch/arm/mach-comcerto/include/mach/ddr.h
+index 1963c04..c5d0b77 100644
+--- a/arch/arm/mach-comcerto/include/mach/ddr.h
++++ b/arch/arm/mach-comcerto/include/mach/ddr.h
+@@ -610,6 +610,149 @@
+ /*****************************/
+ 
+ /* DDR3 Controller @533MHz */
++#if 1 // [Po-Yao]: change memory size from 512M to 1G.
++#define DDRC_CTL_DDR3_000_VAL_CFG2  0x20410600LL
++//
++#define DDRC_CTL_DDR3_002_VAL_CFG2  0x00000006LL
++#define DDRC_CTL_DDR3_003_VAL_CFG2  0x0001A07CLL
++#define DDRC_CTL_DDR3_004_VAL_CFG2  0x00041127LL
++#define DDRC_CTL_DDR3_005_VAL_CFG2  0x04060E00LL
++#define DDRC_CTL_DDR3_006_VAL_CFG2  0x141C0604LL
++#define DDRC_CTL_DDR3_007_VAL_CFG2  0x08040804LL
++#define DDRC_CTL_DDR3_008_VAL_CFG2  0x0092190CLL
++#define DDRC_CTL_DDR3_009_VAL_CFG2  0x00000504LL
++#define DDRC_CTL_DDR3_010_VAL_CFG2  0x08080101LL
++#define DDRC_CTL_DDR3_011_VAL_CFG2  0x00020010LL
++#define DDRC_CTL_DDR3_012_VAL_CFG2  0x00011B03LL
++#define DDRC_CTL_DDR3_013_VAL_CFG2  0x00000009LL
++#define DDRC_CTL_DDR3_014_VAL_CFG2  0x00A00100LL
++#define DDRC_CTL_DDR3_015_VAL_CFG2  0x00001034LL
++#define DDRC_CTL_DDR3_016_VAL_CFG2  0x000D0004LL
++#define DDRC_CTL_DDR3_017_VAL_CFG2  0x00060002LL
++#define DDRC_CTL_DDR3_018_VAL_CFG2  0x00A60200LL
++#define DDRC_CTL_DDR3_019_VAL_CFG2  0x00000000LL
++#define DDRC_CTL_DDR3_020_VAL_CFG2  0x00060600LL
++#define DDRC_CTL_DDR3_021_VAL_CFG2  0x00000000LL
++#define DDRC_CTL_DDR3_022_VAL_CFG2  0x00000000LL
++#define DDRC_CTL_DDR3_023_VAL_CFG2  0x00000000LL
++#define DDRC_CTL_DDR3_024_VAL_CFG2  0x00000000LL
++#define DDRC_CTL_DDR3_025_VAL_CFG2  0x00000000LL
++#define DDRC_CTL_DDR3_026_VAL_CFG2  0x00000000LL
++#define DDRC_CTL_DDR3_027_VAL_CFG2  0x00083000LL
++#define DDRC_CTL_DDR3_028_VAL_CFG2  0x00080042LL
++#define DDRC_CTL_DDR3_029_VAL_CFG2  0x00000000LL
++#define DDRC_CTL_DDR3_030_VAL_CFG2  0x00420830LL
++#define DDRC_CTL_DDR3_031_VAL_CFG2  0x00000008LL
++#define DDRC_CTL_DDR3_032_VAL_CFG2  0x00020000LL
++#define DDRC_CTL_DDR3_033_VAL_CFG2  0x00000000LL
++//
++//
++//
++//
++//
++//
++//
++//
++//
++#define DDRC_CTL_DDR3_043_VAL_CFG2  0x01400200LL
++#define DDRC_CTL_DDR3_044_VAL_CFG2  0x02000040LL
++#define DDRC_CTL_DDR3_045_VAL_CFG2  0x01010080LL
++#define DDRC_CTL_DDR3_046_VAL_CFG2  0xFF0A0101LL
++#define DDRC_CTL_DDR3_047_VAL_CFG2  0x010101FFLL
++#define DDRC_CTL_DDR3_048_VAL_CFG2  0x00010001LL
++#define DDRC_CTL_DDR3_049_VAL_CFG2  0x000C0100LL
++#define DDRC_CTL_DDR3_050_VAL_CFG2  0x00010002LL
++//
++#define DDRC_CTL_DDR3_052_VAL_CFG2  0x00000000LL
++#define DDRC_CTL_DDR3_053_VAL_CFG2  0x007FFFFFLL
++//
++//
++//
++//
++//
++#define DDRC_CTL_DDR3_059_VAL_CFG2  0x01000000LL
++#define DDRC_CTL_DDR3_060_VAL_CFG2  0x00020100LL
++#define DDRC_CTL_DDR3_061_VAL_CFG2  0x02010202LL
++#define DDRC_CTL_DDR3_062_VAL_CFG2  0x02000101LL
++#define DDRC_CTL_DDR3_063_VAL_CFG2  0x00000000LL
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++#define DDRC_CTL_DDR3_091_VAL_CFG2  0xFFFF0000LL
++#define DDRC_CTL_DDR3_092_VAL_CFG2  0x00000202LL
++#define DDRC_CTL_DDR3_093_VAL_CFG2  0x0101FFFFLL
++#define DDRC_CTL_DDR3_094_VAL_CFG2  0x03FFFF00LL
++#define DDRC_CTL_DDR3_095_VAL_CFG2  0xFFFF0003LL
++#define DDRC_CTL_DDR3_096_VAL_CFG2  0x00000303LL
++#define DDRC_CTL_DDR3_097_VAL_CFG2  0x01000400LL
++#define DDRC_CTL_DDR3_098_VAL_CFG2  0x00016400LL
++#define DDRC_CTL_DDR3_099_VAL_CFG2  0x00000100LL
++#define DDRC_CTL_DDR3_100_VAL_CFG2  0x00000001LL
++//
++#define DDRC_CTL_DDR3_102_VAL_CFG2  0x00000800LL
++#define DDRC_CTL_DDR3_103_VAL_CFG2  0x00103300LL
++#define DDRC_CTL_DDR3_104_VAL_CFG2  0x02000200LL
++#define DDRC_CTL_DDR3_105_VAL_CFG2  0x02000200LL
++#define DDRC_CTL_DDR3_106_VAL_CFG2  0x00001033LL
++#define DDRC_CTL_DDR3_107_VAL_CFG2  0x000050FFLL
++#define DDRC_CTL_DDR3_108_VAL_CFG2  0x0002060CLL
++#define DDRC_CTL_DDR3_109_VAL_CFG2  0x00000003LL
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++//
++#define DDRC_CTL_DDR3_126_VAL_CFG2  0x00000000LL
++
++
++
++
++
++#define DDR3_PHY_CTL_00_VAL_CFG2  0x000F1023LL
++#define DDR3_PHY_CTL_01_VAL_CFG2  0x18201010LL
++#define DDR3_PHY_CTL_02_VAL_CFG2  0x00000006LL
++#define DDR3_PHY_CTL_03_VAL_CFG2  0x09090909LL
++#define DDR3_PHY_CTL_04_VAL_CFG2  0x00000009LL
++#define DDR3_PHY_CTL_05_VAL_CFG2  0x00000000LL
++#define DDR3_PHY_CTL_06_VAL_CFG2  0x04300613LL
++#define DDR3_PHY_CTL_07_VAL_CFG2  0x00000000LL
++
++#else // [Po-Yao]: change memory size from 512M to 1G.
+ #define DDRC_CTL_DDR3_000_VAL_CFG2  0x20410600LL
+ //
+ #define DDRC_CTL_DDR3_002_VAL_CFG2  0x00000006LL
+@@ -753,7 +896,7 @@
+ #define DDR3_PHY_CTL_06_VAL_CFG2  0x04300623LL
+ #define DDR3_PHY_CTL_07_VAL_CFG2  0x00000000LL
+ 
+-
++#endif // [Po-Yao]: change memory size from 512M to 1G.
+ 
+ #define DDRC_DDR3_CFG_533 \
+ {DDRC_CTL_00_REG, DDRC_CTL_DDR3_000_VAL_CFG2},\
+-- 
+2.7.4
+

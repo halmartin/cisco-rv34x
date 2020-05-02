@@ -1,0 +1,226 @@
+From ce6fb6e1554ffcdd0f45e08d8592636b522ac32e Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Tue, 14 Jul 2015 09:17:23 +0530
+Subject: [PATCH 04/60] Added command boardinfo and related support
+ Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+
+---
+ commands/Kconfig     |   7 ++
+ commands/Makefile    |   1 +
+ commands/boardinfo.c | 177 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 185 insertions(+)
+ create mode 100644 commands/boardinfo.c
+
+diff --git a/commands/Kconfig b/commands/Kconfig
+index c18da08..4c13381 100644
+--- a/commands/Kconfig
++++ b/commands/Kconfig
+@@ -167,6 +167,13 @@ config CMD_COPY
+ 	default y
+ 	prompt "copy"
+ 
++config CMD_BOARDINFO
++	bool
++	prompt "RV340 boardinfo"
++	default y
++	help
++	  This command allows to update and show RV340 Board Specfic Information.
++
+ endmenu
+ 
+ menu "console                       "
+diff --git a/commands/Makefile b/commands/Makefile
+index e9db5c4..40c4176 100755
+--- a/commands/Makefile
++++ b/commands/Makefile
+@@ -67,3 +67,4 @@ obj-$(CONFIG_CMD_PFE_DIAGS)	+= c2000_pfe_diags.o
+ obj-$(CONFIG_CMD_AR8328)	+= atheros.o
+ obj-$(CONFIG_CMD_COPY)		+= copy.o
+ obj-$(CONFIG_CMD_SATA)		+= sata.o
++obj-$(CONFIG_CMD_BOARDINFO)		+= boardinfo.o
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+new file mode 100644
+index 0000000..1fa6786
+--- /dev/null
++++ b/commands/boardinfo.c
+@@ -0,0 +1,177 @@
++/*
++ * Copyright (c) 2015 Vinaykumar Masne <vinaykumar.masane@freescale>, Freescale Semicondunctors Pvt. Ltd. 
++ *
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++/**
++ * @file
++ * @brief boardinfo: Update OR Show Board Information Parameters
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <linux/ctype.h>
++#include <fs.h>
++#include <fcntl.h>
++#include <string.h>
++#include <command.h>
++#include <common.h>
++#include <errno.h>
++#include <environment.h>
++
++struct c2krv340_board_info {
++  char pid[12];             /* Product ID */
++  char vid[4];              /* H/W Version */
++  char s_n[12];             /* Board Serial Number */
++  unsigned char mac[3][6];  /* MAC Information */
++} __attribute__ ((packed));
++
++
++char *filename = "/dev/spi1.board-info" ;
++static int command_boardinfo_update(int argc, char *argv[])
++{
++  int ret = 0, fd = -1, n_written = 0  ;
++  int i,j,k, len = 0;
++  char mac_str[18] = {'\0'}, prompt_str[18] = {'\0'};
++  char *pChar = mac_str;
++  long long unsigned int mac_val = 0;
++  struct c2krv340_board_info board_data;
++
++  memset(&board_data, 0x00, sizeof(board_data));
++  readline("Enter PID : ", board_data.pid, sizeof(board_data.pid));
++  readline("Enter VID : ", board_data.pid, sizeof(board_data.vid));
++  readline("Enter S/N : ", board_data.pid, sizeof(board_data.s_n));
++  printf("\n PID = %s", board_data.pid);
++  printf("\n VID = %s", board_data.vid);
++  printf("\n S/N = %s", board_data.s_n);
++	for (j=0; j<3; j++)
++	{
++		sprintf(prompt_str,"Enter %s MAC : ",  j == 0 ? "LAN" : (j == 1 ? "WAN-1" : "WAN-2")); 
++    readline(prompt_str, mac_str, sizeof(mac_str));
++    len=strlen(mac_str);
++
++    for(i=0; i<len; i++){
++      mac_val = mac_val * 10 + ( mac_str[i] - '0' );
++    }
++    printf("\n %llu %llX %s\n", mac_val, mac_val, mac_str);
++		for (i=0, k=5; i<6; i++, k--)
++		{
++			board_data.mac[j][i] = *(((unsigned char *)&mac_val)+k);
++		}
++	}
++  fd = open(filename, O_RDWR, 0);
++	if (fd < 0) {
++		printf("could not open %s!\n", filename);
++		return ret = -1;
++	}
++
++  /* ENOSYS is no error here, many devices do not need it */
++  if (ret && errno != -ENOSYS) {
++    printf("could not unprotect %s: %s\n", filename, errno_str());
++    close(fd);
++    return 1;
++  }
++  
++  ret = erase(fd, ~0, 0);
++
++  /* ENOSYS is no error here, many devices do not need it */
++  if (ret && errno != -ENOSYS) {
++    printf("could not erase %s: %s\n", filename, errno_str());
++    close(fd);
++    return 1;
++  }    
++  printf("\nOpened file boade-info.bin for WRITTING...\n");
++  n_written = write(fd, (char *)&board_data, sizeof(board_data));
++  printf("\n Wrote %d bytes out of %d bytes\n", n_written, (int)sizeof(board_data));
++  close(fd);
++	return COMMAND_SUCCESS;
++}
++static int command_boardinfo_show(int argc, char *argv[])
++{
++  int ret = 0, fd = -1, n_read = 0;
++  int j;
++  char mac_str[18] = {0};
++  struct c2krv340_board_info board_data;
++
++  memset(&board_data, 0x00, sizeof(board_data));
++  fd = open(filename, O_RDONLY, 0);
++  if (fd < 0) {
++    printf("could not open %s!\n", "board-info.bin");
++    return ret = -1;
++  }
++
++  printf("\nOpened file boade-info.bin for READING...\n");
++  n_read = read(fd, (char *)&board_data, (int)sizeof(board_data));
++  printf("\n Read %d bytes out of %d bytes\n", n_read, (int)sizeof(board_data));
++  close(fd);
++
++  printf("\n\n********Board Info********\n");
++  printf("PID     : %s\n", board_data.pid);
++  printf("VID     : %s\n", board_data.vid);
++  printf("Sr. NO. : %s\n", board_data.s_n);
++  for (j=0; j<3; j++)
++	{
++		memset(mac_str, 0x00, sizeof(mac_str));
++		sprintf(mac_str,"%02X:%02X:%02X:%02X:%02X:%02X",\
++											board_data.mac[j][0],\
++											board_data.mac[j][1],\
++											board_data.mac[j][2],\
++											board_data.mac[j][3],\
++											board_data.mac[j][4],\
++											board_data.mac[j][5]);
++		printf("\n%s MAC : %s\n", j == 0 ? "LAN" : j == 1 ? "WAN-1" : "WAN-2", mac_str);
++	}
++	return COMMAND_SUCCESS;
++}
++static int do_boardinfo(struct command *cmdtp, int argc, char *argv[])
++{
++	if (strcmp(argv[1], "-u") == 0)
++  {
++		command_boardinfo_update(argc, argv);
++  }
++	else if (strcmp(argv[1], "-s") == 0)
++	{
++    command_boardinfo_show(argc, argv);
++  }
++	else
++  {
++		return COMMAND_ERROR_USAGE;
++  }
++	return COMMAND_SUCCESS;
++}
++
++static const __maybe_unused char cmd_boardinfo_help[] =
++"Usage: boardinfo [OPTIONS]\n"
++"\n"
++"options:\n"
++"  -r  		(default option) lists boardinfo contents from /dev/spi1.board-info\n"
++"  -u     update board-info (default updates info to /dev/spi1.board-info)\n"
++"  e.g.     boardinfo -u\n"
++"Enter PID : <MAX 12 char>\n"
++"Enter VID : <MAX 4 char>\n"
++"Enter S/N : <MAX 11 char>\n"
++"Enter LAN MAC : <6 bytes MAC address without any separator e.g. :>\n"
++"Enter WAN-1 MAC : <6 bytes MAC address without any separator e.g. :>\n"
++"Enter WAN-2 MAC : <6 bytes MAC address without any separator e.g. :>\n"
++"\n";
++
++BAREBOX_CMD_START(boardinfo)
++	.cmd		= do_boardinfo,
++	.usage		= "Read / Update Board Information",
++	BAREBOX_CMD_HELP(cmd_boardinfo_help)
++BAREBOX_CMD_END
+-- 
+2.7.4
+

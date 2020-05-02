@@ -1,0 +1,119 @@
+diff -aurpN '--exclude-from=./exclude-files.txt' busybox-1.23.2-orig/networking/udhcp/dhcpc.c busybox-1.23.2/networking/udhcp/dhcpc.c
+--- busybox-1.23.2-orig/networking/udhcp/dhcpc.c	2015-03-22 22:07:19.000000000 -0500
++++ busybox-1.23.2/networking/udhcp/dhcpc.c	2017-05-02 04:37:11.910476625 -0500
+@@ -24,6 +24,7 @@
+ #include "common.h"
+ #include "dhcpd.h"
+ #include "dhcpc.h"
++#include <ifaddrs.h>
+ 
+ #include <netinet/if_ether.h>
+ #include <linux/filter.h>
+@@ -31,6 +32,7 @@
+ 
+ /* "struct client_config_t client_config" is in bb_common_bufsiz1 */
+ 
++int check_duplicate_ip(uint32_t requested_ip, int isV4);
+ 
+ #if ENABLE_LONG_OPTS
+ static const char udhcpc_longopts[] ALIGN1 =
+@@ -118,6 +120,76 @@ static const uint8_t len_of_option_as_st
+ 	[OPTION_S32             ] = sizeof("-2147483684 "),
+ };
+ 
++/* Duplicate IP detection logic goes here:
++   Return: 1 on detecting 
++   */
++int check_duplicate_ip(uint32_t requested_ip, int isV4)
++{ //NOT using the second argument.
++	struct ifaddrs *ifaddr, *ifa;
++	int family, s;
++	FILE *fp_popen;
++	char host[NI_MAXHOST];
++	char buff[128]="";
++	struct in_addr requested_ipaddr;
++	int isDup = 0;
++
++	requested_ipaddr.s_addr = requested_ip;
++	if (getifaddrs(&ifaddr) == -1) {
++		perror("getifaddrs");
++		return isDup;
++	}
++
++	/* Walk through linked list, maintaining head pointer so we
++	can free list later */
++
++	for (ifa = ifaddr; (ifa != NULL && isDup != 1); ifa = ifa->ifa_next) {
++		if (ifa->ifa_addr == NULL)
++			continue;
++
++		family = ifa->ifa_addr->sa_family;
++
++		/* For an AF_INET* interface address, display the address */
++
++		if (family == AF_INET || family == AF_INET6) {
++			s = getnameinfo(ifa->ifa_addr,
++				(family == AF_INET) ? sizeof(struct sockaddr_in) :
++				sizeof(struct sockaddr_in6),
++				host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
++
++			if (s != 0) {
++				bb_info_msg("getnameinfo() failed: %s\n", gai_strerror(s));
++				break;
++			}
++
++			//log1 ("DEBUG Now checking for the host:%s \r\n",host);
++			if (strcmp(inet_ntoa(requested_ipaddr), host)==0) {
++				//bb_info_msg("The provided IP is same as the IP for interface: %s\r\n",ifa->ifa_name);
++				char command[128];
++				sprintf(command,"uci show network | grep 'ifname=%s$' | head -n 1 | cut -f 2 -d .",ifa->ifa_name);
++				//bb_info_msg("command being executed is: %s\r\n",command);
++				if((fp_popen = popen(command,"r")) == NULL){
++					perror("popen");
++					//log1("Failed in popen. Hence exiting!\r\n");
++					break;
++				}
++				while(fgets(buff,sizeof(buff),fp_popen)!=NULL){
++					char dup_command[128];
++					//This must be the interface screen name. It will be either vlan1/vlan100 etc.
++					//bb_info_msg("screen-name is:%s",buff);
++					sprintf(dup_command, "logger -t WAN \"Rejecting duplicate IP with the interface %s\"",buff);
++					system(dup_command);
++					isDup = 1;
++					break;
++				}
++				pclose(fp_popen);
++			}
++		}
++	}
++
++	freeifaddrs(ifaddr);
++	return isDup;
++}
++
+ /* note: ip is a pointer to an IP in network order, possibly misaliged */
+ static int sprint_nip(char *dest, const char *pre, const uint8_t *ip)
+ {
+@@ -1492,6 +1564,14 @@ int udhcpc_main(int argc UNUSED_PARAM, c
+ 				continue;
+ 			case REQUESTING:
+ 				if (!discover_retries || packet_num < discover_retries) {
++					//Now check if the IP is a duplicate IP, then act based on it.
++					if (check_duplicate_ip(requested_ip, 1) == 1)
++					{
++						struct in_addr server;
++						server.s_addr = server_addr;
++						bb_info_msg("IP from server:%s is rejected because of duplicate with other interface on device",inet_ntoa(server));
++						goto stateInit;
++					}
+ 					/* send broadcast select packet */
+ 					send_select(xid, server_addr, requested_ip);
+ 					timeout = discover_timeout;
+@@ -1502,6 +1582,7 @@ int udhcpc_main(int argc UNUSED_PARAM, c
+ 				 * "discover...select...discover..." loops
+ 				 * were seen in the wild. Treat them similarly
+ 				 * to "no response to discover" case */
++ stateInit:
+ 				change_listen_mode(LISTEN_RAW);
+ 				state = INIT_SELECTING;
+ 				goto leasefail;

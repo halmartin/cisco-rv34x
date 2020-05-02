@@ -1,0 +1,143 @@
+diff -ruaN a/src/lldp.c b/src/lldp.c
+--- a/src/lldp.c	2017-06-01 20:17:41.922957264 +0530
++++ b/src/lldp.c	2017-06-06 15:23:53.658907818 +0530
+@@ -106,7 +106,7 @@
+ 	port = &hardware->h_lport;
+ 	chassis = port->p_chassis;
+ 	length = hardware->h_mtu;
+-	LLOG_INFO("PP LLDP packet sending port->p_descr = %s \n", port->p_descr);
++//	LLOG_INFO("PP LLDP packet sending port->p_descr = %s \n", port->p_descr);
+     if(strcmp(port->p_descr,LAN_INTERFACE)==0)
+     {
+         if (strcmp(PID_RV34X,"RV260") == 0) {
+@@ -161,7 +161,6 @@
+                                 cputag[3]=(cputag[3] | (0x1 << (j-1) ));
+                         break;
+                     }
+-		    LLOG_INFO("For loop PP LLDP packet setting %d cputag[3]=%d\n", j,cputag[3]);
+             }
+             
+         }
+@@ -202,7 +201,6 @@
+                                 cputag[3]=(cputag[3] | (0x1 << (4-j) ));
+                         break;
+                     }
+-		    LLOG_INFO("PP LLDP packet setting %d cputag[3]=%d\n", j,cputag[3]);
+             }
+ 
+ 	}
+@@ -217,8 +215,6 @@
+    {
+ 	if ((strcmp(PID_RV34X,"RV260") == 0) || (strcmp(PID_RV34X,"RV160") == 0))
+ 	{ 
+-		LLOG_INFO("PP LLDP send  = %s \n", port->p_descr);
+-		LLOG_INFO("LLDP SEND ");
+ 		if (!(
+ 		      /* LLDP multicast address */
+ 		      POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
+@@ -568,8 +564,17 @@
+ 	      POKE_END_LLDP_TLV))
+ 		goto toobig;
+ 
+-	LLOG_INFO("LLDP packet sending out cputag[0] = %x : cputag[1] = %x", cputag[0], cputag[1]);
+-	LLOG_INFO(":cputag[2] = %x : cputag[3] = %x\n", cputag[2], cputag[3]);
++	//LLOG_INFO("LLDP packet sending out cputag[0] = %x : cputag[1] = %x", cputag[0], cputag[1]);
++        if (strcmp(hardware->h_ifname, LAN_INTERFACE)==0)
++	{
++		LLOG_INFO("LLDP packet sent on LAN interface %s , Ports = 0x%x\n",hardware->h_ifname, cputag[3]);
++	}
++	else
++	{
++		 LLOG_INFO("LLDP packet sent on WAN interface %s\n",hardware->h_ifname);
++	}
++
++ 
+ 	if (hardware->h_ops->send(global, hardware,
+ 		(char *)packet, pos - packet) == -1) {
+ 		LLOG_WARN("unable to send packet on real device for %s",
+@@ -661,39 +666,46 @@
+ 	TAILQ_INIT(&port->p_ppvids);
+ 	TAILQ_INIT(&port->p_pids);
+ #endif
+-       LLOG_INFO(" -- Decapsulating the VLAN frames --");
++    //LLOG_INFO(" -- Decapsulating the VLAN frames -- %s hardware->h_ifname =%s\n", port->p_descr, hardware->h_ifname);
+     /* Decapsulate VLAN frames */
+- //   if (((struct ethhdr*)frame)->h_proto == htons(CPUTAGPROTOCOL)) {
+-
+-        if ((strcmp(PID_RV34X,"RV260") == 0) || (strcmp(PID_RV34X,"RV160") == 0))
+-        {
+-		portno=frame[BCM_PORTOFFSET];
+-		LLOG_INFO("LLDP port [%d]", portno);
+-		memmove(frame+BCM_CPUTAGLEN,frame,2*ETH_ALEN);
+-		frame=frame+BCM_CPUTAGLEN;
+-		s=s-BCM_CPUTAGLEN;
+-        }
+-        else
+-        {
+-                LLOG_INFO(" ---- Invalid PID -----");
++//    if (((struct ethhdr*)frame)->h_proto == htons(CPUTAGPROTOCOL)) {
++      	if (strcmp(hardware->h_ifname, LAN_INTERFACE)==0) 
++	{
+ 
+-        }
+-#if 0        
+-        sprintf(cmd,"uci get lldpd.config.lan%d",portno);
+-        fp=popen(cmd,"r");
+-        if(fgets(var, sizeof(var), fp) == NULL)
+-          {
+-            printf("fgets failed\n");
+-            pclose(fp);
+-            return -1;
+-           }
+-        pclose(fp);
+-        if(strcmp(var,"1") !=0)
+-        {
+-          goto malformed;
+-        }
+-   //  }
+-#endif
++        	if ((strcmp(PID_RV34X,"RV260") == 0) || (strcmp(PID_RV34X,"RV160") == 0))
++        	{
++			portno=frame[BCM_PORTOFFSET];
++			LLOG_INFO("LLDP packet received on LAN port [%d] on interface %s", (portno+1), hardware->h_ifname);
++			memmove(frame+BCM_CPUTAGLEN,frame,2*ETH_ALEN);
++			frame=frame+BCM_CPUTAGLEN;
++			s=s-BCM_CPUTAGLEN;
++        	}	
++        	else
++        	{
++                	LLOG_INFO(" ---- Invalid PID -----");
++        	}
++		
++		sprintf(cmd,"uci get lldpd.config.lan%d",(portno+1)); //Due to uci value starts from 1
++		fp=popen(cmd,"r");
++		if(fgets(var, sizeof(var), fp) == NULL)
++		  {
++		    printf("fgets failed\n");
++		    pclose(fp);
++		    return -1;
++		   }
++		pclose(fp);
++		if(strcmp(var,"1") !=0)
++		{
++                  LLOG_WARNX("LLDP disabled on port %d\n", (portno+1));
++		  goto malformed;
++        	}
++	
++	}
++	if(strcmp(hardware->h_ifname, "eth0")==0)
++	{
++		LLOG_INFO("LLDP packet received on Wan port %s \n", hardware->h_ifname);
++     	}
++	
+ 	length = s;
+ 	pos = (u_int8_t*)frame;
+ 
+@@ -787,7 +799,6 @@
+ 	    snprintf (PORT_DETAILS, sizeof (PORT_DETAILS)," port=%d",portno);	    
+ 	    strncat (b, PORT_DETAILS, strlen(PORT_DETAILS));
+             port->p_descr = b;
+-            LLOG_INFO("port description is present %s",port->p_descr);
+             break;
+ 		case LLDP_TLV_SYSTEM_NAME:
+ 		case LLDP_TLV_SYSTEM_DESCR:

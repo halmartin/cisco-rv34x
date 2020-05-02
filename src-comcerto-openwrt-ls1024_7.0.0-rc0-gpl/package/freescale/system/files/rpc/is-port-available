@@ -1,0 +1,30 @@
+#!/bin/sh
+#
+# According to YANG Model V1.0.30, rename filename form is_port_available.sh to is-port-available
+
+#Invoke as: ./is-port-available port 21 protocol TCP
+
+protocol=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "protocol") {print $(I+1)};}'`
+port=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "port") {print $(I+1)};}'`
+
+#echo "port:$port"
+#echo "protocol=$protocol"
+
+proto=`{ echo "$protocol"; }|tr [A-Z] [a-z]`
+
+listen_ports=`netstat -ntuap |grep "^$proto"|tr -s ' ' |cut -d ' ' -f 4|sed -n -e 's/^.*://p'|sort|uniq`
+
+#echo "listen_ports=$listen_ports"
+
+status=`echo $listen_ports|grep -w $port`
+
+if [ "$status" = "" ]
+then
+#	echo "port available"
+	exit 0
+else
+#	echo "port not available"
+	exit 1
+fi
+
+

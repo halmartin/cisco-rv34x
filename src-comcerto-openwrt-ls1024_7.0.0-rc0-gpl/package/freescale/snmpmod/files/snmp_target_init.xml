@@ -1,0 +1,91 @@
+<SNMP-TARGET-MIB xmlns="http://tail-f.com/ns/mibs/SNMP-TARGET-MIB/200210140000Z">
+  <snmpTargetParamsTable>
+    <snmpTargetParamsEntry>
+      <snmpTargetParamsName>target_v1</snmpTargetParamsName>
+      <snmpTargetParamsMPModel>0</snmpTargetParamsMPModel>
+      <snmpTargetParamsSecurityModel>1</snmpTargetParamsSecurityModel>
+      <snmpTargetParamsSecurityName>public</snmpTargetParamsSecurityName>
+      <snmpTargetParamsSecurityLevel>noAuthNoPriv</snmpTargetParamsSecurityLevel>
+      <snmpTargetParamsStorageType>nonVolatile</snmpTargetParamsStorageType>
+    </snmpTargetParamsEntry>
+    <snmpTargetParamsEntry>
+      <snmpTargetParamsName>target_v2</snmpTargetParamsName>
+      <snmpTargetParamsMPModel>1</snmpTargetParamsMPModel>
+      <snmpTargetParamsSecurityModel>2</snmpTargetParamsSecurityModel>
+      <snmpTargetParamsSecurityName>public</snmpTargetParamsSecurityName>
+      <snmpTargetParamsSecurityLevel>noAuthNoPriv</snmpTargetParamsSecurityLevel>
+      <snmpTargetParamsStorageType>nonVolatile</snmpTargetParamsStorageType>
+    </snmpTargetParamsEntry>
+    <snmpTargetParamsEntry>
+      <snmpTargetParamsName>trap_target_v3_ad_noauthnopriv</snmpTargetParamsName>
+      <snmpTargetParamsMPModel>3</snmpTargetParamsMPModel>
+      <snmpTargetParamsSecurityModel>3</snmpTargetParamsSecurityModel>
+      <!-- snmpTargetParamsSecurityName + local snmpEngineID from confd.conf
+           are used for lookup in usmUserTable -->
+      <snmpTargetParamsSecurityName>admin</snmpTargetParamsSecurityName>
+      <snmpTargetParamsSecurityLevel>noAuthNoPriv</snmpTargetParamsSecurityLevel>
+      <snmpTargetParamsStorageType>nonVolatile</snmpTargetParamsStorageType>
+    </snmpTargetParamsEntry>
+    <snmpTargetParamsEntry>
+      <snmpTargetParamsName>trap_target_v3_ad_authnopriv</snmpTargetParamsName>
+      <snmpTargetParamsMPModel>3</snmpTargetParamsMPModel>
+      <snmpTargetParamsSecurityModel>3</snmpTargetParamsSecurityModel>
+      <!-- snmpTargetParamsSecurityName + local snmpEngineID from confd.conf
+           are used for lookup in usmUserTable -->
+      <snmpTargetParamsSecurityName>admin</snmpTargetParamsSecurityName>
+      <snmpTargetParamsSecurityLevel>authNoPriv</snmpTargetParamsSecurityLevel>
+      <snmpTargetParamsStorageType>nonVolatile</snmpTargetParamsStorageType>
+    </snmpTargetParamsEntry>
+    <snmpTargetParamsEntry>
+      <snmpTargetParamsName>trap_target_v3_ad_authpriv</snmpTargetParamsName>
+      <snmpTargetParamsMPModel>3</snmpTargetParamsMPModel>
+      <snmpTargetParamsSecurityModel>3</snmpTargetParamsSecurityModel>
+      <!-- snmpTargetParamsSecurityName + local snmpEngineID from confd.conf
+           are used for lookup in usmUserTable -->
+      <snmpTargetParamsSecurityName>admin</snmpTargetParamsSecurityName>
+      <snmpTargetParamsSecurityLevel>authPriv</snmpTargetParamsSecurityLevel>
+      <snmpTargetParamsStorageType>nonVolatile</snmpTargetParamsStorageType>
+    </snmpTargetParamsEntry>
+<snmpTargetParamsEntry>
+      <snmpTargetParamsName>trap_target_v3_gu_noauthnopriv</snmpTargetParamsName>
+      <snmpTargetParamsMPModel>3</snmpTargetParamsMPModel>
+      <snmpTargetParamsSecurityModel>3</snmpTargetParamsSecurityModel>
+      <!-- snmpTargetParamsSecurityName + local snmpEngineID from confd.conf
+           are used for lookup in usmUserTable -->
+      <snmpTargetParamsSecurityName>public</snmpTargetParamsSecurityName>
+      <snmpTargetParamsSecurityLevel>noAuthNoPriv</snmpTargetParamsSecurityLevel>
+      <snmpTargetParamsStorageType>nonVolatile</snmpTargetParamsStorageType>
+    </snmpTargetParamsEntry>
+    <snmpTargetParamsEntry>
+      <snmpTargetParamsName>trap_target_v3_gu_authnopriv</snmpTargetParamsName>
+      <snmpTargetParamsMPModel>3</snmpTargetParamsMPModel>
+      <snmpTargetParamsSecurityModel>3</snmpTargetParamsSecurityModel>
+      <!-- snmpTargetParamsSecurityName + local snmpEngineID from confd.conf
+           are used for lookup in usmUserTable -->
+      <snmpTargetParamsSecurityName>public</snmpTargetParamsSecurityName>
+      <snmpTargetParamsSecurityLevel>authNoPriv</snmpTargetParamsSecurityLevel>
+      <snmpTargetParamsStorageType>nonVolatile</snmpTargetParamsStorageType>
+    </snmpTargetParamsEntry>
+    <snmpTargetParamsEntry>
+      <snmpTargetParamsName>trap_target_v3_gu_authpriv</snmpTargetParamsName>
+      <snmpTargetParamsMPModel>3</snmpTargetParamsMPModel>
+      <snmpTargetParamsSecurityModel>3</snmpTargetParamsSecurityModel>
+      <!-- snmpTargetParamsSecurityName + local snmpEngineID from confd.conf
+           are used for lookup in usmUserTable -->
+      <snmpTargetParamsSecurityName>public</snmpTargetParamsSecurityName>
+      <snmpTargetParamsSecurityLevel>authPriv</snmpTargetParamsSecurityLevel>
+      <snmpTargetParamsStorageType>nonVolatile</snmpTargetParamsStorageType>
+    </snmpTargetParamsEntry>
+
+    <snmpTargetParamsEntry>
+      <snmpTargetParamsName>inform_target_v3</snmpTargetParamsName>
+      <snmpTargetParamsMPModel>3</snmpTargetParamsMPModel>
+      <snmpTargetParamsSecurityModel>3</snmpTargetParamsSecurityModel>
+      <!-- snmpTargetParamsSecurityName + snmpTargetAddrEngineID
+           are used for lookup in usmUserTable -->
+      <snmpTargetParamsSecurityName>remote</snmpTargetParamsSecurityName>
+      <snmpTargetParamsSecurityLevel>noAuthNoPriv</snmpTargetParamsSecurityLevel>
+      <snmpTargetParamsStorageType>nonVolatile</snmpTargetParamsStorageType>
+    </snmpTargetParamsEntry>
+  </snmpTargetParamsTable>
+</SNMP-TARGET-MIB>

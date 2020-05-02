@@ -1,0 +1,18 @@
+#!/bin/sh
+#!/bin/sh
+#logger -t button-hotplug Device: $DEVICE / Action: $ACTION
+#logger -t button-hotplug-igmpproxy Device: $DEVICE   $INTERFACE/ Action: $ACTION
+. /lib/functions.sh
+
+[ "$DEVICE" == "lo" ] && exit 0
+local isboot=$(uci_get_state system.core.booted)
+[ "$isboot" != "1" ] && exit 0
+
+case "$ACTION" in
+            ifup)
+            `/etc/init.d/miniupnpd restart`
+            ;;
+            ifdown)
+            `/etc/init.d/miniupnpd restart`
+            ;;
+esac

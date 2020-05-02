@@ -1,0 +1,51 @@
+diff -Naur asterisk-1.8.2.3.orig/channels/chan_mspd.c asterisk-1.8.2.3/channels/chan_mspd.c
+--- asterisk-1.8.2.3.orig/channels/chan_mspd.c	2016-02-24 11:48:37.120025212 +0200
++++ asterisk-1.8.2.3/channels/chan_mspd.c	2016-02-24 11:16:23.809846570 +0200
+@@ -1099,6 +1099,7 @@
+     S8 cfg_bwe_master = -1;
+     S8 cfg_bwe_high_band = -1;
+     S8 cfg_bwe_low_band = -1;
++    S8 cfg_phone_band = -1;
+     Boolean bwe_apply = False;
+ 
+     MSPD_LOG(2, "Phone%d\n", mspd_global.n_phones + 1);
+@@ -1208,6 +1209,9 @@
+         else if (!strcasecmp(v->name,"wideband")) {
+             phone->wideband = ast_true(v->value);
+         }
++        else if(!strcasecmp(v->name, "phone_band")) {
++            cfg_phone_band = ast_true(v->value) ? True : False;
++        }
+         else if(!strcasecmp(v->name, "bwe_master")) {
+             cfg_bwe_master = ast_true(v->value) ? True : False;
+         }
+@@ -1222,6 +1226,10 @@
+         }
+     }
+ 
++    if(cfg_phone_band != -1) {
++        phone->wideband = cfg_phone_band;
++    }
++
+     if(!phone->bwe.bwe_master) {
+         bwe_apply = True;
+     }
+diff -Naur asterisk-1.8.2.3.orig/channels/mspd/mspd_sti-lines.c asterisk-1.8.2.3/channels/mspd/mspd_sti-lines.c
+--- asterisk-1.8.2.3.orig/channels/mspd/mspd_sti-lines.c	2016-02-24 11:48:37.168020581 +0200
++++ asterisk-1.8.2.3/channels/mspd/mspd_sti-lines.c	2016-02-24 11:16:23.925835377 +0200
+@@ -1561,6 +1561,7 @@
+         return;
+     }
+     line->is_timer_started = False;
++    line->is_flash_probe_on = False;
+     *(struct TEMPO_EVENT_DESC **)value.sival_int = NULL;
+ }
+ 
+@@ -1806,6 +1807,7 @@
+         sig.sigev_value.sival_int = (int) line->ptr_holder;
+         sig.sigev_notify_function = onhook_event;
+         line->is_timer_started = False;
++        line->is_flash_probe_on = False;
+ 
+         int res = timer_create(CLOCK_REALTIME, &sig, &(line->flash_timer));
+         if (res < 0)

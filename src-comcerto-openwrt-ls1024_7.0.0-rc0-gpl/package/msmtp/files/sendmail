@@ -1,0 +1,36 @@
+#!/bin/sh
+if [ "$#" -lt 2 ];then
+echo "First setup /etc/msmtprc"
+echo "Usage:/usr/bin/sendmail \"Subject:Subject\" \"File:BodyFile\" "
+exit 0
+fi
+
+
+PID=`uci get systeminfo.sysinfo.pid`
+SERIAL=`uci get systeminfo.sysinfo.serial_number`
+FROM=`uci get email.email_settings.from_email_address1`
+
+Subject=`echo $1 | cut -d: -f2`
+BodyFile=`echo $2 | cut -d: -f2`
+
+To1=`uci get email.email_settings.to_email_address1`
+To2=""
+uci_email2=`uci show email | grep to_email_address2`
+if [ -n "$uci_email2" ];then
+	To2=`uci get email.email_settings.to_email_address2`
+fi
+
+# Prepare the Mail File
+`sed -i "1i " $BodyFile`
+`sed -i "1i Subject: $Subject" $BodyFile`
+if [ -n "$To2" ];then
+	        `sed -i "1i To: $To2" $BodyFile`
+fi
+`sed -i "1i To: $To1" $BodyFile`
+`sed -i "1i From: \"$PID($SERIAL)\" <$FROM>" $BodyFile`
+
+if [ -n "$To2" ];then
+	cat $BodyFile | msmtp $To1 $To2 --syslog >/dev/null 2>&1
+else
+	cat $BodyFile | msmtp $To1 --syslog >/dev/null 2>&1
+fi

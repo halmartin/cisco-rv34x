@@ -1,0 +1,137 @@
+#!/bin/sh /etc/rc.common
+# 03-03-2017: harry.lin <harry.lin@deltaww.com>
+# Add this script support info show for factory testing require
+
+START=99
+
+INFOFILE="/tmp/info_show"
+
+xappend() {
+	local value="$1"
+	echo "${value}" >> $INFOFILE
+}
+
+stop() {
+	echo -n > ${INFOFILE}
+}
+
+start() {
+	flag_2g=0
+	flag_5g=0
+	fw_version=`uci get firmware.firminfo.version`
+	xappend "FW version:		${fw_version}"
+	serial_number=`uci get systeminfo.sysinfo.serial_number`
+	xappend "Serial Number:		${serial_number}"
+	xappend "Region:"
+	product_id=`uci get systeminfo.sysinfo.fullpid`
+	if [ ! -e /sys/class/gpio/gpio6 ]; then
+		echo 6 > /sys/class/gpio/export
+	fi
+	wifi_onoff_value=`cat /sys/class/gpio/gpio6/value`
+	if [ "x$wifi_onoff_value" == "x0" ];then
+		wifi_onoff="ON"
+	else
+		wifi_onoff="OFF"
+	fi
+	if [ "$wifi_onoff" == "ON" ]
+	then
+		for i in `seq 0 7`
+		do
+			if [ "$i" == "0" ]
+			then
+				mode=wl0
+				if [ -n "`echo $product_id | grep 160W`" ];then
+					band=5Ghz
+				elif [ -n "`echo $product_id | grep 260W`" ];then
+					band=2.4Ghz
+				fi
+			elif [ "$i" == "1" ]
+			then
+				mode=wl1
+				if [ -n "`echo $product_id | grep 160W`" ];then
+					band=2.4Ghz
+				elif [ -n "`echo $product_id | grep 260W`" ];then
+					band=5Ghz
+				fi
+			else
+				mode=`uci get wireless.@wifi-iface[$i].device 2> /dev/null`
+				if [ $? -eq 1 ]
+				then
+					continue
+				fi
+				band=`wl -i $mode status | grep GHz | awk -F ' ' '{print $2}'`
+			fi
+			ssid=`uci get wireless.@wifi-iface[$i].ssid 2> /dev/null`
+			passphrase=`uci get wireless.@wifi-iface[$i].key 2> /dev/null`
+			if [ "x${passphrase}" == "x" ]
+			then
+				passphrase="none"
+			fi
+			wireless_region=`wl -i $mode country | awk -F ' ' '{print $3" "$4}'`
+			xappend "Wireless Region:	${wireless_region}"
+			data_rate=`wl -i $mode rate`
+			xappend "$band	DateRate:	${data_rate}"
+			channel=`uci get wireless.$mode.channel`
+			xappend "$band channel:		${channel}"
+			coexist=`wl -i $mode obss_coex`
+			if [ "x${coexist}" == "x0" ]                           
+			then
+				xappend "$band coexist:		Disabled"
+			elif [ "x${coexist}" == "x1" ]
+			then
+				xappend "$band coexist:		Enabled"
+			fi
+			xappend "$band SSID:		${ssid}"
+			xappend "$band PassPhrase:	${passphrase}"
+		done
+	fi
+
+	wan_mac=`uci get systeminfo.sysinfo.macwan1`
+	xappend "WAN MAC:		${wan_mac}"
+	lan_mac=`uci get systeminfo.sysinfo.maclan`
+	xappend "LAN MAC:		${lan_mac}"
+	if [ "$wifi_onoff" == "ON" ];then
+		if [ "${product_id/260/}" != "${product_id}" ]
+		then
+			wlan_2g_mac=`ifconfig wl0 | grep HWaddr | awk '{print$5}'`
+			xappend "WLAN 2.4G MAC:		${wlan_2g_mac}"
+			wlan_5g_mac=`ifconfig wl1 | grep HWaddr | awk '{print$5}'`
+			xappend "WLAN 5G MAC:		${wlan_5g_mac}"
+		else
+			wlan_2g_mac=`ifconfig wl1 | grep HWaddr | awk '{print$5}'`
+			xappend "WLAN 2.4G MAC:		${wlan_2g_mac}"
+			wlan_5g_mac=`ifconfig wl0 | grep HWaddr | awk '{print$5}'`
+			xappend "WLAN 5G MAC:		${wlan_5g_mac}"
+		fi
+	fi
+	xappend "LABEL MAC:		${lan_mac}"
+	xappend "PID:			${product_id}"
+	vid=`uci get systeminfo.sysinfo.vid`
+	xappend "VID:			${vid}"
+	xappend "Haraware Version: "
+	xappend "SUBHWID: "
+	wan_status=`ethtool eth0 | grep "Link detected" | awk '{print$3}'`
+	wan_speed="Link Down"
+	if [ "x${wan_status}" == "xyes" ]
+	then
+		wan_speed=`ethtool eth0 | grep "Speed" | awk '{print$2}'`
+	fi
+	xappend "WAN Speed: 		${wan_speed}"
+	default_state="Not Default"
+	[ "`cat /tmp/default_state`" == "1" ] && default_state="Default"
+	xappend "Start page:		${default_state}"
+	key_num=`cat /tmp/serial_key.txt`
+	p_n=`openssl enc -d -aes-128-cbc -a -salt -in /tmp/boardinfo_partno.txt -pass pass:${key_num}`
+	xappend "P/N:			${p_n}"
+	prod_name=`openssl enc -d -aes-128-cbc -a -salt -in /tmp/boardinfo_prodname.txt -pass pass:${key_num}`
+	xappend "PROD_NAME:		${prod_name}"
+	prod_series=`openssl enc -d -aes-128-cbc -a -salt -in /tmp/boardinfo_prodseries.txt -pass pass:${key_num}`
+	xappend "PROD_SERIES:		${prod_series}"
+	xappend "WIFI Status:		${wifi_onoff}"
+	[ -d /mnt/packages/burn_in/ ] && xappend "Burn-In Date: 		1"
+}
+
+restart() {
+	stop
+	start
+}

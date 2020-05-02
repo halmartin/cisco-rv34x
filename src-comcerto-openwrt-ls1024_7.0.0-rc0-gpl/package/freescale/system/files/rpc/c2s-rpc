@@ -1,0 +1,29 @@
+#!/bin/sh
+# input: "ACTION connection-name <connection-name> actual-ip <acctual-ip> virtual-ip <vip>"
+# output: "code <int32> errstr <string>"
+
+ACTION=$1
+CONNNAME="c2s_$3"
+
+ACTUALIP=$5
+VIRTUALIP=$7
+
+actualConnID=`ipsec  status $CONNNAME | grep $ACTUALIP | cut -d ':' -f 1`
+
+logger -t VPN-RPC "Executing RPC for connection $actualConnID to bring $1 $ACTUALIP($VIRTUALIP)"
+/etc/init.d/strongswan exec_ipsec down "$actualConnID" >/dev/null 2>&1
+if [ "$?" -ne 0 ]
+then
+	errcode=1
+	errstring="Failed"
+else
+	errcode=0
+	errstring="Success"
+fi
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errstring\""
+	exit 1
+else
+	exit 0
+fi

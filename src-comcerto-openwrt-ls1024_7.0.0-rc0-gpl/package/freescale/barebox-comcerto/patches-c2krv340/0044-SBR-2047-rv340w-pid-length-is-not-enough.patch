@@ -1,0 +1,35 @@
+From e57fca04f77ae5056d2579f9d2445188e3493067 Mon Sep 17 00:00:00 2001
+From: Yonghua Cao-B53732 <Yonghua.Cao@freescale.com>
+Date: Wed, 20 Apr 2016 12:47:33 +0800
+Subject: [PATCH 44/60] SBR-2047 rv340w pid length is not enough
+
+for RV340W, pid format is "RV340W-X-XX-XX", the length should be >= 14
+---
+ commands/boardinfo.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+index 5b6f866..c8c6786 100644
+--- a/commands/boardinfo.c
++++ b/commands/boardinfo.c
+@@ -36,7 +36,7 @@
+ #include <errno.h>
+ #include <environment.h>
+ 
+-#define SIZE_PID 12         /* Max  12 Character Product ID */
++#define SIZE_PID 14         /* Max  14 Character Product ID */
+ #define SIZE_VID  3         /* Max  03 Character H/W Version */
+ #define SIZE_S_N 11         /* Max  11 Character Board Serial Number */
+ #define SIZE_P_N 12         /* Max  12 Character Board Part Number */
+@@ -582,7 +582,7 @@ static const __maybe_unused char cmd_boardinfo_help[] =
+ " -u  update boardinfo (default updates info to /dev/spi1.boardinfo)\n"
+ " -s  lists boardinfo contents from /dev/spi1.boardinfo\n"
+ " e.g.    boardinfo -u\n"
+-"Enter PID : <MAX 11 char>\n"
++"Enter PID : <MAX 14 char>\n"
+ "Enter VID : <MAX  3 char>\n"
+ "Enter S/N : <MAX 11 char>\n"
+ "Enter LAN MAC   : <6 octets of MAC address with : separator e.g. aa:bb:cc:dd:ee:f0 >\n"
+-- 
+2.7.4
+

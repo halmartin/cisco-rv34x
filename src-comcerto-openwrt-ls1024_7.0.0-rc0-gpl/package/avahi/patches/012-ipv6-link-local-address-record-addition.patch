@@ -1,0 +1,104 @@
+From 2f33c6a55befddcdecbcaff88798458674bd9ff8 Mon Sep 17 00:00:00 2001
+From: Manish Tiwari <manish.tiwari@nxp.com>
+Date: Wed, 7 Feb 2018 15:10:00 +0530
+Subject: [PATCH] PPSBR-1416 Bonjour ipv6 link local address addition and
+ avoid conflict of records between multiple devices
+ Signed-off-by: Manish Tiwari <manish.tiwari@nxp.com>
+
+---
+ avahi-core/entry.c |    9 ++++++---
+ avahi-core/iface.c |   20 +++++++++++++++-----
+ 2 files changed, 21 insertions(+), 8 deletions(-)
+
+diff --git a/avahi-core/entry.c b/avahi-core/entry.c
+index c42bfe4..c6f277f 100644
+--- a/avahi-core/entry.c
++++ b/avahi-core/entry.c
+@@ -1,3 +1,7 @@
++/* 07/02/2018   Manish <manish.tiwari@nxp.com>
++   Added link local ipv6 adress record in avahi and allowing same records can be advertise by multiple devices 
++*/
++
+ /***
+   This file is part of avahi.
+ 
+@@ -457,7 +461,7 @@ int avahi_server_add_address(
+     AVAHI_CHECK_VALIDITY(s, !name || avahi_is_valid_fqdn(name), AVAHI_ERR_INVALID_HOST_NAME);
+ 
+     /* Prepare the host naem */
+-
++    
+     if (!name)
+         name = s->host_name_fqdn;
+     else {
+@@ -503,8 +507,7 @@ int avahi_server_add_address(
+     if (!(flags & AVAHI_PUBLISH_NO_REVERSE)) {
+         char reverse_n[AVAHI_DOMAIN_NAME_MAX];
+         avahi_reverse_lookup_name(a, reverse_n, sizeof(reverse_n));
+-
+-        if (!(reverse = server_add_ptr_internal(s, g, interface, protocol, flags | AVAHI_PUBLISH_UNIQUE, AVAHI_DEFAULT_TTL_HOST_NAME, reverse_n, name))) {
++        if (!(reverse = server_add_ptr_internal(s, g, interface, protocol, flags | AVAHI_PUBLISH_ALLOW_MULTIPLE, AVAHI_DEFAULT_TTL_HOST_NAME, reverse_n, name))) {
+             ret = avahi_server_errno(s);
+             goto finish;
+         }
+diff --git a/avahi-core/iface.c b/avahi-core/iface.c
+index 39a860a..b30132a 100644
+--- a/avahi-core/iface.c
++++ b/avahi-core/iface.c
+@@ -1,3 +1,8 @@
++/* 07/02/2018   Manish <manish.tiwari@nxp.com>
++   Added link local ipv6 adress record in avahi and allowing same records can be advertise by multiple devices 
++*/
++
++
+ /***
+   This file is part of avahi.
+ 
+@@ -85,7 +90,7 @@ void avahi_interface_address_update_rrs(AvahiInterfaceAddress *a, int remove_rrs
+     } else {
+ 
+         /* Clear the entry group */
+-
++	
+         if (a->entry_group && !avahi_s_entry_group_is_empty(a->entry_group)) {
+             char t[AVAHI_ADDRESS_STR_MAX];
+             avahi_address_snprint(t, sizeof(t), &a->address);
+@@ -187,9 +192,12 @@ static int interface_mdns_mcast_join(AvahiInterface *i, int join) {
+         AvahiInterfaceAddress *a;
+ 
+         /* Look if there's an address with global scope */
+-        for (a = i->addresses; a; a = a->address_next)
+-            if (a->global_scope)
++        for (a = i->addresses; a; a = a->address_next){
++           if (i->protocol == AVAHI_PROTO_INET && a->global_scope)
+                 break;
++	   if (i->protocol == AVAHI_PROTO_INET6 && avahi_address_is_link_local(&a->address))
++		break;
++	}
+ 
+         /* No address with a global scope has been found, so let's use
+          * any. */
+@@ -240,8 +248,10 @@ static int interface_mdns_mcast_rejoin(AvahiInterface *i) {
+             usable = a;
+ 
+         if (avahi_address_cmp(&a->address, &i->local_mcast_address) == 0) {
++	    if (i->protocol == AVAHI_PROTO_INET6 && avahi_address_is_link_local(&a->address))
++                return 0;
+ 
+-            if (a->global_scope)
++            if (i->protocol == AVAHI_PROTO_INET && a->global_scope)
+                 /* No action necessary: the address still exists and
+                  * has global scope. */
+                 return 0;
+@@ -711,7 +721,7 @@ int avahi_interface_address_is_relevant(AvahiInterfaceAddress *a) {
+             continue;
+ 
+         if (b->global_scope && !b->deprecated)
+-            return 0;
++            return 1;
+     }
+ 
+     return 1;
+-- 
+1.7.9.5
+

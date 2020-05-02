@@ -1,0 +1,17 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006-2010 OpenWrt.org
+START=50
+STOP=35
+
+##SMCroute and igmp proxy are mutually exclusive, so based on the need below lines can be uncommented.
+start() {
+	ip -6 route add unreachable default metric 9024 2>&- >&-
+#	smcroute -d
+}
+
+stop() {
+	local pid=`pgrep smcroute`
+	[ "$pid" != "" ] && { 
+		smcroute -k; 
+	}
+}

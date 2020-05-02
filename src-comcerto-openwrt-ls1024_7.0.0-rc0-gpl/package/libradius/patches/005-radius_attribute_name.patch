@@ -1,0 +1,89 @@
+--- a/src/pam_radius_auth.c	2016-04-06 17:12:58.068273251 +0530
++++ b/src/pam_radius_auth.c	2016-04-06 17:14:32.023227250 +0530
+@@ -63,6 +63,8 @@
+ 
+ #define DPRINT if (opt_debug & PAM_DEBUG_ARG) _pam_log
+ 
++#define PAM_AUTH_CONNECTION_NAME  0x2000
++
+ /* internal data */
+ static CONST char *pam_module_name = "pam_radius_auth";
+ static char conf_file[BUFFER_SIZE]; /* configuration file */
+@@ -1144,6 +1146,11 @@
+         int rad_attr_len = 0;
+         char* rad_attr_val = NULL;
+ 
++        const struct pam_conv *conv;
++        struct pam_response *resp = NULL;
++        char *connection_name = NULL;
++        struct pam_message tmpmsg[1],*ptmpmsg[1];
++
+ 	ctrl = _pam_parse(argc, argv, &config);
+ 
+ 	/* grab the user name */
+@@ -1186,7 +1193,64 @@
+ 	 * keep track of which service is doing the authentication.
+ 	 */
+ 	if (!config.client_id) {
+-		retval = pam_get_item(pamh, PAM_SERVICE, (CONST void **) &config.client_id);
++        retval = pam_get_item(pamh, PAM_SERVICE, (CONST void **) &config.client_id);
++	     PAM_FAIL_CHECK;
++      if((strcmp(config.client_id, "s2s-vpn") == 0))
++      {
++        char cmd[256]={'\0'};
++        char var[256]={'\0'};
++        FILE *fp=NULL;
++        ptmpmsg[0] = &tmpmsg[0];
++        tmpmsg[0].msg_style = PAM_AUTH_CONNECTION_NAME;
++        tmpmsg[0].msg = "Connection: ";
++
++        retval = pam_get_item(pamh, PAM_CONV, (const void **) &conv);
++          
++           if (retval == PAM_SUCCESS)
++           {
++             retval = conv->conv (1,
++                     (const struct pam_message **) ptmpmsg,
++                     &resp, conv->appdata_ptr);
++           }
++           else
++	      PAM_FAIL_CHECK;
++
++           if (resp != NULL)
++           {
++             if ((flags & PAM_DISALLOW_NULL_AUTHTOK) && resp[0].resp == NULL)
++                {
++                  free (resp);
++	          PAM_FAIL_CHECK;
++                }
++
++             connection_name = resp[0].resp;
++             resp[0].resp = NULL;
++           }
++           else
++           {
++	          PAM_FAIL_CHECK;
++           }
++           free (resp);
++
++         if(strncmp(connection_name, "c2s_", 4)== 0)
++        {
++           sprintf(cmd,"uci get strongswan.%s.client_type",connection_name);
++        fp=popen(cmd,"r");
++        if(fgets(var, sizeof(var), fp) == NULL)
++          {
++            printf("fgets failed\n");
++            pclose(fp);
++           }
++        var[strlen(var)-1]='\0';
++        pclose(fp);
++        if (strcmp(var,"ezvpn") == 0)
++          strcpy(config.client_id, "ezvpn");
++        else if(strcmp(var,"3rdparty") == 0)
++          strcpy(config.client_id, "3rdparty");
++        }
++}
++
++
+ 		PAM_FAIL_CHECK;
+ 	}
+ 

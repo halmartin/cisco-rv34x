@@ -1,0 +1,51 @@
+#!/bin/sh
+
+#interface_name=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "interface-name") {print $(I+1)};}'`
+job_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "job-id") {print $(I+1)};}'`
+#action=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "action") {print $(I+1)};}'`
+
+ps_job_id=`ps | grep "tcpdump" | grep "WAN1\|WAN2\|LAN" | sed s/"^ *"//g | cut -f 1 -d ' '`
+if [ "$ps_job_id" == "" ]
+then
+	#NO capture is in progress now. Check if a previous capture is done and its file is available.
+	tmp_pcap_file=$(ls /tmp/download/*.pcap 2>/dev/null)
+	if [ -n "$tmp_pcap_file" ]
+	then	#There is a pcap file. stopped state.
+		onlycapFile=$(basename $tmp_pcap_file)
+		errcode=0
+		logger -t system -p local0.info "Packet capture is in STOPPED state. Download the relevant file:$tmp_pcap_file"
+		echo "file-name \"/download/$onlycapFile\" state \"stopped\""
+	else	#no pcap files found.
+		errcode=0
+		echo "state \"idle\""
+		logger -t system -p local0.info "packet capture is in IDLE state."
+	fi
+
+else
+	#There is one process, that is already in progress. return its PID and interface-name
+	pid_cmdline=`cat /proc/$ps_job_id/cmdline | xargs -0`
+	if [ -n "$(echo $pid_cmdline | grep WAN1)" ]
+	then
+		errcode=0
+		echo "interface-name \"WAN1\" state \"capturing\""
+		logger -t system -p local0.info "packet capture is in CAPTURING state. jobid:$ps_job_id on interface:WAN1"
+	elif [ -n "$(echo $pid_cmdline | grep WAN2)" ]
+	then
+		errcode=0
+		#echo "interface-name \"WAN2\" state \"capturing\" duration \"60\" file-size \"0\" file-name \"empty\""
+		echo "interface-name \"WAN2\" state \"capturing\""
+		logger -t system -p local0.info "packet capture is in CAPTURING state. jobid:$ps_job_id on interface:WAN2"
+	elif [ -n "$(echo $pid_cmdline | grep LAN)" ]
+	then
+		errcode=0
+		echo "interface-name \"LAN\" state \"capturing\""
+		logger -t system -p local0.info "packet capture is in CAPTURING state. jobid:$ps_job_id on interface:LAN"
+	fi
+fi
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errmsg\""
+	exit $errcode
+else
+	exit 0
+fi

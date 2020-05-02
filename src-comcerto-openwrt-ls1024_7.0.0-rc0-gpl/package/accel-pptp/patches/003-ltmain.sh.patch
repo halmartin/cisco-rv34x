@@ -1,0 +1,11 @@
+--- a/pppd_plugin/ltmain.sh	2011-06-24 10:08:35.404479956 +0400
++++ b/pppd_plugin/ltmain.sh	2011-06-24 10:08:43.084233474 +0400
+@@ -60,6 +60,8 @@
+ BIN_SH=xpg4; export BIN_SH # for Tru64
+ DUALCASE=1; export DUALCASE # for MKS sh
+ 
++echo="/bin/echo"
++
+ # Check that we have a working $echo.
+ if test "X$1" = X--no-reexec; then
+   # Discard the --no-reexec flag, and continue.

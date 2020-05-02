@@ -1,0 +1,60 @@
+# 22-02-2017: Abdul Moiz <abdul.moiz@nxp.com>
+# Below fixes
+# 1. saveenv out of memory issue
+# 2. kernel dual boot failover issue
+diff -Naur ./commands/imageenv.c ../../b/barebox-2011.06.0/commands/imageenv.c
+--- ./commands/imageenv.c	2017-02-22 16:53:26.849022365 +0530
++++ ../../b/barebox-2011.06.0/commands/imageenv.c	2017-02-22 16:55:00.977025544 +0530
+@@ -100,7 +100,13 @@
+   char *pch = NULL;
+   char buf[ENV_BUFSIZE] = {0xFF};
+   char *buf_boorargs;
++  /* Size of mtd_str is initialized based on board to take care of single digit or double digit ubi partition numbers
++     while replacing ubi.mtd in bootargs */
++#ifdef CONFIG_MACH_COMCERTO_C2K_MFCNEVM
+   char mtd_str[10] = {0};
++#elif CONFIG_MACH_COMCERTO_C2K_RV16X_26X
++  char mtd_str[9] = {0};
++#endif
+ 
+   if (argc < 3)
+   {
+@@ -195,7 +201,9 @@
+ "\n"
+ "options:\n"
+ " -g  Get active image information\n"
+-" -s < 4 | 7 > Set active image to boot\n"
++" -s  Set active image to boot\n"
++"     For RV16X_26X   < 4 | 7  >\n"
++"     For MFCNEVM     < 9 | 12 >\n"
+ " -c </dev/nand0.kernel1.bb | /dev/nand0.kernel2.bb > Check kernel imaeg validity\n"
+ ;
+ 
+diff -Naur ./common/environment.c ../../b/barebox-2011.06.0/common/environment.c
+--- ./common/environment.c	2017-02-22 16:53:26.713022360 +0530
++++ ../../b/barebox-2011.06.0/common/environment.c	2017-02-22 17:04:43.077045202 +0530
+@@ -16,6 +16,10 @@
+  * You should have received a copy of the GNU General Public License
+  * along with this program; if not, write to the Free Software
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ *
++ * 22-02-2017: Abdul Moiz <abdul.moiz@nxp.com>
++ * Fix for saveenv out of memory issue 
++ * by increasing malloc memory size while reading env from SPI partition
+  */
+ 
+ /**
+@@ -205,7 +209,13 @@
+ 	}
+ 
+ 	size = ENVFS_32(super.size);
++#ifdef CONFIG_MACH_COMCERTO_C2K_RV16X_26X
++	/* Adding 16 byte extra allocation to accommodate extra bytes 
++           read while reading data from SPI flash device into the buffer */
++	buf = xmalloc(size+16);
++#else
+ 	buf = xmalloc(size);
++#endif
+ 	buf_free = buf;
+ 	ret = read(envfd, buf, size);
+ 	if (ret < size) {

@@ -1,0 +1,66 @@
+From a01e9e6f25123c2e11db7903d77a0d529f102696 Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@freescale.com>
+Date: Tue, 1 Mar 2016 13:06:19 +0530
+Subject: [PATCH] 390-required-default-conf.patch
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@freescale.com>
+---
+ conf/options/charon.conf  | 7 +++++--
+ conf/plugins/resolve.conf | 2 +-
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/conf/options/charon.conf b/conf/options/charon.conf
+index bd8e299..df8eb97 100644
+--- a/conf/options/charon.conf
++++ b/conf/options/charon.conf
+@@ -12,7 +12,7 @@ charon {
+     # cert_cache = yes
+ 
+     # Send Cisco Unity vendor ID payload (IKEv1 only).
+-    # cisco_unity = no
++    cisco_unity = yes
+ 
+     # Close the IKE_SA if setup of the CHILD_SA along with IKE_AUTH failed.
+     # close_ike_on_child_failure = no
+@@ -56,7 +56,7 @@ charon {
+     # hash_and_url = no
+ 
+     # Allow IKEv1 Aggressive Mode with pre-shared keys as responder.
+-    # i_dont_care_about_security_and_use_aggressive_mode_psk = no
++    i_dont_care_about_security_and_use_aggressive_mode_psk = yes
+ 
+     # Whether to ignore the traffic selectors from the kernel's acquire events
+     # for IKEv2 connections (they are not used for IKEv1).
+@@ -69,6 +69,8 @@ charon {
+     # Maximum number of IKE_SAs that can be established at the same time before
+     # new connection attempts are blocked.
+     # ikesa_limit = 0
++    # Maximum IPSec connections (50) + Maximum L2TP IPSec (25)
++     ikesa_limit = 75
+ 
+     # Number of exclusively locked segments in the hash table.
+     # ikesa_table_segments = 1
+@@ -175,6 +177,7 @@ charon {
+ 
+     # Number of times to retransmit a packet before giving up.
+     # retransmit_tries = 5
++    retransmit_tries = 3
+ 
+     # Interval to use when retrying to initiate an IKE_SA (e.g. if DNS
+     # resolution failed), 0 to disable retries.
+diff --git a/conf/plugins/resolve.conf b/conf/plugins/resolve.conf
+index 5d9ca72..ffe7997 100644
+--- a/conf/plugins/resolve.conf
++++ b/conf/plugins/resolve.conf
+@@ -1,7 +1,7 @@
+ resolve {
+ 
+     # File where to add DNS server entries.
+-    # file = /etc/resolv.conf
++    file = /etc/cisco_ezvpn_attr
+ 
+     # Whether to load the plugin. Can also be an integer to increase the
+     # priority of this plugin.
+-- 
+1.9.1
+

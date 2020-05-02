@@ -1,0 +1,132 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2008-2012 OpenWrt.org
+
+START=90
+
+SERVICE_USE_PID=1
+
+PID_VER=`uci get systeminfo.sysinfo.pid | awk -F'-' '{print $1}'`
+if [ "$PID_VER" = "RV345" -o "$PID_VER" = "RV340"  -o "$PID_VER" = "RV345P"  -o "$PID_VER" = "RV340W" ]
+then
+        vlanName=eth3
+        WAN1IFACE=eth2
+        WAN2IFACE=eth0
+
+        LLDP_SWITCH_ENABLE="rtkssdk feature lldp enable"
+        LLDP_SWITCH_DISABLE="rtkssdk feature lldp disable"
+elif [ "$PID_VER" = "RV260" -o "$PID_VER" = "RV160" -o "$PID_VER" = "RV260W" -o "$PID_VER" = "RV260P" -o "$PID_VER" = "RV160W" ]
+then
+        vlanName=eth2
+        WAN1IFACE=eth0
+fi
+
+start() {
+	enable=`uci get lldpd.config.enable`
+	if [ "$enable" = 1 ];then
+		if [ "$PID_VER" = "RV340" -o "$PID_VER" = "RV340W" ]
+		then
+                	$LLDP_SWITCH_ENABLE
+		fi
+		local enable_cdp
+		local enable_fdp
+		local enable_sonmp
+		local enable_edp
+		local lldp_class
+		local lldp_location
+		
+		config_load 'lldpd'
+		config_get_bool enable_cdp 'config' 'enable_cdp' 0
+		config_get_bool enable_fdp 'config' 'enable_fdp' 0
+		config_get_bool enable_sonmp 'config' 'enable_sonmp' 0
+		config_get_bool enable_edp 'config' 'enable_edp' 0
+		config_get lldp_class 'config' 'lldp_class'
+		config_get lldp_location 'config' 'lldp_location'
+		if [ "$PID_VER" = "RV340" -o "$PID_VER" = "RV340W" -o "$PID_VER" = "RV345" -o "$PID_VER" = "RV345P" ];then
+			local wan2
+                        config_get_bool wan2 'config' 'wan2' 0
+		fi
+
+		config_get_bool lan1 'config' 'lan1' 0
+		config_get_bool lan2 'config' 'lan2' 0
+		config_get_bool lan3 'config' 'lan3' 0
+		config_get_bool lan4 'config' 'lan4' 0
+
+		IFACE_STR=""
+
+		if [ "$lan1" = 1 -o "$lan2" = 1 -o "$lan3" = 1 -o "$lan4" = 1 ];then
+			IFACE_STR=${vlanName}"*"
+		fi
+		
+		if [ "$PID_VER" = "RV345" -o "$PID_VER" = "RV345P" ];then
+			config_get_bool lan5 'config' 'lan5' 0
+			config_get_bool lan6 'config' 'lan6' 0
+			config_get_bool lan7 'config' 'lan7' 0            
+			config_get_bool lan8 'config' 'lan8' 0            
+			config_get_bool lan9 'config' 'lan9' 0 
+			config_get_bool lan10 'config' 'lan10' 0              
+			config_get_bool lan11 'config' 'lan11' 0              
+			config_get_bool lan12 'config' 'lan12' 0          
+			config_get_bool lan13 'config' 'lan13' 0         
+			config_get_bool lan14 'config' 'lan14' 0         
+			config_get_bool lan15 'config' 'lan15' 0
+			config_get_bool lan0 'config' 'lan0' 0
+			
+			if [ "$lan5" = 1 -o "$lan6" = 1 -o "$lan7" = 1 -o "$lan8" = 1 -o "$lan9" = 1 -o "$lan10" = 1 -o "$lan11" = 1 -o "$lan12" = 1 -o "$lan13" = 1 -o "$lan14" = 1 -o "$lan15" = 1 -o "$lan0" = 1 ];then
+				IFACE_STR=${vlanName}"*"                 
+			fi
+		elif [ "$PID_VER" = "RV260" -o "$PID_VER" = "RV260W" -o "$PID_VER" = "RV260P" ]
+                then
+                        config_get_bool lan5 'config' 'lan5' 0
+                        config_get_bool lan6 'config' 'lan6' 0
+                        config_get_bool lan7 'config' 'lan7' 0
+                        config_get_bool lan8 'config' 'lan8' 0
+
+                        if [ "$lan5" = 1 -o "$lan6" = 1 -o "$lan7" = 1 -o "$lan8" = 1 ];then
+                                IFACE_STR=${vlanName}"*"
+                        fi
+		fi
+		local wan1_local=$(uci get lldpd.config.wan1)
+		if [ "$wan1_local" -eq 1 ];then
+			IFACE_STR=$IFACE_STR",${WAN1IFACE}"
+		fi
+		if [ "$PID_VER" = "RV340" -o "$PID_VER" = "RV340W" -o "$PID_VER" = "RV345" -o "$PID_VER" = "RV345P" ]
+		then
+			local wan2_local=$(uci get lldpd.config.wan2)
+			if [ "$wan2_local" -eq 1 ];then
+                                IFACE_STR=$IFACE_STR",${WAN2IFACE}"
+                        fi
+		fi
+
+		iface_config=1
+
+		[ -z "$IFACE_STR" ] && return 0
+
+		[ $enable_cdp -gt 0 ] && append args '-c'
+		[ $enable_fdp -gt 0 ] && append args '-f'
+		[ $enable_sonmp -gt 0 ] && append args '-s'
+		[ $enable_edp -gt 0 ] && append args '-e'
+
+		if [ "$iface_config" = 1 ];then
+			service_start /usr/sbin/lldpd -I $IFACE_STR $args \
+				${lldp_class:+ -M $lldp_class}
+		else
+			service_start /usr/sbin/lldpd $args \
+				${lldp_class:+ -M $lldp_class}
+		fi
+		[ -n "$lldp_location" ] && {
+			sleep 1
+			/usr/sbin/lldpctl -L "$lldp_location" > /dev/null 2>&1
+		}
+	fi
+	return 0
+}
+
+stop() {
+	service_stop /usr/sbin/lldpd
+	rm -f /var/run/lldpd.socket
+}
+
+restart() {
+	stop
+	start
+}

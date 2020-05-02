@@ -1,0 +1,14 @@
+--- lldpd-0.6.0_Orig/src/display.c	2015-10-29 15:01:59.841362604 +0530
++++ lldpd-0.6.0/src/display.c	2015-10-29 15:02:24.141363483 +0530
+@@ -681,6 +681,11 @@ display_chassis(struct writer * w, struc
+ 	tag_datatag(w, "name", "SysName", chassis->c_name);
+ 	tag_datatag(w, "descr", "SysDescr", chassis->c_descr);
+ 
++	/* Changes to show ttl value */
++	tag_start (w, "ttl", "TTL");
++	tag_attr(w, "ttl" , "", u2str(chassis->c_ttl));
++	tag_end(w);
++
+ 	TAILQ_FOREACH(mgmt, &chassis->c_mgmt, m_entries) {
+ 		memset(addrbuf, 0, sizeof(addrbuf));
+ 		inet_ntop(lldpd_af(mgmt->m_family), &mgmt->m_addr, addrbuf, sizeof(addrbuf));

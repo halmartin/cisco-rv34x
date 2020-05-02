@@ -1,0 +1,80 @@
+#!/bin/sh
+. /lib/functions/network.sh
+
+if [ "$_this_board" = "RV160" -o "$_this_board" = "RV160W" -o "$_this_board" = "RV260" -o "$_this_board" = "RV260W" -o "$_this_board" = "RV260P" ];then
+	platform_led_script="rv16x_26x_led.sh"
+else
+	platform_led_script="rv340_led.sh"
+fi
+USBBUS1="Bus 003"
+USBBUS2="Bus 001"
+STATS_3G="/tmp/stats/3g"
+SIGNAL_STRENGTH_CRON_FILE="/usr/bin/cron.d/10minutes/1-update_signal_strength"
+iface=`echo $INTERFACE | grep "^usb[12]$"`
+USB_NUB=
+if [ -n "$iface" ];then
+	case "$ACTION" in
+		ifup)
+			proto=`uci get network.$INTERFACE.proto` >/dev/null 2>&1
+			if [ "$proto" = "qmi" ];then
+				INTERFACE=$INTERFACE"_4"
+			fi
+			
+			# Add cron job to get signal strength every 10 min.
+			tmp=`echo $INTERFACE | grep "usb1"` >/dev/null 2>&1
+			if [ -n "$tmp" ];then
+				USB_NUB=1
+				device="/dev/modem1"
+				`sed -i "/ #USB1_SIGNAL_CHECK/c\USB1_GET_STRENGTH=1 #USB1_SIGNAL_CHECK" $SIGNAL_STRENGTH_CRON_FILE`
+			else
+				USB_NUB=2
+				device="/dev/modem2"
+				`sed -i "/ #USB2_SIGNAL_CHECK/c\USB2_GET_STRENGTH=1 #USB2_SIGNAL_CHECK" $SIGNAL_STRENGTH_CRON_FILE`
+			fi
+
+			local ipaddr=
+			unset ipaddr
+			# get the interface ip address
+			network_get_wanip ipaddr $INTERFACE
+			[ -n "$ipaddr" ] && {
+				`$platform_led_script "usb${USB_NUB}" green`
+			}
+		;;
+		ifdown)
+			USB=`echo $INTERFACE | grep "usb1"`
+			if [ -n "$USB" ];then
+				# Remove cron job to get signal strength.
+				`sed -i "/ #USB1_SIGNAL_CHECK/c\USB1_GET_STRENGTH=0 #USB1_SIGNAL_CHECK" $SIGNAL_STRENGTH_CRON_FILE`
+				
+				hardware_present=`lsusb | grep -v "Device 001" | grep "$USBBUS1"`
+				if [ -n "$hardware_present" ];then
+					$platform_led_script usb1 amber
+				else
+					$platform_led_script usb1 off
+				fi
+			else
+				USB=`echo $INTERFACE | grep "usb2"`
+				if [ -n "$USB" ];then
+					# Remove cron job to get signal strength.
+					`sed -i "/ #USB2_SIGNAL_CHECK/c\USB2_GET_STRENGTH=0 #USB2_SIGNAL_CHECK" $SIGNAL_STRENGTH_CRON_FILE`
+					
+					hardware_present=`lsusb | grep -v "Device 001" | grep "$USBBUS2"`
+					if [ -n "$hardware_present" ];then
+						$platform_led_script usb2 amber
+					else
+						$platform_led_script usb2 off
+					fi	
+				fi
+			fi
+		;;
+	esac	
+else
+	local ipaddr=
+	unset ipaddr
+	# get the interface ip address
+	network_get_wanip ipaddr $INTERFACE
+	[ -n "$ipaddr" ] && {
+                usb=`echo $INTERFACE | grep "^usb[12]" | cut -d "_" -f 1`
+                `$platform_led_script $usb green`
+	}
+fi

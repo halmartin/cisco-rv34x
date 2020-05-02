@@ -1,0 +1,47 @@
+--- linux-4.1.8.NEW/arch/arm/Makefile	2017-09-15 13:09:12.763882386 +0530
++++ linux-4.1.8/arch/arm/Makefile	2017-09-01 21:11:01.887099389 +0530
+@@ -151,7 +151,8 @@
+ machine-$(CONFIG_ARCH_CNS3XXX)		+= cns3xxx
+ machine-$(CONFIG_ARCH_COMCERTO)         := comcerto
+ ifeq ($(CONFIG_ARCH_COMCERTO),y)
+-textofs-$(CONFIG_ZONE_DMA) := 0x06008000
++#textofs-$(CONFIG_ZONE_DMA) := 0x06008000
++textofs-$(CONFIG_ZONE_DMA) := 0x07808000
+ endif
+ machine-$(CONFIG_ARCH_DAVINCI)		+= davinci
+ machine-$(CONFIG_ARCH_DIGICOLOR)	+= digicolor
+--- linux-4.1.8.NEW/arch/arm/mach-comcerto/Makefile.boot	2017-09-15 13:09:12.763882386 +0530
++++ linux-4.1.8/arch/arm/mach-comcerto/Makefile.boot	2017-09-01 21:10:45.123099652 +0530
+@@ -1,6 +1,7 @@
+ ifeq ($(CONFIG_ARCH_M86XXX),y)
+ ifeq ($(CONFIG_COMCERTO_ZONE_DMA_NCNB),y)
+-   zreladdr-y     := 0x06008000
++   #zreladdr-y     := 0x06008000
++   zreladdr-y     := 0x07808000
+ else
+    zreladdr-y     := 0x00008000
+ endif
+--- linux-4.1.8.NEW/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-09-15 13:09:12.763882386 +0530
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-09-01 21:15:10.615095489 +0530
+@@ -1006,7 +1006,8 @@
+ 	.init_machine	= platform_init,
+ 	.init_time	= comcerto_timer_init,
+ #ifdef CONFIG_ZONE_DMA
+-	.dma_zone_size	= SZ_32M + 11*SZ_4M,
++	/*.dma_zone_size	= SZ_32M + 11*SZ_4M,*/
++	.dma_zone_size	= SZ_32M + 17*SZ_4M,
+ #endif
+ 	.restart	= ls1024_restart,
+ 	.reboot_mode	= REBOOT_SOFT,
+--- linux-4.1.8.NEW/arch/arm/mach-comcerto/include/mach/comcerto-2000.h	2017-09-15 13:09:12.763882386 +0530
++++ linux-4.1.8/arch/arm/mach-comcerto/include/mach/comcerto-2000.h	2017-09-01 21:13:58.735096616 +0530
+@@ -119,7 +119,8 @@
+ 
+ #define COMCERTO_AXI_ACP_SIZE			(1 << 24)
+ 
+-#define COMCERTO_DDR_SHARED_BASE		(COMCERTO_AXI_DDR_BASE + 0x4C00000)
++/*#define COMCERTO_DDR_SHARED_BASE		(COMCERTO_AXI_DDR_BASE + 0x4C00000)*/
++#define COMCERTO_DDR_SHARED_BASE		(COMCERTO_AXI_DDR_BASE + 0x6400000)
+ #define COMCERTO_DDR_SHARED_SIZE		(SZ_16M + SZ_4M)
+ #define COMCERTO_FASTSPI_DDR_BASE		(COMCERTO_AXI_DDR_BASE + 0x2B00000)
+ #define COMCERTO_FASTSPI_DDR_SIZE		SZ_64K

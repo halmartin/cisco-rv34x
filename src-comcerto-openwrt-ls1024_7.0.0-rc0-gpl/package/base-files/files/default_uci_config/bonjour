@@ -1,0 +1,8 @@
+
+config bonjour 'bonjour_status'
+	option status 'enable'
+
+config iface 'iface_0'
+	option interface 'vlan1'
+	option status 'enable'
+

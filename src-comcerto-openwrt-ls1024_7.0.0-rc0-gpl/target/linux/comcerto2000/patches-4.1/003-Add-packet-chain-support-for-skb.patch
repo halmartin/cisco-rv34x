@@ -1,0 +1,80 @@
+From 819fa8ada7ddacf6433a10844a7d5212a963cc08 Thu Jul 14 14:39:00 2016 +0530
+From: Bozhong Xu <baizhong.xu@nxp.com>
+Date: Web, Feb 15, 2017
+Subject: [PATCH] Add packet chain support for skbuff.
+Signed-off-by: Bozhong Xu <baizhong.xu@nxp.com>
+---
+
+diff --git a/arch/arm/mach-comcerto/Kconfig b/arch/arm/mach-comcerto/Kconfig
+index ad25077..b86e687 100644
+--- a/arch/arm/mach-comcerto/Kconfig
++++ b/arch/arm/mach-comcerto/Kconfig
+@@ -240,6 +240,10 @@ config COMCERTO_CUSTOM_SKB_LAYOUT
+ 	depends on COMCERTO_ZONE_DMA_NCNB
+ 	default n
+ 
++config BRCM_CPKTC
++	bool "Broadcom Custom Packet chaining"
++	default y
++
+ config DSPG_DECT_CSS
+ 	bool "DSPG DECT CSS"
+ 	default n
+diff --git a/include/linux/skbuff.h b/include/linux/skbuff.h
+old mode 100644
+new mode 100755
+index 3625fc0..39abdb2
+--- a/include/linux/skbuff.h
++++ b/include/linux/skbuff.h
+@@ -9,6 +9,9 @@
+  *	modify it under the terms of the GNU General Public License
+  *	as published by the Free Software Foundation; either version
+  *	2 of the License, or (at your option) any later version.
++ *
++ *   15/Feb/2017 Bozhong Xu <baizhong.xu@nxp.com>
++ *     Add packet chain support which controlled by macro CONFIG_BRCM_CPKTC.
+  */
+ 
+ #ifndef _LINUX_SKBUFF_H
+@@ -697,6 +700,13 @@ struct sk_buff {
+ 	__u32 			mspd_len;
+ 	__u32 			mspd_ofst;
+ #endif
++
++/* BRCM PKTC Flags */
++#ifdef CONFIG_BRCM_CPKTC
++	unsigned char	pktc_cb[8];
++	__u32		pktc_flags;
++#endif
++
+ 	unsigned int		truesize;
+ 	atomic_t		users;
+ };
+diff --git a/net/core/skbuff.c b/net/core/skbuff.c
+old mode 100644
+new mode 100755
+index 6edb0f2..7000809
+--- a/net/core/skbuff.c
++++ b/net/core/skbuff.c
+@@ -30,6 +30,9 @@
+  *	modify it under the terms of the GNU General Public License
+  *	as published by the Free Software Foundation; either version
+  *	2 of the License, or (at your option) any later version.
++ *
++ *  15/Feb/2017 Bozhong Xu <baizhong.xu@nxp.com>
++ *     Add packet chain support which controlled by macro CONFIG_BRCM_CPKTC.
+  */
+ 
+ /*
+@@ -912,6 +915,11 @@ EXPORT_SYMBOL(consume_skb);
+ 
+ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
+ {
++/* BRCM PKTC Clear the flags */
++#ifdef CONFIG_BRCM_CPKTC
++	memset(new->pktc_cb, 0, sizeof(new->pktc_cb));
++	new->pktc_flags = old->pktc_flags;
++#endif
+ 	new->tstamp		= old->tstamp;
+ 	/* We do not copy old->sk */
+ 	new->dev		= old->dev;

@@ -1,0 +1,60 @@
+#!/bin/sh
+
+# Calculate memory usage
+total_mem=`cat /proc/meminfo | grep MemTotal: | cut -d : -f2  | sed -e "s/^ *//g" | cut -d " " -f 1`
+free_mem=`cat /proc/meminfo | grep MemFree: | cut -d : -f2  | sed -e "s/^ *//g" | cut -d " " -f 1`
+tmp=`expr $free_mem \* 100`
+free_mem_percent=`expr $tmp \/ $total_mem`
+
+if [ "$free_mem_percent" -le 10 ];then
+	used_mem_percent=`expr 100 - $free_mem_percent`
+	echo "Current Memory Usage $used_mem_percent%"
+	logger -t system -p local0.alert "Current Memory Usage is $used_mem_percent%"
+fi
+
+# Calculate cpu usage
+`top -b -n 1 > /tmp/cpuUsageOutput`
+cpu_usage=`head -n 2 /tmp/cpuUsageOutput | tail -n 1 | sed -e "s/ */ /g"`
+cpu_idle_percent=`echo $cpu_usage | awk '{
+                                        for (I=1;I<=NF;I=I+1) 
+                                        {
+						J=I-1
+                                                if ($I == "idle") 
+                                                {
+                                                     {print $(J)};
+                                                }
+                                        }
+                                    }'`
+
+cpu_idle_percent=`echo $cpu_idle_percent | cut -d % -f 1` >/dev/null 2>&1
+[ -z "$cpu_idle_percent" ] && cpu_idle_percent=100
+
+local cpu_high_flag=0
+
+if [ "$cpu_idle_percent" -le 10 ];then
+
+	cpu_high_flag=1
+
+	#if cpu usage is high for approx 10 secs then log it otherwise don't log.
+	for i in `seq 1 3`;
+	do
+		`top -b -n1 > /tmp/cpuUsageOutput1`
+		local cpu_idle=`cat /tmp/cpuUsageOutput1 | grep ^CPU | awk '{print $8 " "}' | cut -d% -f 1`
+		if [ "$cpu_idle" -le 10 ];then
+			cpu_high_flag=$(($cpu_high_flag * 1))
+		else
+			cpu_high_flag=0
+		fi
+		sleep 3
+	done
+	if [ "$cpu_high_flag" = "1" ]
+	then
+		used_cpu_percent=`expr 100 - $cpu_idle`
+		echo "Current CPU Usage $used_cpu_percent%"
+		logger -t system -p local0.alert "Current CPU Usage is $used_cpu_percent%"
+	fi
+fi
+
+[ "$cpu_high_flag" != "1" ] && {
+	python exec_wanscript.py 2> /dev/null
+}

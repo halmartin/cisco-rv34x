@@ -1,0 +1,32 @@
+From 0789e5031f556f4cde850af341baf5b5b94ab649 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy K <ganeshreddy@freescale.com>
+Date: Mon, 28 Mar 2016 02:55:03 +0530
+Subject: [PATCH 39/60] SBR-1568 barebox:007-c2krv340-clkout_disabled.patch
+ changes
+
+Signed-off-by: Ganesh Reddy K <ganeshreddy@freescale.com>
+---
+ drivers/net/comcerto/c2000_eth.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/net/comcerto/c2000_eth.c b/drivers/net/comcerto/c2000_eth.c
+index 4cf9c9a..063cd92 100755
+--- a/drivers/net/comcerto/c2000_eth.c
++++ b/drivers/net/comcerto/c2000_eth.c
+@@ -450,9 +450,13 @@ static int c2000_eth_init(struct eth_device *edev)
+ 		miidev_enable_rgmii_rx_delay(&priv->miidev);
+ 		miidev_enable_rgmii_tx_delay(&priv->miidev);
+ #else
++		mii_write(&priv->miidev, priv->miidev.address, 0x1f, 0xa43);
++		mii_write(&priv->miidev, priv->miidev.address, 0x19, 0x0062);
+ 		mii_write(&priv->miidev, priv->miidev.address, 0x1f, 0xd04);
+ 		mii_write(&priv->miidev, priv->miidev.address, 0x10, 0x201b);
+ 		mii_write(&priv->miidev, priv->miidev.address, 0x1f, 0xa42);
++		mii_write(&priv->miidev, priv->miidev.address, 0x0, 
++			mii_read(&priv->miidev, priv->miidev.address, 0x0) | (0x1 << 15));
+ #endif
+ 		miidev_restart_aneg(&priv->miidev);
+ 	}
+-- 
+2.7.4
+

@@ -1,0 +1,5 @@
+auth binding pam_radius_auth.so retry=2
+auth binding pam_ldap.so try_first_pass
+auth binding pam_krb5.so try_first_pass
+auth binding pam_localdb.so
+account required pam_authorize.so

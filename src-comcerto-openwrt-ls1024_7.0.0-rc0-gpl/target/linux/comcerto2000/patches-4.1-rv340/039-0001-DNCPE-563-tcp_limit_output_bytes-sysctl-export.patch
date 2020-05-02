@@ -1,0 +1,30 @@
+From 6c9e750a580de9dc3a5b474b57c915ab4f7a2d94 Mon Sep 17 00:00:00 2001
+From: Madhu Koriginja <madhu.koriginja@freescale.com>
+Date: Mon, 30 Jan 2017 14:31:23 +0530
+Subject: [PATCH 1/4] DNCPE-563: tcp_limit_output_bytes sysctl export
+
+This sysctl parameter is exported to access this parameter from
+pfe_ctrl driver to flush the tcp traffic.
+Corresponding pfe_ctrl modules changes stash patch link:
+http://sw-stash.freescale.net/projects/DNCPE/repos/engine-pfe_ctrl/pull-requests/71
+---
+ net/ipv4/tcp_output.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/net/ipv4/tcp_output.c b/net/ipv4/tcp_output.c
+index a369e8a..5777b13 100644
+--- a/net/ipv4/tcp_output.c
++++ b/net/ipv4/tcp_output.c
+@@ -52,6 +52,9 @@ int sysctl_tcp_workaround_signed_windows __read_mostly = 0;
+ 
+ /* Default TSQ limit of two TSO segments */
+ int sysctl_tcp_limit_output_bytes __read_mostly = 131072;
++#ifdef CONFIG_CPE_FAST_PATH
++EXPORT_SYMBOL(sysctl_tcp_limit_output_bytes);
++#endif
+ 
+ /* This limits the percentage of the congestion window which we
+  * will allow a single TSO frame to consume.  Building TSO frames
+-- 
+1.7.7.4
+

@@ -1,0 +1,6 @@
+CHANGES:
+1. Makefile (tools/quilt/Makefile)
+	-Fix for bash binary big path.
+2.Makefile:Added DTC tool for compilation
+3.Makefile:Added expat tool for Bluez applications
+

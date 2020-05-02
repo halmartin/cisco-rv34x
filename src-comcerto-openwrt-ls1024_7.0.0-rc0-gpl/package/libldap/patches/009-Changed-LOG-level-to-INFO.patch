@@ -1,0 +1,26 @@
+From b09d5c94c1d78f8de7d075d27ee5911d0a78dc21 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Wed, 30 May 2018 15:00:17 +0530
+Subject: [PATCH 2/2] Changed LOG level to INFO Signed-off-by: nageshkoneti
+ <b47094@freescale.com>
+
+---
+ pam_ldap.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pam_ldap.c b/pam_ldap.c
+index fe90bfb..1fdd38a 100644
+--- a/pam_ldap.c
++++ b/pam_ldap.c
+@@ -798,7 +798,7 @@ _read_config (const char *configFile, pam_ldap_config_t ** presult)
+        * According to PAM Documentation, such an error in a config file
+        * SHOULD be logged at LOG_ALERT level
+        */
+-      syslog (LOG_ALERT, "pam_ldap: missing file \"%s\"", configFile);
++      syslog (LOG_INFO, "pam_ldap: missing file \"%s\"", configFile);
+       return PAM_SERVICE_ERR;
+     }
+ 
+-- 
+1.7.9.5
+

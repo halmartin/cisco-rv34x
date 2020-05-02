@@ -1,0 +1,186 @@
+diff -ruaN a/src/header/radius_client.h b/src/header/radius_client.h
+--- a/src/header/radius_client.h	2016-07-27 15:51:24.466119434 +0530
++++ b/src/header/radius_client.h	2016-07-27 15:54:25.042094421 +0530
+@@ -62,5 +62,5 @@
+ void Radius_client_flush(rtapd *rtapd);
+ int Radius_client_init(rtapd *rtapd);
+ void Radius_client_deinit(rtapd *rtapd);
+-
++int Radius_client_retry_init(rtapd *rtapd);
+ #endif /* RADIUS_CLIENT_H */
+diff -ruaN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-07-27 15:53:15.244089463 +0530
++++ b/src/source/ieee802_1x.c	2016-07-27 15:55:00.983604801 +0530
+@@ -103,13 +103,14 @@
+     while(token != NULL)
+     {
+       token = strsep(&ptr," ");
+-      if(strcmp(token, "dev") == 0)
++      if(token && strcmp(token, "dev") == 0)
+       {
+         token = strsep(&ptr," ");
+-	strcpy(dev,token);
++	if (token)
++	  strcpy(dev,token);
+ 	DBGPRINT(RT_DEBUG_INFO,"Interface = %s\n", dev);
+       }
+-      if(strcmp(token, "src") == 0)
++      if(token && strcmp(token, "src") == 0)
+       {
+         token = strsep(&ptr," ");
+ 	DBGPRINT(RT_DEBUG_INFO,"Interface IP = %s\n", token);
+@@ -581,6 +582,15 @@
+ 	char mac[SIZE];
+ 	int	res;
+ 
++	if (rtapd->radius->auth_serv_sock < 0)
++	{
++		DBGPRINT(RT_DEBUG_INFO, "ieee802_1x_encapsulate_radius: Calling Radius Client Retry Init\n");
++		if (Radius_client_retry_init(rtapd) < 0)
++		{
++			DBGPRINT(RT_DEBUG_ERROR, "Redius Client Re-initialization Failed\n");
++			return;
++		}
++	}
+ 	sta->radius_identifier = Radius_client_get_id(rtapd);
+ 	msg = Radius_msg_new(RADIUS_CODE_ACCESS_REQUEST, sta->radius_identifier);
+ 	if (msg == NULL)
+diff -ruaN a/src/source/radius_client.c b/src/source/radius_client.c
+--- a/src/source/radius_client.c	2016-07-27 15:52:50.752157214 +0530
++++ b/src/source/radius_client.c	2016-07-27 15:54:52.007231593 +0530
+@@ -471,7 +471,7 @@
+         if (get_NAS_ip_address(&rtapd->conf->auth_servers->addr, &own_ip, &device, &mac) != 0)
+         {
+ 		DBGPRINT(RT_DEBUG_ERROR,"Failed to get NAS IP address\n");
+-		return -1;
++		return -2;
+ 
+         }
+ 
+@@ -481,7 +481,8 @@
+ 	if (bind(sock, (struct sockaddr *) &serv, sizeof(serv)) < 0)
+ 	{
+ 		perror("bind");
+-		return -1;
++		DBGPRINT(RT_DEBUG_ERROR,"Radius Client Socket Bind Failed\n");
++		return -2;
+ 	}
+ #endif
+ 
+@@ -492,7 +493,8 @@
+ 	if (connect(sock, (struct sockaddr *) &serv, sizeof(serv)) < 0)
+ 	{
+ 		perror("connect[radius]");
+-		return -1;
++		DBGPRINT(RT_DEBUG_ERROR,"Radius Client Socket Connect Failed\n");
++		return -2;
+ 	}
+ 	DBGPRINT(RT_DEBUG_TRACE, "Radius_change_server :: Connect to Radius Server(%s)\n", inet_ntoa(nserv->addr));
+ 	return 0;
+@@ -560,6 +562,8 @@
+ #else
+ static int Radius_client_init_auth(rtapd *rtapd)
+ {
++	int result;
++
+ 	rtapd->radius->auth_serv_sock = socket(PF_INET, SOCK_DGRAM, 0);
+ 	if (rtapd->radius->auth_serv_sock < 0)
+ 	{
+@@ -567,7 +571,14 @@
+ 		return -1;
+ 	}
+ 
+-	Radius_change_server(rtapd, rtapd->conf->auth_server, NULL, rtapd->radius->auth_serv_sock, 1);
++	result = Radius_change_server(rtapd, rtapd->conf->auth_server, NULL, rtapd->radius->auth_serv_sock, 1);
++	if (result == -2)
++	{
++		DBGPRINT(RT_DEBUG_ERROR,"Radius_client_init_auth: Unalbe to Bind read socket for authentication server\n");
++		close(rtapd->radius->auth_serv_sock);
++		rtapd->radius->auth_serv_sock = -1;
++		return -1;
++	}
+ 
+ 	if (eloop_register_read_sock(rtapd->radius->auth_serv_sock, Radius_client_receive, rtapd, (void *) RADIUS_AUTH))
+ 	{
+@@ -629,8 +640,9 @@
+ #else
+ 	if( rtapd->radius->auth_serv_sock < 0)
+ 	{
+-		if (rtapd->conf->auth_server && Radius_client_init_auth(rtapd))
+-			return -1;
++		if (rtapd->conf->auth_server)
++			 Radius_client_init_auth(rtapd);
++
+ 		if (rtapd->conf->radius_retry_primary_interval)
+ 			eloop_register_timeout(rtapd->conf->radius_retry_primary_interval, 0, Radius_retry_primary_timer, rtapd, NULL);
+ 	}
+@@ -651,3 +663,69 @@
+ 	rtapd->radius = NULL;
+ }
+ 
++int Radius_client_retry_init(rtapd *rtapd)
++{
++	struct sockaddr_in serv;
++	unsigned long own_ip;
++	char device[SIZE];
++	char mac[SIZE];
++
++        // bind before connect to assign local port
++#ifdef CONFIG_RV34X_8021X
++/* purpose     : 802.1x      author : ChunRu       date : 2013-01-22    */
++/* description : fix sometimes DUT cannot send packets to Radius Server */
++        /* Ralink original code mark this part */
++        memset(&serv, 0, sizeof(serv));
++        serv.sin_family = AF_INET;
++
++        if (get_NAS_ip_address(&rtapd->conf->auth_servers->addr, &own_ip, &device, &mac) != 0)
++        {
++                DBGPRINT(RT_DEBUG_ERROR,"Failed to get NAS IP address\n");
++                return -1;
++
++        }
++
++        rtapd->radius->auth_serv_sock = socket(PF_INET, SOCK_DGRAM, 0);
++        if (rtapd->radius->auth_serv_sock < 0)
++        {
++                perror("socket[PF_INET,SOCK_DGRAM]");
++                DBGPRINT(RT_DEBUG_ERROR,"Radius_client_retry_init: socket open failed\n");
++                return -1;
++        }
++
++        serv.sin_addr.s_addr = own_ip;
++        //serv.sin_addr.s_addr = rtapd->conf->own_ip_addr.s_addr;
++        //serv.sin_port = htons(rtapd->conf->auth_server->port);
++        if (bind(rtapd->radius->auth_serv_sock, (struct sockaddr *) &serv, sizeof(serv)) < 0)
++        {
++                perror("bind");
++		close(rtapd->radius->auth_serv_sock);
++		rtapd->radius->auth_serv_sock = -1;
++                DBGPRINT(RT_DEBUG_ERROR,"Radius_client_retry_init: socket bind failed\n");
++                return -1;
++        }
++#endif
++
++        memset(&serv, 0, sizeof(serv));
++        serv.sin_family = AF_INET;
++        serv.sin_addr.s_addr = rtapd->conf->auth_server->addr.s_addr;
++        serv.sin_port = htons(rtapd->conf->auth_server->port);
++        if (connect(rtapd->radius->auth_serv_sock, (struct sockaddr *) &serv, sizeof(serv)) < 0)
++        {
++                perror("connect[radius]");
++		close(rtapd->radius->auth_serv_sock);
++		rtapd->radius->auth_serv_sock = -1;
++                DBGPRINT(RT_DEBUG_ERROR,"Radius_client_retry_init: socket connect failed\n");
++                return -1;
++        }
++
++        if (eloop_register_read_sock(rtapd->radius->auth_serv_sock, Radius_client_receive, rtapd, (void *) RADIUS_AUTH))
++        {
++                DBGPRINT(RT_DEBUG_ERROR,"Radius_client_retry_init: Could not register read socket for authentication server\n");
++                return -1;
++        }
++
++        DBGPRINT(RT_DEBUG_TRACE, "Radius_client_retry_init :: Connected to Radius Server(%s)\n", inet_ntoa(rtapd->conf->auth_server->addr));
++
++        return 0;
++}

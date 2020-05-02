@@ -1,0 +1,52 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# The related changing about nandsize and power, diag led and poe reset(porting this patch from SDK5.4.1 20170105 version NXP's patch).
+--- barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c.org	2017-01-19 16:13:22.955252046 +0800
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c	2017-01-19 16:28:53.396502311 +0800
+@@ -338,6 +338,24 @@
+ 	serial_plat.clock = clk * 1000 * 1000;
+ 	register_device(&fast_uart_device);
+ 
++	/* Config GPIO Select */
++	writel(readl(COMCERTO_GPIO_PIN_SELECT_REG) & 0x00000000, COMCERTO_GPIO_PIN_SELECT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) | 0x0ffff000, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++
++	//POWER_LED ON
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) & ~GPIO_59, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_59, COMCERTO_GPIO_EXT_OUTPUT_REG);
++
++	//DIAG LED OFF
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) & ~GPIO_56, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_56, COMCERTO_GPIO_EXT_OUTPUT_REG);
++
++	//POE RESET
++	writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_15, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_15, COMCERTO_GPIO_OUTPUT_REG);
++	udelay(100000);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_15, COMCERTO_GPIO_OUTPUT_REG);
++
+ #ifdef CONFIG_I2C_C2K
+ 	i2c_register_board_info(0, i2c_devices, ARRAY_SIZE(i2c_devices));
+ 	register_device(&c2k_i2c_dev);
+--- barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/config.h.org	2017-01-19 16:17:30.345254155 +0800
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/config.h	2017-01-19 16:28:35.466502172 +0800
+@@ -44,8 +44,7 @@
+ 
+ #define COMCERTO_EXP_CS4_BASE_ADDR	(COMCERTO_AXI_EXP_BASE + (EXP_CS4_BASE_VAL << SHIFT_4K_MUL))
+ 
+-#define COMCERTO_NAND_FLASH_SIZE	(2UL * 1024UL * 1024UL * 1024UL)
+-
++#define COMCERTO_NAND_FLASH_SIZE	(256UL * 1024UL * 1024UL)
+ 
+ #endif  /* __CONFIG_H */
+ 
+--- barebox-2011.06.0/drivers/mtd/nand/nand_ids.c.org	2017-01-19 16:21:10.445877386 +0800
++++ barebox-2011.06.0/drivers/mtd/nand/nand_ids.c	2017-01-19 16:28:08.565252144 +0800
+@@ -99,7 +99,7 @@
+ 
+ 	/* 2 Gigabit */
+ 	{__NANDSTR("NAND 256MiB 1,8V 8-bit"),	0xAA, 0, 256, 0, LP_OPTIONS},
+-	{__NANDSTR("NAND 256MiB 3,3V 8-bit"),	0xDA, 0, 256, 0, LP_OPTIONS},
++	/*{__NANDSTR("NAND 256MiB 3,3V 8-bit"),	0xDA, 0, 256, 0, LP_OPTIONS},*/		/* commented in PP for ONFI check */
+ 	{__NANDSTR("NAND 256MiB 1,8V 16-bit"),	0xBA, 0, 256, 0, LP_OPTIONS16},
+ #endif /* CONFIG_COMCERTO_NAND_ULOADER */
+ 

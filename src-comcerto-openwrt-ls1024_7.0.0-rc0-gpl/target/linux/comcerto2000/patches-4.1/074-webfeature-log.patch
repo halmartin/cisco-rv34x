@@ -1,0 +1,46 @@
+--- a/net/ipv4/netfilter/ipt_webstr.c	2017-11-22 14:35:13.634354245 +0530
++++ b/net/ipv4/netfilter/ipt_webstr.c	2017-11-22 14:36:16.265269592 +0530
+@@ -241,6 +241,7 @@ static int mangle_http_header(const stru
+ 	return 0;
+ end:
+ 	if (get_http_info(skb, HTTP_URL, &htinfo) > 0) {
++         printk(KERN_INFO "FIREWALL: COOKIE BLOCKED IN URL %s\n", htinfo->url);
+ 		web_iptlog_fn("[COOKIE_BLOCKED]", skb, htinfo);
+ 	}
+ 	return ret;
+@@ -530,6 +531,7 @@ webstr_mt(const struct sk_buff *skb, con
+ 		int vicelen;
+ 		if (opt & BLK_JAVA) {
+ 			if (javaCheck(htinfo->url, htinfo->urllen)) {
++                printk(KERN_INFO "FIREWALL: JAVA BLOCKED IN URL %s\n", htinfo->url);
+ 				web_iptlog_fn("[JAVA_BLOCKED]", skb, htinfo);
+ 				found = 1;
+ 				goto webstr_mt_ret;
+@@ -558,9 +560,11 @@ webstr_mt(const struct sk_buff *skb, con
+ 			if (strncasecmp
+ 			    (htinfo->url + htinfo->urllen - vicelen, ".ocx",
+ 			     vicelen) == 0) {
++                 printk(KERN_INFO "FIREWALL: ACTIVEX BLOCKED IN URL %s\n", htinfo->url);
+ 				SPARQ_LOG("%s: MATCH....activex\n",
+ 					  __FUNCTION__);
+ 				web_iptlog_fn("[ACTIVEX_BLOCKED]", skb, htinfo);
++
+ 				found = 1;
+ 				goto webstr_mt_ret;
+ 			}
+@@ -568,6 +572,7 @@ webstr_mt(const struct sk_buff *skb, con
+ 			if (strncasecmp
+ 			    (htinfo->url + htinfo->urllen - vicelen, ".cab",
+ 			     vicelen) == 0) {
++                 printk(KERN_INFO "FIREWALL: ACTIVEX BLOCKED IN URL %s\n", htinfo->url);
+ 				SPARQ_LOG("%s: MATCH....activex\n",
+ 					  __FUNCTION__);
+ 				web_iptlog_fn("[ACTIVEX_BLOCKED]", skb, htinfo);
+@@ -579,6 +584,7 @@ webstr_mt(const struct sk_buff *skb, con
+ 			if (strncasecmp
+ 			    (htinfo->url + htinfo->hostlen, "http://",
+ 			     sizeof("http://") - 1) == 0) {
++                 printk(KERN_INFO "FIREWALL: PROXY BLOCKED IN URL %s\n", htinfo->url);
+ 				web_iptlog_fn("[PROXY_BLOCKED]", skb, htinfo);
+ 				SPARQ_LOG("%s: MATCH....proxy\n", __FUNCTION__);
+ 				found = 1;

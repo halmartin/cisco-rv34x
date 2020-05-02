@@ -1,0 +1,171 @@
+--- a/src/lldp.c	2016-09-02 18:59:29.955042383 +0530
++++ b/src/lldp.c	2016-09-02 18:59:45.251042591 +0530
+@@ -78,7 +78,7 @@ lldp_send(struct lldpd *global,
+ 	int length;
+ 	u_int8_t *packet, *pos, *tlv;
+ 	struct lldpd_mgmt *mgmt;
+-    u_int8_t cputag[9]={'\0'};
++    u_int8_t cputag[12]={'\0'};
+     u_int8_t j=1;
+     int proto;
+     char cmd[64]={'\0'};
+@@ -104,36 +104,132 @@ lldp_send(struct lldpd *global,
+ 	length = hardware->h_mtu;
+     if(strcmp(port->p_descr,LAN_INTERFACE)==0)
+     {
+-        cputag[0]=0x88;
+-        cputag[1]=0x99;
+-        cputag[2]=0x04;
+-        cputag[3]=0x00;
+-        cputag[4]=0x00;
+-        cputag[5]=0x00;
+-        cputag[6]=0x00;
+-        cputag[7]=0x00;
++        if (strcmp(PID_RV34X,"RV340") == 0) {
++            cputag[0]=0x88;
++            cputag[1]=0x99;
++            cputag[2]=0x04;
++            cputag[3]=0x00;
++            cputag[4]=0x00;
++            cputag[5]=0x00;
++            cputag[6]=0x00;
++            cputag[7]=0x00;
+ 
+-        for(j=1;j<=4;j++)
+-        {
+-          sprintf(cmd,"uci get lldpd.config.lan%d",j);
+-          fp=popen(cmd,"r");
+-        if(fgets(var, sizeof(var), fp) == NULL)
+-        {
+-         printf("fgets failed\n");
+-         pclose(fp);
+-         return -1;
++            for(j=1;j<=4;j++)
++            {
++                sprintf(cmd,"uci get lldpd.config.lan%d",j);
++                fp=popen(cmd,"r");
++                if(fgets(var, sizeof(var), fp) == NULL)
++                {
++                    printf("fgets failed\n");
++                    pclose(fp);
++                    return -1;
++                }
++                pclose(fp);
++                if((strcmp(var,"1") == 0) && (j==4))
++                    cputag[7]=cputag[7] | 0x10;
++                else if((strcmp(var,"1") == 0) && (j==3))
++                    cputag[7]=cputag[7] | 0x08;
++                else if((strcmp(var,"1") == 0) && (j==2))
++                    cputag[7]=cputag[7] | 0x04;
++                else if((strcmp(var,"1") == 0) && (j==1))
++                    cputag[7]=cputag[7] | 0x02;
++            }
+         }
+-        pclose(fp);
+-        if((strcmp(var,"1") == 0) && (j==4))
+-            cputag[7]=cputag[7] | 0x10;
+-        else if((strcmp(var,"1") == 0) && (j==3))
+-            cputag[7]=cputag[7] | 0x08;
+-        else if((strcmp(var,"1") == 0) && (j==2))
+-            cputag[7]=cputag[7] | 0x04;
+-        else if((strcmp(var,"1") == 0) && (j==1))
+-            cputag[7]=cputag[7] | 0x02;
++        else if (strcmp(PID_RV34X,"RV345") == 0) {
++                cputag[0]=0x88;
++                cputag[1]=0x99;
++                cputag[2]=0x04;
++                cputag[3]=0x10;
++                cputag[4]=0x02;
++                cputag[5]=0x00;
++                cputag[6]=0x00;
++                cputag[7]=0x00;
++                cputag[8]=0x00;
++                cputag[9]=0x00;
++                cputag[10]=0x00; 
++                cputag[11]=0x00;
+ 
+-        }
++                for(j=0;j<=15;j++)
++                {
++                    sprintf(cmd,"uci get lldpd.config.lan%d",j);
++                    fp=popen(cmd,"r");
++                    if(fgets(var, sizeof(var), fp) == NULL)
++                    {
++                        printf("fgets failed\n");
++                        pclose(fp);
++                        return -1;
++                    }
++                    pclose(fp);
++                    switch(j)
++                    {
++                        case 0 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j ));
++                        break;
++                        case 1 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j ));
++                        break;
++                        case 2 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j));
++                        break;
++                        case 3 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j ));
++                        break;
++                        case 4 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j));
++                        break;
++                        case 5 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j));
++                        break;
++                        case 6 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j));
++                        break;
++                        case 7 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[11]=(cputag[11] | (0x1 << j));
++                        break;
++                        case 8 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 9 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 10 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 11 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 12 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 13 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 14:
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                        case 15:
++                            if(strcmp(var,"1") == 0) 
++                                cputag[10]=(cputag[10] | (0x1 << (j-8)));
++                        break;
++                    }
++            }
++            
++        }    
+     }
+ 	
+     if ((packet = (u_int8_t*)malloc(length)) == NULL)

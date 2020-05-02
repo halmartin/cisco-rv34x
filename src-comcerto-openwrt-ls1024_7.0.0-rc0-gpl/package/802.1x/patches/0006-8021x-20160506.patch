@@ -1,0 +1,40 @@
+diff -rauN a/src/source/radius_client.c b/src/source/radius_client.c
+--- a/src/source/radius_client.c	2016-05-06 15:11:54.772000000 +0530
++++ b/src/source/radius_client.c	2016-05-06 15:05:33.992000000 +0530
+@@ -23,6 +23,7 @@
+ 					  * list (oldest will be removed, if this limit is exceeded) */
+ #define RADIUS_CLIENT_NUM_FAILOVER 4 /* try to change RADIUS server after this
+ 					  * many failed retry attempts */
++#define SIZE 256
+ 
+ static int
+ Radius_change_server(rtapd *rtapd, struct hostapd_radius_server *nserv,
+@@ -427,6 +428,10 @@
+ 			 struct hostapd_radius_server *oserv, int sock, int auth)
+ {
+ 	struct sockaddr_in serv;
++	unsigned long own_ip;
++	char device[SIZE];
++	char mac[SIZE];
++
+ 	if (!oserv || nserv->shared_secret_len != oserv->shared_secret_len ||
+ 		memcmp(nserv->shared_secret, oserv->shared_secret, nserv->shared_secret_len) != 0)
+ 	{
+@@ -462,7 +467,16 @@
+ 	/* Ralink original code mark this part */
+ 	memset(&serv, 0, sizeof(serv));
+ 	serv.sin_family = AF_INET;
+-	serv.sin_addr.s_addr = rtapd->conf->own_ip_addr.s_addr;
++
++        if (get_NAS_ip_address(&rtapd->conf->auth_servers->addr, &own_ip, &device, &mac) != 0)
++        {
++		DBGPRINT(RT_DEBUG_ERROR,"Failed to get NAS IP address\n");
++		return -1;
++
++        }
++
++	serv.sin_addr.s_addr = own_ip;
++	//serv.sin_addr.s_addr = rtapd->conf->own_ip_addr.s_addr;
+ 	//serv.sin_port = htons(rtapd->conf->auth_server->port);
+ 	if (bind(sock, (struct sockaddr *) &serv, sizeof(serv)) < 0)
+ 	{

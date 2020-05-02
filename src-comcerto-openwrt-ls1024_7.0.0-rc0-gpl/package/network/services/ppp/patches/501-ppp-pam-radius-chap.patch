@@ -1,0 +1,398 @@
+--- a/pppd/Makefile.linux	2015-08-19 14:36:47.754519236 +0530
++++ b/pppd/Makefile.linux	2015-08-19 14:40:05.501404406 +0530
+@@ -64,7 +64,7 @@ HAVE_MULTILINK=y
+ #USE_TDB=y
+ 
+ #HAS_SHADOW=y
+-#USE_PAM=y
++USE_PAM=y
+ HAVE_INET6=y
+ 
+ # Enable plugins
+--- a/pppd/chap-new.c	2015-08-19 14:37:04.938891307 +0530
++++ b/pppd/chap-new.c	2015-08-19 14:42:36.587504995 +0530
+@@ -46,12 +46,21 @@
+ 
+ int chap_mdtype_all = MDTYPE_ALL;
+ 
++#ifdef USE_PAM
+ /* Hook for a plugin to validate CHAP challenge */
+ int (*chap_verify_hook)(char *name, char *ourname, int id,
+ 			struct chap_digest_type *digest,
+ 			unsigned char *challenge, unsigned char *response,
+-			char *message, int message_space) = NULL;
++			char *message, int message_space,char *group) = NULL;
+ 
++int (*chap_authorisation_hook) __P((char *user,char *ourname,char *group)) = NULL;
++#else
++/* Hook for a plugin to validate CHAP challenge */
++int (*chap_verify_hook)(char *name, char *ourname, int id,
++                    struct chap_digest_type *digest,
++                    unsigned char *challenge, unsigned char *response,
++                    char *message, int message_space) = NULL;
++#endif
+ /*
+  * Option variables.
+  */
+@@ -315,7 +324,9 @@ chap_handle_response(struct chap_server_
+ 	int (*verifier)(char *, char *, int, struct chap_digest_type *,
+ 		unsigned char *, unsigned char *, char *, int);
+ 	char rname[MAXNAMELEN+1];
+-
++#ifdef USE_PAM
++    char radius_group[256] = {'\0'};
++#endif
+ 	if ((ss->flags & LOWERUP) == 0)
+ 		return;
+ 	if (id != ss->challenge[PPP_HDRLEN+1] || len < 2)
+@@ -348,14 +359,21 @@ chap_handle_response(struct chap_server_
+ 				strcpy(rname, tmp);
+ 			}
+ 		}
++#ifdef USE_PAM
++             ok = (*chap_verify_hook)(name, ss->name, id, ss->digest,
++                   ss->challenge + PPP_HDRLEN + CHAP_HDRLEN,
++                   response, ss->message, sizeof(ss->message),radius_group);
++#else
+ 
+ 		if (chap_verify_hook)
+ 			verifier = chap_verify_hook;
+ 		else
+ 			verifier = chap_verify_response;
++
+ 		ok = (*verifier)(name, ss->name, id, ss->digest,
+ 				 ss->challenge + PPP_HDRLEN + CHAP_HDRLEN,
+ 				 response, ss->message, sizeof(ss->message));
++#endif
+ 		if (!ok || !auth_number()) {
+ 			ss->flags |= AUTH_FAILED;
+ 			warn("Peer %q failed CHAP authentication", name);
+@@ -388,11 +406,22 @@ chap_handle_response(struct chap_server_
+ 		     * account info (like when using Winbind integrated with
+ 		     * PAM).
+ 		     */
++#ifdef USE_PAM
++         if (chap_authorisation_hook &&
++                 (*chap_authorisation_hook)(name,our_name,radius_group) == 0)
++            {
++              ss->flags |= AUTH_FAILED;
++              warn("Peer %q failed CHAP Session verification", name);
++            }
++#else
++
+ 		    if (session_mgmt &&
+ 			session_check(name, NULL, devnam, NULL) == 0) {
+ 			ss->flags |= AUTH_FAILED;
+ 			warn("Peer %q failed CHAP Session verification", name);
+ 		    }
++            
++#endif
+ 		}
+ 		if (ss->flags & AUTH_FAILED) {
+ 			auth_peer_fail(0, PPP_CHAP);
+--- a/pppd/chap-new.h	2015-08-19 14:37:12.922780987 +0530
++++ b/pppd/chap-new.h	2015-08-19 14:40:21.729200394 +0530
+@@ -111,12 +111,21 @@ struct chap_digest_type {
+ 	struct chap_digest_type *next;
+ };
+ 
++#ifdef USE_PAM
+ /* Hook for a plugin to validate CHAP challenge */
+ extern int (*chap_verify_hook)(char *name, char *ourname, int id,
+ 			struct chap_digest_type *digest,
+ 			unsigned char *challenge, unsigned char *response,
+-			char *message, int message_space);
++			char *message, int message_space,char *group);
+ 
++extern int (*chap_authorisation_hook) __P((char *user,char *ourname,char *group));
++#else
++/* Hook for a plugin to validate CHAP challenge */
++extern int (*chap_verify_hook)(char *name, char *ourname, int id,
++                    struct chap_digest_type *digest,
++                    unsigned char *challenge, unsigned char *response,
++                    char *message, int message_space);
++#endif
+ /* Called by digest code to register a digest type */
+ extern void chap_register_digest(struct chap_digest_type *);
+ 
+--- a/pppd/session.c	2015-08-19 14:37:19.999485047 +0530
++++ b/pppd/session.c	2015-08-19 14:45:22.305421640 +0530
+@@ -176,6 +176,7 @@ session_start(flags, user, passwd, ttyNa
+     const char *usr;
+     int pam_error;
+     bool try_session = 0;
++    char service[256] = {'\0'};
+ #else /* #ifdef USE_PAM */
+     struct passwd *pw;
+ #ifdef HAS_SHADOW
+@@ -210,15 +211,17 @@ session_start(flags, user, passwd, ttyNa
+     PAM_password = passwd;
+ 
+     dbglog("Initializing PAM (%d) for user %s", flags, usr);
+-    pam_error = pam_start (SERVICE_NAME, usr, &pam_conv_data, &pamh);
++    if (strcmp(our_name,"pptpd") == 0)
++        strcpy(service,"pptp");
++    else if (strcmp(our_name,"l2tpsrvgw") == 0)
++        strcpy(service,"l2tp");
++    pam_error = pam_start (service, usr, &pam_conv_data, &pamh);
+     dbglog("---> PAM INIT Result = %d", pam_error);
+     ok = (pam_error == PAM_SUCCESS);
+-
+     if (ok) {
+         ok = (pam_set_item(pamh, PAM_TTY, ttyName) == PAM_SUCCESS) &&
+ 	    (pam_set_item(pamh, PAM_RHOST, ifname) == PAM_SUCCESS);
+     }
+-
+     if (ok && (SESS_AUTH & flags)) {
+         dbglog("Attempting PAM authentication");
+         pam_error = pam_authenticate (pamh, PAM_SILENT);
+@@ -239,7 +242,6 @@ session_start(flags, user, passwd, ttyNa
+             }
+         }
+     }
+-
+     if (ok && (SESS_ACCT & flags)) {
+         dbglog("Attempting PAM account checks");
+         pam_error = pam_acct_mgmt (pamh, PAM_SILENT);
+--- a/pppd/plugins/radius/radius.c	2015-08-19 14:39:07.490133705 +0530
++++ b/pppd/plugins/radius/radius.c	2015-08-19 14:43:34.850772525 +0530
+@@ -47,6 +47,7 @@ static char const RCSID[] =
+ #define BUF_LEN 1024
+ 
+ #define MD5_HASH_SIZE	16
++#define USE_PAM
+ 
+ static char *config_file = NULL;
+ static int add_avp(char **);
+@@ -72,11 +73,19 @@ static int radius_pap_auth(char *user,
+ 			   char **msgp,
+ 			   struct wordlist **paddrs,
+ 			   struct wordlist **popts);
++#ifdef USE_PAM
++static int radius_chap_verify(char *user, char *ourname, int id,
++                          struct chap_digest_type *digest,
++                          unsigned char *challenge,
++                          unsigned char *response,
++                          char *message, int message_space,char *group);
++#else
+ static int radius_chap_verify(char *user, char *ourname, int id,
+ 			      struct chap_digest_type *digest,
+ 			      unsigned char *challenge,
+ 			      unsigned char *response,
+ 			      char *message, int message_space);
++#endif
+ 
+ static void radius_ip_up(void *opaque, int arg);
+ static void radius_ip_down(void *opaque, int arg);
+@@ -148,12 +157,15 @@ char pppd_version[] = VERSION;
+ void
+ plugin_init(void)
+ {
++#ifdef USE_PAM
++    chap_verify_hook = radius_chap_verify;
++#else
+     pap_check_hook = radius_secret_check;
+     pap_auth_hook = radius_pap_auth;
+ 
+     chap_check_hook = radius_secret_check;
+     chap_verify_hook = radius_chap_verify;
+-
++#endif
+     ip_choose_hook = radius_choose_ip;
+     allowed_address_hook = radius_allowed_address;
+ 
+@@ -328,11 +340,19 @@ radius_pap_auth(char *user,
+ * %DESCRIPTION:
+ * Performs CHAP, MS-CHAP and MS-CHAPv2 authentication using RADIUS.
+ ***********************************************************************/
++#ifdef USE_PAM
++static int
++radius_chap_verify(char *user, char *ourname, int id,
++                   struct chap_digest_type *digest,
++                   unsigned char *challenge, unsigned char *response,
++                   char *message, int message_space, char *group)
++#else
+ static int
+ radius_chap_verify(char *user, char *ourname, int id,
+ 		   struct chap_digest_type *digest,
+ 		   unsigned char *challenge, unsigned char *response,
+ 		   char *message, int message_space)
++#endif
+ {
+     VALUE_PAIR *send, *received;
+     UINT4 av_type;
+@@ -344,7 +364,7 @@ radius_chap_verify(char *user, char *our
+     /* Need the RADIUS secret and Request Authenticator to decode MPPE */
+     REQUEST_INFO request_info, *req_info = &request_info;
+ #else
+-    REQUEST_INFO *req_info = NULL;
++    REQUEST_INFO *req_info = NULL
+ #endif
+ 
+     challenge_len = *challenge++;
+@@ -485,6 +505,12 @@ radius_chap_verify(char *user, char *our
+ 	}
+     }
+ 
++#ifdef USE_PAM
++    if (rstate.class != NULL)
++        strcpy(group,rstate.class);
++    else
++        strcpy(group,"default");
++#endif
+     rc_avpair_free(received);
+     rc_avpair_free (send);
+     return (result == OK_RC);
+diff -Nurp a/pppd/plugins/authorize/authorize.c b/pppd/plugins/authorize/authorize.c
+--- a/pppd/plugins/authorize/authorize.c	1970-01-01 05:30:00.000000000 +0530
++++ b/pppd/plugins/authorize/authorize.c	2015-08-19 14:43:55.242516167 +0530
+@@ -0,0 +1,93 @@
++
++/*
++ *  Author: Arvin Schnell <arvin@suse.de>
++ *
++ *  This plugin let's you pass the password to the pppd via
++ *  a file descriptor. That's easy and secure - no fiddling
++ *  with pap- and chap-secrets files.
++ */
++#define USE_PAM
++#ifdef USE_PAM
++#include <stdio.h>
++#include <errno.h>
++#include <string.h>
++#include <unistd.h>
++#include <malloc.h>
++
++#include "pppd.h"
++#include "chap-new.h"
++
++#include <confd.h>
++#include <confd_maapi.h>
++#include <confd_lib.h>
++#include <confd_cdb.h>
++
++
++char pppd_version[] = VERSION;
++
++static int pwfd_check (void)
++{
++        return 1;
++}
++
++static int authorize (char *user,char *service,char *group)
++{
++  int retval;
++  struct sockaddr_in addr;
++  int rsock;
++  int action;
++  char confd_service[256] = {'\0'};
++
++    if (strcmp(service,"pptpd") == 0)
++        strcpy(confd_service,"pptp");
++    else if (strcmp(service,"l2tpsrvgw") == 0)
++        strcpy(confd_service,"l2tp");
++
++  
++       confd_init_vsn(NULL,NULL,4,0x06000000);
++       addr.sin_addr.s_addr = inet_addr("127.0.0.1");
++       addr.sin_family = AF_INET;
++       addr.sin_port = htons(4565);
++
++       if ((rsock = socket(PF_INET, SOCK_STREAM, 0)) < 0 )
++          {
++            return 0;
++          }
++       if (cdb_connect(rsock, CDB_READ_SOCKET, (struct sockaddr *)&addr,
++                         sizeof (struct sockaddr_in)) < 0)
++          {
++            return 0;
++          }
++       if (cdb_start_session(rsock, CDB_RUNNING) != CONFD_OK)
++          {
++            return 0;
++          }
++
++
++       retval = cdb_get_enum_value(rsock, &action,
++                      "/nacm:nacm/nacm:rule-list{%s}/feature-rule{%s}/action",group,confd_service);
++       if(retval != CONFD_OK)
++         {
++           cdb_close(rsock);
++           return 0;
++         }
++       if(action == 0)
++         {
++           cdb_close(rsock);
++           return 1;
++         }
++       else
++         {
++          cdb_close(rsock);
++          return 0;
++         }
++
++}
++
++void plugin_init (void)
++{
++
++    chap_authorisation_hook = authorize;
++    chap_check_hook = pwfd_check;
++}
++#endif
+Binary files a/pppd/plugins/authorize/authorize.o and b/pppd/plugins/authorize/authorize.o differ
+Binary files a/pppd/plugins/authorize/authorize.so and b/pppd/plugins/authorize/authorize.so differ
+diff -Nurp a/pppd/plugins/authorize/Makefile b/pppd/plugins/authorize/Makefile
+--- a/pppd/plugins/authorize/Makefile	1970-01-01 05:30:00.000000000 +0530
++++ b/pppd/plugins/authorize/Makefile	2015-08-19 14:41:46.376136238 +0530
+@@ -0,0 +1,39 @@
++#CC	= gcc
++COPTS	= -O2 -g
++#CFLAGS	= $(COPTS) -I.. -I../../include -fPIC
++COPTS = -O2
++CFLAGS=-I. -I../.. -I../../../include $(COPTS) -fPIC -DRC_LOG_FACILITY=LOG_DAEMON
++LDFLAGS += -L$(STAGING_DIR)/lib -lconfd -lpthread 
++INSTALL	= install
++
++DESTDIR = $(INSTROOT)/usr
++BINDIR = $(DESTDIR)/sbin
++MANDIR = $(DESTDIR)/share/man/man8
++LIBDIR = $(DESTDIR)/lib/pppd/$(VERSION)
++
++SUBDIRS := 
++# Uncomment the next line to include the radius authentication plugin
++PLUGINS := authorize.so
++
++# include dependencies if present
++ifeq (.depend,$(wildcard .depend))
++include .depend
++endif
++
++all: authorize.so
++
++authorize.o: authorize.c
++	        $(CC) $(CFLAGS) -c $< -o $@
++
++authorize.so: authorize.o
++			$(CC) $(LDFLAGS) authorize.o -o authorize.so
++
++VERSION = $(shell awk -F '"' '/VERSION/ { print $$2; }' ../patchlevel.h)
++
++install: $(PLUGINS)
++	$(INSTALL) -d -m 755 $(LIBDIR)
++	$(INSTALL) -c -m  4550 $(PLUGINS) $(LIBDIR)
++
++clean:
++	rm -f *.o *.so *.a
++
+--- a/pppd/plugins/Makefile.linux	2015-08-19 14:38:24.650672271 +0530
++++ b/pppd/plugins/Makefile.linux	2015-08-19 14:41:16.864507250 +0530
+@@ -11,7 +11,7 @@ LIBDIR = $(DESTDIR)/lib/pppd/$(VERSION)
+ 
+ SUBDIRS := rp-pppoe pppoatm pppol2tp pptp
+ # Uncomment the next line to include the radius authentication plugin
+-SUBDIRS += radius
++SUBDIRS += radius authorize 
+ PLUGINS := minconn.so passprompt.so passwordfd.so winbind.so
+ 
+ # include dependencies if present

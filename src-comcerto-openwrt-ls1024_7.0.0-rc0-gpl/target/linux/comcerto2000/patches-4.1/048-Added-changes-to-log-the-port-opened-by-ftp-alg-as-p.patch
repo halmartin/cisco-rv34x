@@ -1,0 +1,26 @@
+From e0ab66f6218d6b4fcfee024c197f25b75ba75af8 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Thu, 12 May 2016 18:59:30 +0530
+Subject: [PATCH 41/51] Added changes to log the port opened by ftp alg as per
+ the logs requirement Signed-off-by: nageshkoneti <b47094@freescale.com>
+
+---
+ net/netfilter/nf_nat_ftp.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/netfilter/nf_nat_ftp.c b/net/netfilter/nf_nat_ftp.c
+index e462a95..2ed2e65 100644
+--- a/net/netfilter/nf_nat_ftp.c
++++ b/net/netfilter/nf_nat_ftp.c
+@@ -72,7 +72,7 @@ static unsigned int nf_nat_ftp(struct sk_buff *skb,
+ 	newip = ct->tuplehash[!dir].tuple.dst.u3.ip;
+ 	exp->saved_proto.tcp.port = exp->tuple.dst.u.tcp.port;
+ 	exp->dir = !dir;
+-
++    printk(KERN_INFO "FIREWALL:FTPALG:Opened the following port %d\n",ntohs(exp->tuple.dst.u.tcp.port));
+ 	/* When you see the packet, we need to NAT it the same as the
+ 	 * this one. */
+ 	exp->expectfn = nf_nat_follow_master;
+-- 
+1.9.1
+

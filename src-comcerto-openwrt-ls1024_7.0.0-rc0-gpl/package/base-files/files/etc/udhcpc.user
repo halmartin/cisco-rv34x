@@ -1,0 +1,33 @@
+#!/bin/sh
+set -e
+
+replace_or_update_to_eol()
+{
+    local pattern string_to_eol file_name pattern_to_eol
+    pattern="$1"
+    string_to_eol="$2"
+    file_name="$3"
+    pattern_to_eol="${pattern}${string_to_eol}"
+    if grep "$pattern" "$file_name" >/dev/null; then
+        sed -i "s|${pattern}.*$|${pattern_to_eol}|" "$file_name"
+    else
+        sed -i "1i${pattern_to_eol}" "$file_name"
+    fi
+}
+
+lease_file="/tmp/udhcpc.log"
+touch "${lease_file}"
+if [ "X$(cat "${lease_file}")" = "X" ]; then
+   echo "" >> "${lease_file}"
+fi
+
+if [ ! -z ${vendor_encap} ]; then
+    replace_or_update_to_eol "option vendor-encapsulated-options " "${vendor_encap};" "${lease_file}"
+fi
+if [ ! -z ${domain} ]; then
+    replace_or_update_to_eol "option domain-name " "${domain};" "${lease_file}"
+fi
+if [ ! -z ${dns} ]; then
+    replace_or_update_to_eol "option domain-name-servers " "${dns};" "${lease_file}"
+fi
+

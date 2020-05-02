@@ -1,0 +1,101 @@
+From cbf49ed35a8e21b1c48448f1cb2596dc70f8c274 Mon Sep 17 00:00:00 2001
+From: Veeresh Sajjan <veeresh.sajjan@nxp.com>
+Date: Thu, 19 Jul 2018 15:48:53 +0530
+Subject: [PATCH] SBR-4576 802.1x backup radius support
+
+1. Default retry interval is set to 120 sec to switch back to primary
+from backup radius server
+2. Changed RADIUS_CLIENT_NUM_FAILOVER to default value 3 so as to reduce the time taken to switch to backup.
+3. Proper handling of binding the socket during switch to other server
+
+Signed-off-by: Veeresh Sajjan <veeresh.sajjan@nxp.com>
+---
+ src/source/config.c        |  7 +++++++
+ src/source/radius_client.c | 28 ++++++++++++++++++++--------
+ 2 files changed, 27 insertions(+), 8 deletions(-)
+
+diff --git a/src/source/config.c b/src/source/config.c
+index 1d52873..cc403de 100644
+--- a/src/source/config.c
++++ b/src/source/config.c
+@@ -28,6 +28,9 @@
+ /* Interface used for BB2 is eth3 and interface used for PP is eth2 */
+ #define LAN_IFACE_NAME_CONF "eth3"
+ 
++/* time interval to switch from back-up to primary radius server */
++#define DEFAULT_RETRY_INTERVAL 120
++
+ unsigned char BtoH(
+     unsigned char ch)
+ {
+@@ -905,7 +908,11 @@ BOOLEAN nk_Config_parse(char *config_filename, char *prefix_name, struct rtapd_c
+ 	}   
+ 
+    	// radius_retry_primary_interval
++#ifdef DEFAULT_RETRY_INTERVAL
++    conf->radius_retry_primary_interval = DEFAULT_RETRY_INTERVAL;
++#else
+    	conf->radius_retry_primary_interval = pDot1xCmmConf->retry_interval;
++#endif
+ 	if (conf->radius_retry_primary_interval > 0)
+ 	{
+ 		DBGPRINT(RT_DEBUG_TRACE,"Radius retry primary interval %d seconds. \n", conf->radius_retry_primary_interval);
+diff --git a/src/source/radius_client.c b/src/source/radius_client.c
+index ec7c5a3..6e55978 100644
+--- a/src/source/radius_client.c
++++ b/src/source/radius_client.c
+@@ -21,7 +21,7 @@
+ 					  * before entry is removed from retransmit list */
+ #define RADIUS_CLIENT_MAX_ENTRIES 30 /* maximum number of entries in retransmit
+ 					  * list (oldest will be removed, if this limit is exceeded) */
+-#define RADIUS_CLIENT_NUM_FAILOVER 4 /* try to change RADIUS server after this
++#define RADIUS_CLIENT_NUM_FAILOVER 3 /* try to change RADIUS server after this
+ 					  * many failed retry attempts */
+ #define SIZE 256
+ #define MAC_STR_SIZE 32
+@@ -451,10 +451,11 @@ static int
+ Radius_change_server(rtapd *rtapd, struct hostapd_radius_server *nserv,
+ 			 struct hostapd_radius_server *oserv, int sock, int auth)
+ {
+-	struct sockaddr_in serv;
++	struct sockaddr_in serv,binded_addr;
+ 	struct in_addr own_ip;
+ 	char device[SIZE];
+ 	char mac[MAC_STR_SIZE];
++    int len;
+ 
+ 	if (!oserv || nserv->shared_secret_len != oserv->shared_secret_len ||
+ 		memcmp(nserv->shared_secret, oserv->shared_secret, nserv->shared_secret_len) != 0)
+@@ -504,12 +505,23 @@ Radius_change_server(rtapd *rtapd, struct hostapd_radius_server *nserv,
+ 	strncpy(rtapd->conf->own_if_mac, mac, (MAC_STR_SIZE - 1));
+ 	//serv.sin_addr.s_addr = rtapd->conf->own_ip_addr.s_addr;
+ 	//serv.sin_port = htons(rtapd->conf->auth_server->port);
+-	if (bind(sock, (struct sockaddr *) &serv, sizeof(serv)) < 0)
+-	{
+-		perror("bind");
+-		DBGPRINT(RT_DEBUG_ERROR,"Radius Client Socket Bind Failed\n");
+-		return -2;
+-	}
++    memset(&binded_addr, 0, sizeof(binded_addr));
++    len = sizeof(binded_addr);
++    if (getsockname(sock, (struct sockaddr *) &binded_addr, &len) == -1)
++    {
++        perror("getsockname() failed");
++        return -2;
++    }
++    /** Avoid binding the same IP address to the same socket **/
++    if(binded_addr.sin_addr.s_addr != serv.sin_addr.s_addr)
++    {
++        if (bind(sock, (struct sockaddr *) &serv, sizeof(serv)) < 0)
++        {
++            perror("bind");
++            DBGPRINT(RT_DEBUG_ERROR,"Radius Client Socket Bind Failed\n");
++            return -2;
++        }
++    }
+ #endif
+ 
+ 	memset(&serv, 0, sizeof(serv));
+-- 
+1.9.1
+

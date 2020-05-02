@@ -1,0 +1,11 @@
+--- a/net/l2tp/l2tp_core.c	2017-09-14 13:47:36.705982562 +0530
++++ b/net/l2tp/l2tp_core.c	2017-09-14 13:48:02.705983149 +0530
+@@ -1172,6 +1172,8 @@ int l2tp_xmit_skb(struct l2tp_session *s
+ 		break;
+ 	}
+ 
++        skb->sk = sk;
++
+ 	l2tp_xmit_core(session, skb, fl, data_len);
+ out_unlock:
+ 	bh_unlock_sock(sk);

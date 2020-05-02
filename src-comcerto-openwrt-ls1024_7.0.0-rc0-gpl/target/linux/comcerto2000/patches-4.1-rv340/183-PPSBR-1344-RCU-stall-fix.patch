@@ -1,0 +1,191 @@
+From 8c8e3740f09679329cdd8be9d5856f2c317e0ef1 Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Tue, 20 Feb 2018 10:06:18 +0530
+Subject: [PATCH] PPSBR-1344 RCU stall fix.
+
+SBR-3602 is a similar issue of this. Changes of that bug are ported to PP.
+
+RCU stall observed as flow_cache_gc was never being invoked under heavy traffic loads.
+Changes done to remove the schedule_work for flow_cache_gc.
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ net/core/flow.c | 58 ++++++++++++++++++++++++++++++++++++---------------------
+ 1 file changed, 37 insertions(+), 21 deletions(-)
+
+diff --git a/net/core/flow.c b/net/core/flow.c
+index 5ddf2ac..6ef0972 100644
+--- a/net/core/flow.c
++++ b/net/core/flow.c
+@@ -14,7 +14,7 @@
+ #include <linux/init.h>
+ #include <linux/slab.h>
+ #include <linux/smp.h>
+-#include <linux/completion.h>
++/* #include <linux/completion.h> */
+ #include <linux/percpu.h>
+ #include <linux/bitops.h>
+ #include <linux/notifier.h>
+@@ -49,7 +49,7 @@ struct flow_cache_entry {
+ struct flow_flush_info {
+ 	struct flow_cache		*cache;
+ 	atomic_t			cpuleft;
+-	struct completion		completion;
++/* 	struct completion		completion; */
+ };
+ 
+ #if defined(CONFIG_INET_IPSEC_OFFLOAD) || defined(CONFIG_INET6_IPSEC_OFFLOAD)
+@@ -59,7 +59,7 @@ struct flow_remove_info {
+ 	unsigned short			family;
+ 	unsigned short			dir;
+ 	atomic_t			cpuleft;
+-	struct completion		completion;
++/*	struct completion		completion; */
+ };
+ 
+ struct flow_cache       *flow_cache_global;
+@@ -104,12 +104,12 @@ static void flow_entry_kill(struct flow_cache_entry *fle,
+ 	kmem_cache_free(flow_cachep, fle);
+ }
+ 
+-static void flow_cache_gc_task(struct work_struct *work)
++static void flow_cache_gc_task(struct netns_xfrm *xfrm_p)
+ {
+ 	struct list_head gc_list;
+ 	struct flow_cache_entry *fce, *n;
+-	struct netns_xfrm *xfrm = container_of(work, struct netns_xfrm,
+-						flow_cache_gc_work);
++	struct netns_xfrm *xfrm = xfrm_p;
++
+ 
+ 	INIT_LIST_HEAD(&gc_list);
+ 	spin_lock_bh(&xfrm->flow_cache_gc_lock);
+@@ -135,7 +135,8 @@ static void flow_cache_queue_garbage(struct flow_cache_percpu *fcp,
+ 		spin_lock_bh(&xfrm->flow_cache_gc_lock);
+ 		list_splice_tail(gc_list, &xfrm->flow_cache_gc_list);
+ 		spin_unlock_bh(&xfrm->flow_cache_gc_lock);
+-		schedule_work(&xfrm->flow_cache_gc_work);
++/*		schedule_work(&xfrm->flow_cache_gc_work); */
++		flow_cache_gc_task(xfrm);
+ 	}
+ }
+ 
+@@ -353,8 +354,9 @@ static void flow_cache_flush_tasklet(unsigned long data)
+ 
+ 	flow_cache_queue_garbage(fcp, deleted, &gc_list, xfrm);
+ 
+-	if (atomic_dec_and_test(&info->cpuleft))
+-		complete(&info->completion);
++	/* if (atomic_dec_and_test(&info->cpuleft))
++		complete(&info->completion); */
++		atomic_dec(&info->cpuleft);
+ }
+ 
+ /*
+@@ -390,6 +392,7 @@ void flow_cache_flush(struct net *net)
+ 	struct flow_flush_info info;
+ 	cpumask_var_t mask;
+ 	int i, self;
++	static DEFINE_SPINLOCK(flow_flush_lock);
+ 
+ 	/* Track which cpus need flushing to avoid disturbing all cores. */
+ 	if (!alloc_cpumask_var(&mask, GFP_KERNEL))
+@@ -398,7 +401,9 @@ void flow_cache_flush(struct net *net)
+ 
+ 	/* Don't want cpus going down or up during this. */
+ 	get_online_cpus();
+-	mutex_lock(&net->xfrm.flow_flush_sem);
++/* 	mutex_lock(&net->xfrm.flow_flush_sem); */
++
++	spin_lock_bh(&flow_flush_lock);
+ 	info.cache = &net->xfrm.flow_cache_global;
+ 	for_each_online_cpu(i)
+ 		if (!flow_cache_percpu_empty(info.cache, i))
+@@ -407,7 +412,7 @@ void flow_cache_flush(struct net *net)
+ 	if (atomic_read(&info.cpuleft) == 0)
+ 		goto done;
+ 
+-	init_completion(&info.completion);
++	/* init_completion(&info.completion); */
+ 
+ 	local_bh_disable();
+ 	self = cpumask_test_and_clear_cpu(smp_processor_id(), mask);
+@@ -416,10 +421,14 @@ void flow_cache_flush(struct net *net)
+ 		flow_cache_flush_tasklet((unsigned long)&info);
+ 	local_bh_enable();
+ 
+-	wait_for_completion(&info.completion);
++	/* wait_for_completion(&info.completion); */
++	while (atomic_read(&info.cpuleft) != 0)
++		cpu_relax();
+ 
+ done:
+-	mutex_unlock(&net->xfrm.flow_flush_sem);
++	/* mutex_unlock(&net->xfrm.flow_flush_sem); */
++	spin_unlock_bh(&flow_flush_lock);
++
+ 	put_online_cpus();
+ 	free_cpumask_var(mask);
+ }
+@@ -466,8 +475,9 @@ void flow_cache_remove_tasklet(unsigned long data)
+ 		}
+ 	}
+ nocache:	
+-	if (atomic_dec_and_test(&info->cpuleft))
+-		complete(&info->completion);
++/* 	if (atomic_dec_and_test(&info->cpuleft))
++		complete(&info->completion); */
++	atomic_dec(&info->cpuleft);
+ 	return;
+ }
+ 
+@@ -475,26 +485,32 @@ void flow_cache_remove(const struct flowi *key,
+ 			unsigned short family, unsigned short dir)
+ {
+ 	struct flow_remove_info info;
+-	static DEFINE_MUTEX(flow_rem_sem);
++/* static DEFINE_MUTEX(flow_rem_sem); */
++	static DEFINE_SPINLOCK(flow_rem_lock);
+ 
+ 	/* Don't want cpus going down or up during this. */
+ 	get_online_cpus();
+-	mutex_lock(&flow_rem_sem);
++/* 	mutex_lock(&flow_rem_sem); */
++	spin_lock_bh(&flow_rem_lock);
+ 	info.cache = flow_cache_global;
+ 	info.key = (struct flowi*)key;
+ 	//memcpy(&info.key, key, sizeof(struct flowi));
+ 	info.family = family;
+ 	info.dir = dir;
+         atomic_set(&info.cpuleft, num_online_cpus());
+-        init_completion(&info.completion);
++/*  init_completion(&info.completion); */
+ 
+         local_bh_disable();
+ 	smp_call_function(flow_cache_remove_per_cpu, &info, 1);
+ 	flow_cache_remove_tasklet((unsigned long)&info);
+         local_bh_enable();
+ 
+-        wait_for_completion(&info.completion);
+-        mutex_unlock(&flow_rem_sem);
++       /* wait_for_completion(&info.completion);
++        mutex_unlock(&flow_rem_sem); */
++	while (atomic_read(&info.cpuleft) != 0)
++		cpu_relax();
++
++	spin_unlock_bh(&flow_rem_lock);
+         put_online_cpus();
+ }
+ 
+@@ -573,7 +589,7 @@ int flow_cache_init(struct net *net)
+ 						0, SLAB_PANIC, NULL);
+ 	spin_lock_init(&net->xfrm.flow_cache_gc_lock);
+ 	INIT_LIST_HEAD(&net->xfrm.flow_cache_gc_list);
+-	INIT_WORK(&net->xfrm.flow_cache_gc_work, flow_cache_gc_task);
++/*	INIT_WORK(&net->xfrm.flow_cache_gc_work, flow_cache_gc_task); */
+ 	INIT_WORK(&net->xfrm.flow_cache_flush_work, flow_cache_flush_task);
+ 	mutex_init(&net->xfrm.flow_flush_sem);
+ 
+-- 
+1.9.1
+

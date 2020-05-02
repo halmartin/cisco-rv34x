@@ -1,0 +1,10 @@
+#!/bin/sh
+
+category="$1"
+severity="$2"
+msg="$3"
+
+# Add some sleep because traffic may not run by the time we got this event.
+sleep 10;
+
+logger -t $category -p "local0.${severity}" "$msg"

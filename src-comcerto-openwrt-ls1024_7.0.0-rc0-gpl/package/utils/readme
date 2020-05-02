@@ -1,0 +1,3 @@
+Changes:
+
+1)ubi-utis/Makefile :Removed the NAND SUPPORT dependency for this package usage

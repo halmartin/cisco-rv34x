@@ -1,0 +1,28 @@
+# 2017-06-15: li.zhang <li.zhang@deltaww.com>
+# fix bug the 3g dongle reconnect error sometimes
+
+--- linux-4.1.8/drivers/usb/serial/usb-serial.c.bak	2017-06-15 16:00:44.187545798 +0800
++++ linux-4.1.8/drivers/usb/serial/usb-serial.c	2017-06-15 16:04:15.970670730 +0800
+@@ -349,13 +349,20 @@
+ {
+ 	struct usb_serial_port *port = tty->driver_data;
+ 	struct usb_serial *serial = port->serial;
++	int count =0;
+ 
+ 	dev_dbg(tty->dev, "%s\n", __func__);
++	
++	mutex_lock(&serial->disc_mutex);
+ 
+ 	if (serial->disconnected)
+-		return 0;
++		count=0;
++	else
++		count = serial->type->chars_in_buffer(tty);
++
++	mutex_unlock(&serial->disc_mutex);
+ 
+-	return serial->type->chars_in_buffer(tty);
++	return count;
+ }
+ 
+ static void serial_wait_until_sent(struct tty_struct *tty, int timeout)

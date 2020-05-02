@@ -1,0 +1,351 @@
+From 7ecdad7273833ea7b3e1379e479a76888ba925ec Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Date: Wed, 15 Mar 2017 08:51:45 -0500
+Subject: [PATCH] hanges are related to differing packet processing from core0 
+ to core1      as all packets will be received on core0 on our platform 
+ Packet will be processed as follows
+
+      Out Packet:
+	Core0:
+	plain packetrcv ->route lookup->pptp_xmit->ppp_encapsulation
+	Core1:
+	reinject ppp packet->and till packet xmit
+
+     In Packet:
+	Core0:
+	ppp/pptp packetrcv ->route lookup->pptp_rcv
+	Core1:
+	decapsulate and further processing
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+---
+ drivers/net/ppp/pptp.c | 264 ++++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 262 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/ppp/pptp.c b/drivers/net/ppp/pptp.c
+index e3bfbd4..cb1d4ab 100644
+--- a/drivers/net/ppp/pptp.c
++++ b/drivers/net/ppp/pptp.c
+@@ -8,6 +8,21 @@
+  *	as published by the Free Software Foundation; either version
+  *	2 of the License, or (at your option) any later version.
+  *
++ * 26/Jan/2017 Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
++ *	Changes are related to differing packet processing from core0 to core1
++ *	as all packets will be received on core0 on our platform
++ *	Packet will be processed as follows
++ *	Out Packet:
++ *	Core0:
++ *	plain packetrcv ->route lookup->pptp_xmit->ppp_encapsulation
++ *	Core1:
++ *	reinject ppp packet->and till packet xmit
++ *
++ *	In Packet:
++ *	Core0:
++ *	ppp/pptp packetrcv ->route lookup->pptp_rcv
++ *	Core1:
++ *	decapsulate and further processing
+  */
+ 
+ #include <linux/string.h>
+@@ -32,6 +47,7 @@
+ #include <linux/netfilter_ipv4.h>
+ #include <linux/rcupdate.h>
+ #include <linux/spinlock.h>
++#include <linux/kthread.h>
+ 
+ #include <net/sock.h>
+ #include <net/protocol.h>
+@@ -90,6 +106,235 @@ struct pptp_gre_header {
+ 	__be32 ack;
+ } __packed;
+ 
++static int pptp_rcv(struct sk_buff *skb);
++
++int pptp_napi_init(void);
++void pptp_napi_deinit(void);
++int pptp_napi_send_packet(struct sk_buff *skb, char op);
++int pptp_napi_poll(struct napi_struct *napi, int budget);
++
++#define PPTP_NAPI_BUDGET	64
++
++#define PPTP_PKT_RECV 	1
++#define PPTP_PKT_XMIT	2
++
++struct napi_struct napi;
++struct net_device dummy_dev;
++int task_differ_cpu_id = 1;
++
++struct sk_buff_head pptp_napi_skb_list_head;
++
++#ifndef PPTP_SCHED_NAPI_THRU_SMP_FUN_SINGLE
++static struct task_struct *pptp_thread = NULL;
++static int net_napi_backlog(void *data);
++#else
++int napi_schedule_cpu(struct napi_struct *napi, int cpuid);
++#endif
++
++//#define PPTP_NAPI_DEBUG 1
++
++#ifdef PPTP_NAPI_DEBUG
++#define pptp_napi_debug(fmt, arg...)  \
++	printk(KERN_INFO"[CPU %d ln %d fn %s] - " fmt, smp_processor_id(), __LINE__, __func__, ##arg)
++#else
++#define pptp_napi_debug(fmt, arg...)
++#endif
++
++#ifdef PPTP_NAPI_PROC_SUPPORT
++#define PPTP_TASK_DIFF_CPU		"pptp_tx_rx_cpu_affinity"
++#define PPTP_PROC_DIR			"pptp"
++struct proc_dir_entry *pptp_dir;
++
++static int get_task_differ_cpu_id(char *page, char **start,
++					off_t off, int count,
++					int *eof, void *data)
++{
++	int size = 0;
++	size = sprintf(page, "%d\n", task_differ_cpu_id);
++	return size;
++}
++
++int set_task_differ_cpu_id(struct file *file, const char *buf, int count, void *data)
++{
++	char ch[2];
++	int err;
++	unsigned int cpuid;
++	err=copy_from_user(ch, buf, count);
++	if(err)
++		return 0;
++	ch[1]='\0';
++	if (kstrtou32(ch, 10, &cpuid) < 0)
++		printk("Invalid input\n");
++	else if (cpu_online(cpuid)) {
++		printk("Moving differed pptp task to CPU id %d\n", cpuid);
++		task_differ_cpu_id = cpuid;
++	}
++	else
++		printk("CPU %d is not online\n", cpuid);
++
++	return count;
++}
++#endif
++
++
++int pptp_napi_init()
++{
++	skb_queue_head_init(&pptp_napi_skb_list_head);
++
++	init_dummy_netdev(&dummy_dev);
++
++	netif_napi_add(&dummy_dev, &napi, pptp_napi_poll, PPTP_NAPI_BUDGET);
++	napi_enable(&napi);
++
++	pptp_napi_debug("NAPI Initialized\r\n");
++
++#ifdef PPTP_NAPI_PROC_SUPPORT
++	struct proc_dir_entry   *proc_file;
++
++	pptp_dir = proc_mkdir(PPTP_PROC_DIR, NULL);
++	if (!pptp_dir) {
++		pr_err("Unable to create pptp_dir\r\n");
++		goto err;
++	}
++	proc_file = create_proc_entry(PPTP_TASK_DIFF_CPU, 0666, pptp_dir);
++
++	if (proc_file) {
++		proc_file->read_proc = get_task_differ_cpu_id;
++		proc_file->write_proc = set_task_differ_cpu_id;
++	} else {
++		pr_err("Unable to create proc entry\r\n");
++		goto err;
++	}
++#endif
++#ifndef PPTP_SCHED_NAPI_THRU_SMP_FUN_SINGLE
++	pptp_thread = kthread_create(net_napi_backlog, NULL,
++					"pptp_th_%d", (int) task_differ_cpu_id);
++	if (IS_ERR(pptp_thread)) {
++		int error;
++		error = PTR_ERR(pptp_thread);
++		pr_err("pptp_napi_init: cannot start crypto thread; error %d\n",
++			error);
++		goto err;
++	}
++	kthread_bind(pptp_thread, task_differ_cpu_id);
++	wake_up_process(pptp_thread);
++#endif
++	return 0;
++
++err:
++	napi_disable(&napi);
++	netif_napi_del(&napi);
++
++	return -ENOMEM;
++
++}
++
++void pptp_napi_deinit()
++{
++	napi_disable(&napi);
++	netif_napi_del(&napi);
++
++	skb_queue_purge(&pptp_napi_skb_list_head);
++#ifndef PPTP_SCHED_NAPI_THRU_SMP_FUN_SINGLE
++	if (pptp_thread)
++		kthread_stop(pptp_thread);
++#endif
++#ifdef PPTP_NAPI_PROC_SUPPORT
++	remove_proc_entry(PPTP_TASK_DIFF_CPU, pptp_dir);
++	remove_proc_entry(PPTP_PROC_DIR, NULL);
++#endif
++
++	pptp_napi_debug("NAPI Deinitialized\r\n");
++}
++
++int pptp_napi_poll(struct napi_struct *napi, int budget)
++{
++	struct sk_buff *skb;
++	int pkts_processed = 0;
++
++	pptp_napi_debug("Entry\r\n");
++
++	while ((pkts_processed < budget) &&
++		((skb = skb_dequeue(&pptp_napi_skb_list_head)) != NULL)) {
++
++		pptp_napi_debug("Calling li_local_out\r\n");
++		if (skb->cb[44] == PPTP_PKT_XMIT)
++			ip_local_out(skb);
++		else if (skb->cb[44] == PPTP_PKT_RECV)
++			pptp_rcv(skb);
++		else {
++			kfree_skb(skb);
++			pr_err("Invalid packet send option (%d)\n", skb->cb[44]);
++		}
++		pkts_processed++;
++	}
++
++	pptp_napi_debug("Number of Packets Pracessed %d\r\n", pkts_processed);
++
++	if (pkts_processed < budget) {
++		pptp_napi_debug("NAPI Complete\r\n");
++		napi_complete(napi);
++	}
++
++	pptp_napi_debug("EXIT\r\n");
++	return pkts_processed;
++}
++
++int pptp_napi_send_packet(struct sk_buff *skb, char op)
++{
++	pptp_napi_debug("Entry\r\n");
++
++	skb->cb[44] = op;
++	skb_queue_tail(&pptp_napi_skb_list_head, skb);
++
++	pptp_napi_debug("Scheduling NAPI\r\n");
++
++	/*Scheduling NAPI on perticular core core */
++#ifndef PPTP_SCHED_NAPI_THRU_SMP_FUN_SINGLE
++	wake_up_process(pptp_thread);
++#else
++	napi_schedule_cpu(&napi, task_differ_cpu_id);
++#endif
++	pptp_napi_debug("EXIT\r\n");
++	return 0;
++}
++
++EXPORT_SYMBOL(pptp_napi_send_packet);
++
++#ifndef PPTP_SCHED_NAPI_THRU_SMP_FUN_SINGLE
++static int net_napi_backlog(void *data)
++{
++	pptp_napi_debug("ENTRY\r\n");
++	for(;;)
++	{
++		napi_schedule(&napi);
++		schedule_timeout_interruptible(MAX_SCHEDULE_TIMEOUT);
++		if (kthread_should_stop())
++			break;
++	}
++	pptp_napi_debug("EXIT\r\n");
++	return 0;
++}
++#else
++static void net_napi_backlog(void *data)
++{
++	pptp_napi_debug("ENTRY\r\n");
++	napi_schedule(&napi);
++	pptp_napi_debug("EXIT\r\n");
++	return 0;
++}
++
++int napi_schedule_cpu(struct napi_struct *napi, int cpuid)
++{
++	pptp_napi_debug("ENTRY\r\n");
++
++	pptp_napi_debug("Scheduling NAPI on core %d", cpuid);
++	smp_call_function_single(cpuid, net_napi_backlog, NULL, 0);
++	pptp_napi_debug("EXIT\r\n");
++	return 0;
++}
++#endif
++
+ static struct pppox_sock *lookup_chan(u16 call_id, __be32 s_addr)
+ {
+ 	struct pppox_sock *sock;
+@@ -284,7 +529,7 @@ static int pptp_xmit(struct ppp_channel *chan, struct sk_buff *skb)
+ 	ip_select_ident(sock_net(sk), skb, NULL);
+ 	ip_send_check(iph);
+ 
+-	ip_local_out(skb);
++	pptp_napi_send_packet(skb, PPTP_PKT_XMIT);
+ 	return 1;
+ 
+ tx_error:
+@@ -376,6 +621,12 @@ drop:
+ 	return NET_RX_DROP;
+ }
+ 
++static int pptp_rcv_napi(struct sk_buff *skb)
++{
++	pptp_napi_send_packet(skb, PPTP_PKT_RECV);
++	return 0;
++}
++
+ static int pptp_rcv(struct sk_buff *skb)
+ {
+ 	struct pppox_sock *po;
+@@ -663,7 +914,7 @@ static const struct pppox_proto pppox_pptp_proto = {
+ };
+ 
+ static const struct gre_protocol gre_pptp_protocol = {
+-	.handler = pptp_rcv,
++	.handler = pptp_rcv_napi,
+ };
+ 
+ static int __init pptp_init_module(void)
+@@ -693,6 +944,12 @@ static int __init pptp_init_module(void)
+ 		goto out_unregister_sk_proto;
+ 	}
+ 
++	err = pptp_napi_init();
++	if (err) {
++		pr_err("PPTP: can't initialize napi\n");
++		goto out_unregister_sk_proto;
++	}
++
+ 	return 0;
+ 
+ out_unregister_sk_proto:
+@@ -710,6 +967,9 @@ static void __exit pptp_exit_module(void)
+ 	unregister_pppox_proto(PX_PROTO_PPTP);
+ 	proto_unregister(&pptp_sk_proto);
+ 	gre_del_protocol(&gre_pptp_protocol, GREPROTO_PPTP);
++
++	pptp_napi_deinit();
++
+ 	vfree(callid_sock);
+ }
+ 
+-- 
+1.9.1
+

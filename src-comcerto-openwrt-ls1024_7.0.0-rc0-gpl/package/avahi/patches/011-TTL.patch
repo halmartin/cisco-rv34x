@@ -1,0 +1,29 @@
+--- a/avahi-core/entry.c	2016-03-09 18:30:47.134983748 +0530
++++ b/avahi-core/entry.c	2016-03-09 18:33:36.639693748 +0530
+@@ -623,7 +623,7 @@
+ 
+     /* Add service enumeration PTR record */
+ 
+-    if (!(ptr_entry = server_add_ptr_internal(s, g, interface, protocol, 0, AVAHI_DEFAULT_TTL, ptr_name, svc_name))) {
++    if (!(ptr_entry = server_add_ptr_internal(s, g, interface, protocol, 0, AVAHI_DEFAULT_TTL_HOST_NAME, ptr_name, svc_name))) {
+         ret = avahi_server_errno(s);
+         goto fail;
+     }
+@@ -663,7 +663,7 @@
+ 
+     /* Add service type enumeration record */
+ 
+-    if (!(enum_entry = server_add_ptr_internal(s, g, interface, protocol, 0, AVAHI_DEFAULT_TTL, enum_ptr, ptr_name))) {
++    if (!(enum_entry = server_add_ptr_internal(s, g, interface, protocol, 0, AVAHI_DEFAULT_TTL_HOST_NAME, enum_ptr, ptr_name))) {
+         ret = avahi_server_errno(s);
+         goto fail;
+     }
+@@ -860,7 +860,7 @@
+         goto fail;
+     }
+ 
+-    if ((ret = avahi_server_add_ptr(s, g, interface, protocol, 0, AVAHI_DEFAULT_TTL, ptr_name, svc_name)) < 0)
++    if ((ret = avahi_server_add_ptr(s, g, interface, protocol, 0, AVAHI_DEFAULT_TTL_HOST_NAME, ptr_name, svc_name)) < 0)
+         goto fail;
+ 
+ fail:

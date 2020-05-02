@@ -1,0 +1,13 @@
+# 2017-05-19: harry.lin <harry.lin@deltaww.com>
+# Add support Auto Power Down.
+--- linux-4.1.8/drivers/net/phy/broadcom.c.org	2017-05-19 17:19:59.407547546 +0800
++++ linux-4.1.8/drivers/net/phy/broadcom.c	2017-05-19 17:25:54.690671583 +0800
+@@ -256,6 +256,8 @@
+ 		phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) | (1 << 1)));
+ 		phy_write(phydev, 0x1e, 0x12);
+ 		phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) | (6 << 0)));
++		phy_write(phydev, 0x1e, 0x1a);
++		phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) | (1 << 8) | (3 << 5) | (1 << 4) | (15 << 0)));
+ 	}
+ 
+ 	return 0;

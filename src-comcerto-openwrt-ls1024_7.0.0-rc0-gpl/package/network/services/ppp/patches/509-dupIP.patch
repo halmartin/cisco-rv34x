@@ -1,0 +1,112 @@
+diff -aurpN '--exclude-from=./exclude-files.txt' ppp-2.4.5-orig/pppd/ipcp.c ppp-2.4.5/pppd/ipcp.c
+--- ppp-2.4.5-orig/pppd/ipcp.c	2017-04-24 03:33:48.838327038 -0500
++++ ppp-2.4.5/pppd/ipcp.c	2017-05-02 04:36:35.874474958 -0500
+@@ -55,6 +55,7 @@
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
++#include <ifaddrs.h>
+ 
+ #include "pppd.h"
+ #include "fsm.h"
+@@ -111,6 +112,8 @@ static void ipcp_up __P((fsm *));		/* We
+ static void ipcp_down __P((fsm *));		/* We're DOWN */
+ static void ipcp_finished __P((fsm *));	/* Don't need lower layer */
+ 
++int check_duplicate_ip(uint32_t requested_ip, int isV4);
++
+ fsm ipcp_fsm[NUM_PPP];		/* IPCP fsm structure */
+ 
+ static fsm_callbacks ipcp_callbacks = { /* IPCP callback routines */
+@@ -1755,6 +1758,75 @@ ip_demand_conf(u)
+     return 1;
+ }
+ 
++/* Duplicate IP detection logic goes here:
++ *  Return: 1 on detecting 
++ */
++int check_duplicate_ip(uint32_t requested_ip, int isV4)
++{ //NOT using the second argument.
++	struct ifaddrs *ifaddr, *ifa;
++	int family, s;
++	FILE *fp_popen;
++	char host[NI_MAXHOST];
++	char buff[128]="";
++	struct in_addr requested_ipaddr;
++	int isDup = 0;
++
++	requested_ipaddr.s_addr = requested_ip;
++	if (getifaddrs(&ifaddr) == -1) {
++		perror("getifaddrs");
++		return isDup;
++	}
++
++	/* Walk through linked list, maintaining head pointer so we
++	can free list later */
++
++	for (ifa = ifaddr; (ifa != NULL && isDup != 1); ifa = ifa->ifa_next) {
++		if (ifa->ifa_addr == NULL)
++			continue;
++
++		family = ifa->ifa_addr->sa_family;
++
++		/* For an AF_INET* interface address, display the address */
++
++		if (family == AF_INET || family == AF_INET6) {
++			s = getnameinfo(ifa->ifa_addr,
++				(family == AF_INET) ? sizeof(struct sockaddr_in) :
++				sizeof(struct sockaddr_in6),
++				host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
++
++			if (s != 0) {
++				notice("getnameinfo() failed: %s\n", gai_strerror(s));
++				break;
++			}
++
++			//notice ("DEBUG Now checking for the host:%s \r\n",host);
++			if (strcmp(inet_ntoa(requested_ipaddr), host)==0) {
++				//notice("The provided IP is same as the IP for interface: %s\r\n",ifa->ifa_name);
++				char command[128];
++				sprintf(command,"uci show network | grep 'ifname=%s$' | head -n 1 | cut -f 2 -d .",ifa->ifa_name);
++				//notice("command being executed is: %s\r\n",command);
++				if((fp_popen = popen(command,"r")) == NULL){
++					perror("popen");
++					//notice("Failed in popen. Hence exiting!\r\n");
++					break;
++				}
++				while(fgets(buff,sizeof(buff),fp_popen)!=NULL){
++					char dup_command[128];
++					//This must be the interface screen name. It will be either vlan1/vlan100 etc.
++					//Moreover, we enter only once into it.
++					//notice("screen-name is:%s",buff);
++					sprintf(dup_command, "logger -t WAN \"Rejecting duplicate IP with the interface %s\"",buff);
++					system(dup_command);
++					isDup = 1;
++					break;
++				}
++				pclose(fp_popen);
++			}
++		}
++	}
++	freeifaddrs(ifaddr);
++	return isDup;
++}
+ 
+ /*
+  * ipcp_up - IPCP has come UP.
+@@ -1789,6 +1861,15 @@ ipcp_up(f)
+ 	ipcp_close(f->unit, "Could not determine local IP address");
+ 	return;
+     }
++    else {
++	//have your logic of identifying the duplicate address and reject it by closing ipcp_close
++	if(check_duplicate_ip(go->ouraddr, 1) == 1)
++	{
++		error("IP from server:%I is rejected because of duplicate with other interface on device",ho->hisaddr);
++		ipcp_close(f->unit, "Served IP is a duplicate IP on device with other LAN interfaces");
++		return;
++	}
++    }
+     if (ho->hisaddr == 0 && !noremoteip) {
+ 	ho->hisaddr = htonl(0x0a404040 + ifunit);
+ 	warn("Could not determine remote IP address: defaulting to %I",

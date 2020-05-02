@@ -1,0 +1,215 @@
+#!/bin/sh
+
+index=1
+
+arg=$1
+
+[ -n "$arg" ] && {
+	index=$arg
+}
+
+WLAN_PORT_STAT_FILE="/tmp/stats/wlan_port_stats"
+
+cat /dev/null > ${WLAN_PORT_STAT_FILE}
+
+. /lib/functions.sh
+scan_wifi() {
+	local cfgfile="$1"
+	DEVICES=
+	wl0_VIFS=
+	wl1_VIFS=
+
+	config_cb() {
+		local type="$1"
+		local section="$2"
+
+		# section start
+		case "$type" in
+			wifi-device)
+				append DEVICES "$section"
+				#config_set "$section" vifs ""
+				config_set "$section" ht_capab ""
+			;;
+		esac
+
+		# section end
+		config_get TYPE "$CONFIG_SECTION" TYPE
+		case "$TYPE" in
+			wifi-iface)
+				config_get device "$CONFIG_SECTION" device
+				eval append ${device}_VIFS "$CONFIG_SECTION"
+				eval vifs="\${${device}_VIFS}"
+				config_set "$device" vifs "$vifs"
+			;;
+		esac
+	}
+	config_load "${cfgfile:-wireless}"
+}
+
+include /lib/wifi
+scan_wifi
+
+board="$(/usr/bin/board_check.sh)"
+
+local i=-1
+while grep -qs "^ *wl$((++i)):" /proc/net/dev; do
+	i_idx=$(( $i + 1 ))
+	device="wl$i"
+
+	if [ "$device" = "wl0" ];then
+		if [ "$board" = "RV160W" -o "$board" = "RV340W" ];then
+			WLANPORT="WLAN1"
+			VAP_PREFIX="VAP1"
+		else
+			WLANPORT="WLAN0"
+			VAP_PREFIX="VAP0"
+		fi
+	else
+		if [ "$board" = "RV160W" ];then
+			WLANPORT="WLAN0"
+			VAP_PREFIX="VAP0"
+		elif [ "$board" = "RV340W" ];then
+			WLANPORT="WLAN2"
+			VAP_PREFIX="VAP2"
+		else
+			WLANPORT="WLAN1"
+			VAP_PREFIX="VAP1"
+		fi
+	fi
+
+	#PHY_ADDR="$(wl -i $device rdvar macaddr)"
+	PHY_ADDR="$(wl -i $device cur_etheraddr | awk -F' ' '{print $2}')"
+	
+	LINK_STATUS=0
+	PORT_ACTIVITY=0
+	SPEED=0
+	DUPLEX=0
+	AUTO_NEG=0
+	In_Ucast=0
+	In_Bcast=0
+	In_Mcast=0
+	In_Octets=0
+	In_Error=0
+	In_Discards=0
+	Out_Discards=0
+	In_Cols=0
+	Out_Ucast=0
+	Out_Bcast=0
+	Out_Mcast=0
+	Out_Octets=0
+	Out_Error=0
+	Out_Cols=0
+	lldp_status=0
+	admin_status=1
+	oper_status=1
+	_d="$(uci get wireless.${device}.disabled 2>/dev/null)"
+	if [ "$_d" = "1" ];then
+		admin_status=2
+		oper_status=2
+	fi
+	
+	echo $WLANPORT,$PHY_ADDR,$LINK_STATUS,$PORT_ACTIVITY,$SPEED,$DUPLEX,$AUTO_NEG,$In_Ucast,$In_Bcast,$In_Mcast,$In_Octets,$In_Error,$In_Cols,$In_Discards,$Out_Ucast,$Out_Bcast,$Out_Mcast,$Out_Octets,$Out_Error,$Out_Cols,$Out_Discards,$lldp_status,$index,$admin_status,$oper_status, >> ${WLAN_PORT_STAT_FILE}
+
+	vap_i=1
+	while read line;do
+		_ssid="$(echo $line | awk '{$NF=""}1' | awk '{$NF=""}1' | sed 's/.\{1\}$//')"
+		_radio="$(echo $line | awk '{print $(NF-1)}')"
+		index=$(( $index + 1 ))
+		admin_status=1
+		oper_status=1
+
+		[ "$i_idx" = "1" ] && {
+			if [ "$board" = "RV160W" -o "$board" = "RV340W" ];then
+				[ "$_radio" = "WLAN1" -o "$_radio" = "BOTH" ] || {
+					shift 2
+					continue
+				}
+			else
+				[ "$_radio" = "WLAN0" -o "$_radio" = "BOTH" ] || {
+					shift 2
+					continue
+				}
+			fi
+		}
+
+		[ "$i_idx" = "2" ] && {
+			if [ "$board" = "RV160W" ];then
+				[ "$_radio" = "WLAN0" -o "$_radio" = "BOTH" ] || {
+					shift 2
+					continue
+				}
+			elif [ "$board" = "RV340W" ];then
+				[ "$_radio" = "WLAN2" -o "$_radio" = "BOTH" ] || {
+				shift 2
+				continue
+				}
+			else
+				[ "$_radio" = "WLAN1" -o "$_radio" = "BOTH" ] || {
+					shift 2
+					continue
+				}
+			fi
+		}
+
+		config_get vifs "$device" vifs
+		ifname=
+		for vif in $vifs; do
+			config_get ssid "$vif" ssid
+
+			[ "$ssid" = "$_ssid" ] && {
+				config_get ifname "$vif" ifname
+				config_get_bool _d "$vif" disabled 0
+				if [ "$_d" = "1" ];then
+					admin_status=2
+					oper_status=2
+				fi
+
+				break
+			}
+		done
+
+		[ -n "$ifname" ] || {
+			shift 3
+			vap_i=$(( $vap_i + 1 ))
+			continue
+		}
+
+		VAPPORT="${VAP_PREFIX}_${vap_i}"
+		PHY_ADDR="$(wl -i $ifname cur_etheraddr)"
+		PHY_ADDR="${PHY_ADDR##* }"
+		iface_stats=`awk '{if ($1 == "'${ifname}:'") {print $5,$13,$15}}' /proc/net/dev`
+		In_Discards="${iface_stats%% *}"
+		Out_Discards="${iface_stats#* }"
+		Out_Cols="${Out_Discards#* }"
+		Out_Discards="${Out_Discards%% *}"
+
+		iface_stats_cnt="$(wl -i $ifname pktcnt 1)"
+		local oIFS="$IFS"; IFS=","
+		set $iface_stats_cnt
+		IFS="$oIFS"
+
+		Out_Octets="$(( $2 + $11 ))"
+		Out_Ucast="$1"
+		Out_Error="$3"
+		Out_Mcast="$10"
+		In_Octets="$(( $14 + $20 ))"
+		In_Ucast="$13"
+		In_Error="$15"
+		In_Mcast="$19"
+
+		ori_discards="0 0"
+		[ -e /tmp/${VAPPORT}.drop ] && ori_discards="$(cat /tmp/${VAPPORT}.drop)"
+		ori_in_discards="${ori_discards%% *}"
+		ori_out_discards="${ori_discards#* }"
+		In_Discards=$(( $In_Discards - ${ori_in_discards} ))
+		Out_Discards=$(( $Out_Discards - ${ori_out_discards} ))
+
+		echo $VAPPORT,$PHY_ADDR,$LINK_STATUS,$PORT_ACTIVITY,$SPEED,$DUPLEX,$AUTO_NEG,$In_Ucast,$In_Bcast,$In_Mcast,$In_Octets,$In_Error,$In_Cols,$In_Discards,$Out_Ucast,$Out_Bcast,$Out_Mcast,$Out_Octets,$Out_Error,$Out_Cols,$Out_Discards,$lldp_status,$index,$admin_status,$oper_status, >> ${WLAN_PORT_STAT_FILE}
+
+		shift 2
+
+		vap_i=$(( $vap_i + 1 ))
+	done < /tmp/wifi_status_result
+
+	index=$(( $index + 1 ))
+done

@@ -1,0 +1,7 @@
+CHANGES : 
+1. Patches directory : All the patches in patches directory are freescale specific.
+
+* 	01-FSL-LEDE-DEV-libubox-procd-init-process-hangs.patch - The patch is taken from 
+	https://patchwork.ozlabs.org/patch/622990/ . This is to avoid the hang in init.d 
+	while loading the processes.
+

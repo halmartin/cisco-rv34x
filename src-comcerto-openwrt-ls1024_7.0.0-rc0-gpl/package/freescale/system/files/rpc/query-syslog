@@ -1,0 +1,95 @@
+#!/bin/sh
+
+severity_grep=severity
+facility_grep=facility
+logfile="/var/log/syslog"
+logfileBK="/var/log/syslogBK"
+tmplogs="/tmp/tmplogs"
+tmplogfile1="/tmp/tmpsyslog1"
+tmplogfile2="/tmp/tmpsyslog2"
+tmplogfile3="/tmp/tmpsyslog3"
+logoutputfile="/tmp/Log/syslog.log"
+total_lines=
+total_pages=
+
+if [ ! -e $logfile ];then
+	touch $logfile
+fi
+
+if [ -e $logfileBK ];then
+	cp -f $logfileBK $tmplogs
+fi
+
+
+page_size=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "page-size") {print $(I+1)};}'`
+key_word=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "keyword") {print $(I+1)};}'`
+keyword=$(echo $key_word | sed -e 's#\([]\!\(\)\#\^\?\+\.\%\@\*\$\/&\-\=[]\)#\\\1#g')
+severity=`echo $@ | awk '{
+				severity=""
+				for (I=1;I<=NF;I=I+2)
+				{
+					if ($I == "logging-sevirity")
+					{
+						if ($(I+1) == "__BEGIN") {
+							print $(I+3)
+							}
+					}
+				}
+			}'`
+
+for word in $severity; do
+	severity_grep=$severity_grep" "$word"|severity"
+done
+severity_grep=`echo $severity_grep | sed -e "s/.........$//"`
+
+facility=`echo $@ | awk '{
+				facility=""
+				for (I=1;I<=NF;I=I+2)
+				{
+					if ($I == "logging-facilities")
+					{
+						if ($(I+1) == "__BEGIN") {
+							print $(I+3)
+							}
+					}
+				}
+			}'`
+
+for word in $facility; do
+	facility_part=`echo $word | cut -d : -f 2`
+	facility_grep=$facility_grep" "$facility_part"|facility"
+done
+facility_grep=`echo $facility_grep | sed -e "s/.........$//"`
+
+# Parse the logs based on facility and severity and keyword. Put them to logoutputfile
+
+awk '{print}' $logfile >> $tmplogs
+
+`awk "/$facility_grep/ { print; }" $tmplogs > $tmplogfile1`
+`awk "/$severity_grep/ { print; }" $tmplogfile1 > $tmplogfile2`
+`awk "/$keyword/ { print; }" $tmplogfile2 > $logoutputfile`
+
+
+# We should display last log first (2000 msg), so reversing the file
+`tail -n 2000 $logoutputfile > $tmplogfile3`
+`awk '{a[i++]=$0} END {for (j=i-1; j>=0;) print a[j--] }' $tmplogfile3 > $logoutputfile`
+
+rm -rf $tmplogs $tmplogfile1 $tmplogfile2 $tmplogfile3
+
+total_lines=`awk 'END { print NR }' $logoutputfile`
+
+#get_num_pages() {
+#	number="$1"
+#	divisor="$2"
+#	num_pages=`awk -vnumber="$number" -vdiv="$divisor" '
+#			function ceiling(x){return x%1 ? int(x)+1 : x}
+#			BEGIN{ print ceiling(number/div) }'`
+#	return $num_pages
+#}
+#get_num_pages $total_lines $page_size
+
+#total_pages=$?
+
+echo "total $total_lines"
+
+

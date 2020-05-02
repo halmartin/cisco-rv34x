@@ -1,0 +1,39 @@
+diff -Naur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/config.h barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/config.h
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/config.h	2017-08-17 15:24:52.247280161 +0530
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/config.h	2017-08-17 15:25:35.559280156 +0530
+@@ -44,7 +44,7 @@
+ 
+ #define COMCERTO_EXP_CS4_BASE_ADDR	(COMCERTO_AXI_EXP_BASE + (EXP_CS4_BASE_VAL << SHIFT_4K_MUL))
+ 
+-#define COMCERTO_NAND_FLASH_SIZE	(256UL * 1024UL * 1024UL)
++#define COMCERTO_NAND_FLASH_SIZE	(512UL * 1024UL * 1024UL)
+ 
+ #endif  /* __CONFIG_H */
+ 
+diff -Naur barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot
+--- barebox-2011.06.0-old/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot	2017-08-17 15:24:52.247280161 +0530
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot	2017-08-17 15:26:13.567280152 +0530
+@@ -127,7 +127,7 @@
+ 			ubiroot="rootfs"
+ 		fi
+ 		if [ x$rootfs_loc = xnand ]; then
+-			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock ,4096"
++			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock ,2048"
+ 		else
+ 			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock "
+ 		fi
+diff -Naur barebox-2011.06.0-old/commands/mem_flash_test.c barebox-2011.06.0/commands/mem_flash_test.c
+--- barebox-2011.06.0-old/commands/mem_flash_test.c	2017-08-17 15:24:52.379280161 +0530
++++ barebox-2011.06.0/commands/mem_flash_test.c	2017-08-17 15:28:50.767280133 +0530
+@@ -279,9 +279,9 @@
+     offset = _start;
+     count = _end - _start;
+ 
+-    if((_start < 0x0) || (_end > 0xFFFFFFF) || (_start > _end))
++    if((_start < 0x0) || (_end > 0x1FFFFFFF) || (_start > _end))
+     {
+-        printf ("Addr Range: 0x0 ~ 0xFFFFFFF\n");
++        printf ("Addr Range: 0x0 ~ 0x1FFFFFFF\n");
+         return -1;
+     }
+ 

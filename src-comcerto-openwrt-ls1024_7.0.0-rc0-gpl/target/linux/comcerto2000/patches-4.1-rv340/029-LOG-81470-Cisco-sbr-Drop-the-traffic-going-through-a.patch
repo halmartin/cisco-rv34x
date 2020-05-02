@@ -1,0 +1,56 @@
+--- a/include/uapi/linux/netfilter/nf_conntrack_common.h	2017-03-23 12:15:01.695580656 +0530
++++ b/include/uapi/linux/netfilter/nf_conntrack_common.h	2017-03-23 12:18:18.890123346 +0530
+@@ -108,6 +108,8 @@ enum ip_conntrack_status {
+ 	/* Connection is assured by DPI application */
+ 	IPS_DPI_ALLOWED_BIT = 15,
+ 	IPS_DPI_ALLOWED = (1 << IPS_DPI_ALLOWED_BIT),
++    IPS_DROP_CONN_BIT = 15,
++    IPS_DROP_CONN = (1 << IPS_DROP_CONN_BIT),
+ #endif
+ 	/* Trigger, not included in offical kernel.
+ 	* Make sure bit number is not overlapped with anyone above.
+@@ -130,6 +132,7 @@ enum ip_conntrack_events {
+ 	IPCT_NATSEQADJ = IPCT_SEQADJ,
+ 	IPCT_SECMARK,		/* new security mark has been set */
+ 	IPCT_LABEL,		/* new connlabel has been set */
++    IPCT_DROP,      /* dropping packets enabled on this connection */
+ };
+ 
+ enum ip_conntrack_expect_events {
+--- a/include/net/netfilter/nf_conntrack.h	2017-03-23 12:19:34.359837322 +0530
++++ b/include/net/netfilter/nf_conntrack.h	2017-03-23 12:20:57.477373116 +0530
+@@ -304,6 +304,7 @@ static inline bool nf_is_loopback_packet
+ struct kernel_param;
+ 
+ #if defined(CONFIG_CPE_FAST_PATH)
++extern int nf_conntrack_set_drop_enable_report(struct sk_buff *skb);
+ extern int nf_conntrack_set_dpi_allow_report(struct sk_buff *skb);
+ extern int nf_conntrack_set_dpi_allow_and_mark(struct sk_buff *skb, int mark);
+ #endif
+--- a/net/netfilter/nf_conntrack_core.c	2017-03-23 12:22:06.591911227 +0530
++++ b/net/netfilter/nf_conntrack_core.c	2017-03-23 12:24:28.646899403 +0530
+@@ -1587,6 +1587,24 @@ void *nf_ct_alloc_hashtable(unsigned int
+ EXPORT_SYMBOL_GPL(nf_ct_alloc_hashtable);
+ 
+ #ifdef CONFIG_CPE_FAST_PATH
++int nf_conntrack_set_drop_enable_report(struct sk_buff *skb)
++{
++    int err = 0;
++    struct nf_conn *ct = (struct nf_conn *)skb->nfct;
++
++    nf_conntrack_get(skb->nfct);
++    
++    set_bit(IPS_DROP_CONN_BIT, &ct->status);
++    
++    nf_conntrack_event_cache(IPCT_DROP, ct);
++    
++    nf_conntrack_put(skb->nfct);
++    
++    return err;
++}
++
++EXPORT_SYMBOL(nf_conntrack_set_drop_enable_report);
++
+ int nf_conntrack_set_dpi_allow_report(struct sk_buff *skb)
+ {
+ 	int err = 0;

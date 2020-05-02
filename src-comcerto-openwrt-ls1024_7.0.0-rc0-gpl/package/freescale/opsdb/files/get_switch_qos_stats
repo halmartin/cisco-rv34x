@@ -1,0 +1,185 @@
+#!/bin/sh
+
+SWITCH_QOS_STATS_FILE="/tmp/stats/switch_qos_stats"
+TMP_STATS_FILE="/tmp/stats/tmp_sw_qos_stats_port"
+
+pid=`uci get systeminfo.sysinfo.pid` >/dev/null 2>&1
+pid=${pid%%-*}
+
+rm -f $SWITCH_QOS_STATS_FILE
+touch $SWITCH_QOS_STATS_FILE
+
+case $pid in
+	*260*)
+		ports="0 1 2 3 4 5 6 7"
+		/usr/sbin/bcmssdk -R 1 -q 1
+		sleep 3
+	;;
+	*160*)
+		ports="0 1 2 3"
+		/usr/sbin/bcmssdk -R 1 -q 1
+		sleep 2
+	;;
+       *345*)
+                ports="0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15"
+
+                for j in $ports
+                do
+                rm -f "$TMP_STATS_FILE$j"
+                touch "$TMP_STATS_FILE$j"
+                rtkssdk_diag -S 1 -p $j -g 1
+                done
+        ;;
+        *340*)
+                ports="1 2 3 4"
+        ;;
+
+esac
+
+for i in $ports 
+do
+	LANPORT=$i
+	j=$i
+
+	case $pid in
+                *340*)
+                        x=$(rtkssdk port_stats -p $i -g 1)
+                ;;
+                *345*)
+                        STATS_FILE="$TMP_STATS_FILE$i"
+                        x=$(cat $STATS_FILE)
+                ;;
+		*160* | *260*)
+			STATS_FILE="$TMP_STATS_FILE$i"
+			x=$(cat $STATS_FILE)
+		;;
+
+		
+        esac
+
+
+	local oIFS="$IFS"; IFS=","
+	set $x
+	IFS="$oIFS"
+	QUEUE1=$1;QUEUE2=$2;
+	QUEUE3=$3;QUEUE4=$4;
+
+	case $pid in
+        *340*)
+                case $LANPORT in
+                        1)
+                                LANPORT="LAN4"
+                        ;;
+                        2)
+                                LANPORT="LAN3"
+                        ;;
+                        3)
+                                LANPORT="LAN2"
+                        ;;
+                        4)
+                                LANPORT="LAN1"
+                        ;;
+                esac
+        ;;
+
+       *345*)
+                case $LANPORT in
+                        0)
+                                LANPORT="LAN9"
+                        ;;
+                        1)
+                                LANPORT="LAN1"
+                        ;;
+                        2)
+                                LANPORT="LAN10"
+                        ;;
+                        3)
+                                LANPORT="LAN2"
+                        ;;
+                        4)
+                                LANPORT="LAN11"
+                        ;;
+                        5)
+                                LANPORT="LAN3"
+                        ;;
+                        6)
+                                LANPORT="LAN12"
+                        ;;
+                        7)
+                                LANPORT="LAN4"
+                        ;;
+                        8)
+                                LANPORT="LAN13"
+                        ;;
+                        9)
+                                LANPORT="LAN5"
+                        ;;
+                        10)
+                                LANPORT="LAN14"
+                        ;;
+                       11)
+                                LANPORT="LAN6"
+                        ;;
+                        12)
+                                LANPORT="LAN15"
+                        ;;
+                        13)
+                                LANPORT="LAN7"
+                        ;;
+                        14)
+                                LANPORT="LAN16"
+                        ;;
+                        15)
+                                LANPORT="LAN8"
+                        ;;
+                esac
+        ;;
+
+	*160*) 
+		case $LANPORT in
+			0)
+				LANPORT="LAN4"
+			;;
+			1)
+				LANPORT="LAN3"
+			;;
+			2)
+				LANPORT="LAN2"
+			;;
+			3)
+				LANPORT="LAN1"
+			;;
+		esac
+	;;
+	*260*)
+		case $LANPORT in
+			0)
+				LANPORT="LAN1"
+			;;
+			1)
+				LANPORT="LAN2"
+			;;
+			2)
+				LANPORT="LAN3"
+			;;
+			3)
+				LANPORT="LAN4"
+			;;
+			4)
+				LANPORT="LAN5"
+			;;
+			5)
+				LANPORT="LAN6"
+			;;
+			6)
+				LANPORT="LAN7"
+			;;
+			7)
+				LANPORT="LAN8"
+			;;
+		esac
+	;;
+	esac
+
+	echo $LANPORT,$QUEUE1,$QUEUE2,$QUEUE3,$QUEUE4,0,0,0,0,>> $SWITCH_QOS_STATS_FILE
+done

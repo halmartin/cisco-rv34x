@@ -1,0 +1,69 @@
+From a2a04328b92178bcda565a8a73b2c87e2a2d2c2e Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Mon, 24 Aug 2015 10:59:11 +0530
+Subject: [PATCH 14/60] SBR-41 Addressed Review Inputs on boardinfo.c
+ Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+
+Alligned MAC addresses to 8 bytes boundary for Linux reads (dd, hexdump)
+---
+ commands/boardinfo.c | 23 +++++++++++++++++++----
+ 1 file changed, 19 insertions(+), 4 deletions(-)
+
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+index 249ef62..4373863 100644
+--- a/commands/boardinfo.c
++++ b/commands/boardinfo.c
+@@ -52,7 +52,7 @@ typedef struct c2krv340_board_info {
+   char pid[12];             /* Product ID */
+   char vid[4];              /* H/W Version */
+   char s_n[12];             /* Board Serial Number */
+-  unsigned char mac[3][6];  /* MAC Information */
++  unsigned char mac[3][8]  __attribute__ ((aligned (8)));  /* MAC Information */
+ } c2krv340;
+ 
+ 
+@@ -81,7 +81,12 @@ static int command_boardinfo_mac(int argc, char *argv[])
+   }
+ 
+   memset((char *)board_data, 0x00, sizeof(c2krv340));
+-  n_read = read(fd, (char *)board_data, sizeof(c2krv340));
++  if ( (n_read = read(fd, (char *)board_data, sizeof(c2krv340))) < 0 )
++  {
++    printf("Read Error %d! : %s\n", errno, errno_str());
++    close(fd);
++    return COMMAND_ERROR;
++  }
+   close(fd);
+   flush(stdout);
+ 
+@@ -242,7 +247,12 @@ static int command_boardinfo_update(int argc, char *argv[])
+     return COMMAND_ERROR;
+   }
+   printf("\nOpened file %s for WRITTING...\n", filename);
+-  n_written = write(fd, (char *)&board_data, sizeof(board_data));
++  if ( (n_written = write(fd, (char *)&board_data, sizeof(board_data))) < 0 )
++  {
++    printf("Write Error %d! : %s\n", errno, errno_str());
++    close(fd);
++    return COMMAND_ERROR;
++  }
+   printf("\n Wrote %d bytes out of %d input bytes\n", n_written, (int)sizeof(board_data));
+   close(fd);
+   printf("\n");
+@@ -271,7 +281,12 @@ static int command_boardinfo_show(int argc, char *argv[])
+   }
+ 
+   memset((char *)board_data, 0x00, sizeof(c2krv340));
+-  n_read = read(fd, (char *)board_data, sizeof(c2krv340));
++  if ( (n_read = read(fd, (char *)board_data, sizeof(c2krv340))) < 0 )
++  {
++    printf("Read Error %d! : %s\n", errno, errno_str());
++    close(fd);
++    return COMMAND_ERROR;
++  }
+   printf("Read %d bytes out of %d bytes\n", n_read, sizeof(c2krv340));
+   close(fd);
+   flush(stdout);
+-- 
+2.7.4
+

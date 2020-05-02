@@ -1,0 +1,19 @@
+# 2017-05-11: li.zhang <li.zhang@deltaww.com>
+# fix bug72144 the huawei e161 will cause system crashed and reboot
+--- linux-4.1.8/drivers/usb/dwc_otg/dwc_otg_hcd_intr.c.bak	2017-05-04 10:55:00.109420830 +0800
++++ linux-4.1.8/drivers/usb/dwc_otg/dwc_otg_hcd_intr.c	2017-05-10 17:26:34.870671450 +0800
+@@ -1989,6 +1989,14 @@
+ 	} else {
+ 		DWC_PRINTF("NYET/NAK/ACK/other in non-error case, 0x%08x\n",
+ 			   hcint.d32);
++error:
++		/* Failthrough: use 3-strikes rule */
++		qtd->error_count++;
++		update_urb_state_xfer_intr(hc, hc_regs,
++					  qtd->urb, qtd,
++					  DWC_OTG_HC_XFER_XACT_ERR);
++		dwc_otg_hcd_save_data_toggle(hc, hc_regs, qtd);
++		halt_channel(hcd, hc, qtd,DWC_OTG_HC_XFER_XACT_ERR);
+ 	}
+ }
+ 

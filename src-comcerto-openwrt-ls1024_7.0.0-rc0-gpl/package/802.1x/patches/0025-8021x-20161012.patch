@@ -1,0 +1,43 @@
+diff -aur a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2016-10-12 03:28:29.724145938 +0530
++++ b/src/source/rtdot1x.c	2016-10-12 03:29:25.416147297 +0530
+@@ -828,6 +828,7 @@
+ 	struct rtapd_config *newconf;
+ 	int i;
+ 	struct sta_info *sta;
++	u8	GroupMac[6] = {0x01, 0x80, 0xc2, 0x00, 0x00, 0x03};
+ 
+ 	DBGPRINT(RT_DEBUG_TRACE,"Handle_usr1: Reloading RADIUS Configuration\n");
+ 	for (i = 0; i < rtapds->count; i++)
+@@ -865,16 +866,24 @@
+ 			DBGPRINT(RT_DEBUG_TRACE, "auth_serv_sock[%d] = %d\n", i, rtapd->radius->mbss_auth_serv_sock[i]);
+ #else
+ 	        DBGPRINT(RT_DEBUG_TRACE,"rtapd->radius->auth_serv_sock = %d\n",rtapd->radius->auth_serv_sock);
+-
+-        	sta = rtapd->sta_list;
++       		sta = rtapd->sta_list;
+ 		while (sta)
+ 		{
+-			if(sta->eapol_sm && (sta->eapol_sm->portControl == 2))
++			if(sta->eapol_sm && (sta->eapol_sm->portControl == 2) && (memcmp(sta->addr, GroupMac, 6)))
+ 			{
+-				sta->eapol_sm->auth_pae.reAuthCount = 0;
+-				sta->eapol_sm->reAuthenticate = TRUE;
+-				eapol_sm_step(sta->eapol_sm);
+-				DBGPRINT(RT_DEBUG_TRACE,"Set Port(%d) to Re-Authention, State (%d)\n", sta->aid, sta->eapol_sm->auth_pae.state);
++				if (newconf->auth_server && newconf->auth_server->port == 9001)
++				{
++					sta->eapol_sm->auth_pae.eapLogoff = TRUE;
++					eapol_sm_step(sta->eapol_sm);
++					DBGPRINT(RT_DEBUG_TRACE,"Set Port(%d) to LOGOFF, State (%d)\n", sta->aid, sta->eapol_sm->auth_pae.state);
++				}
++				else
++				{
++					sta->eapol_sm->auth_pae.reAuthCount = 0;
++					sta->eapol_sm->reAuthenticate = TRUE;
++					eapol_sm_step(sta->eapol_sm);
++					DBGPRINT(RT_DEBUG_TRACE,"Set Port(%d) to RE-AUTHENTICATION, State (%d)\n", sta->aid, sta->eapol_sm->auth_pae.state);
++				}
+ 			}
+ 			sta = sta->next;
+ 		}

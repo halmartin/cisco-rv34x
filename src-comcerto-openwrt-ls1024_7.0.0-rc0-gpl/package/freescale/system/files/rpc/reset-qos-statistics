@@ -1,0 +1,35 @@
+#!/bin/sh
+. /lib/config/uci.sh
+
+errcode=1
+errstring="Invalid Arguments"
+QOS_STATS_FILE="/tmp/stats/qosstats"
+
+iface=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "interface-name") {print $(I+1)};}'`
+
+if [ -n "$iface" ];then
+        if [ -e $QOS_STATS_FILE ];then
+                sed -i s/"^qos,$iface,.*"/"qos,$iface,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"/ $QOS_STATS_FILE
+        else                                                                                                                         
+                errcode=0                                                                                                            
+        fi                                       
+        errcode=$?                               
+	
+	# send signal to operdb_stats to clear the saved counters
+	`/usr/bin/sendOpsdbSignal.sh SIGUSR1`
+                         
+        if [ "$errcode" -ne 0 ];then
+                errstring="Counters for Interface are not reset"
+        else                                                    
+                errstring="Counters for Interface are reset"
+		reset_uptime=`cat /proc/uptime | cut -d " " -f 1 | cut -d . -f 1`
+		echo "$reset_uptime" > /tmp/stats/qos_reset_$iface
+        fi                                                      
+fi
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errstring\""
+	exit 1
+else
+	exit 0
+fi

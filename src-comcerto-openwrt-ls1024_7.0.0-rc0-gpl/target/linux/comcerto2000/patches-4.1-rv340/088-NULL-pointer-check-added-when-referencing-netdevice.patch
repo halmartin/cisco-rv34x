@@ -1,0 +1,27 @@
+From 793294475ce792c5dbdf6613112e6e39605bdcc0 Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Tue, 31 Jul 2018 12:14:48 +0530
+Subject: [PATCH] NULL pointer check added when referencing netdevice.
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ net/bridge/br_fdb.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/net/bridge/br_fdb.c b/net/bridge/br_fdb.c
+index ea1ff0e..b07d272 100644
+--- a/net/bridge/br_fdb.c
++++ b/net/bridge/br_fdb.c
+@@ -579,7 +579,8 @@ static int fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
+ 		if (source == p)
+ 			continue;
+ 
+-		dev_uc_add(source->dev, p->dev->dev_addr);
++		if (source)
++			dev_uc_add(source->dev, p->dev->dev_addr);
+ 		dev_uc_add(p->dev, addr);
+ 	}
+ #endif
+-- 
+1.9.1
+

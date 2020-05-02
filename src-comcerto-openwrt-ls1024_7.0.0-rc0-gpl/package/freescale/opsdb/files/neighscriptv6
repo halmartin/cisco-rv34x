@@ -1,0 +1,46 @@
+#!/bin/sh
+NEIGHOUT_V6="/tmp/stats/neighstatsv6"
+pid=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+BRIGE_IFACE="br-wan"
+BRIGE_LAN_IFACE="br-vlan"
+TMP_HOST_NAME=/tmp/tmphost
+case $pid in
+                *340* | *345*)
+                        LANIFACE="eth3"
+                ;;
+                *160* | *260*)
+                        LANIFACE="eth2"
+                ;;
+esac
+rm -rf $NEIGHOUT_V6
+touch $NEIGHOUT_V6
+gethostname()
+{
+	mac="$1"
+	`cut -f1,2,3,4 -d' ' /tmp/dhcp.leases > $TMP_HOST_NAME`
+	host=`cat $TMP_HOST_NAME | grep "$mac" | cut -d " " -f4`
+	if [ -z "$host" ]; then
+		host=`arp -a | grep -iv "<incomplete>" | grep -v "?" | grep -w "$mac" | cut -d " " -f1`
+	fi
+}
+ip -6 neigh show | grep -i "REACHABLE\|DELAY" | grep "$LANIFACE\|$BRIGE_IFACE\|$BRIGE_LAN_IFACE" > /tmp/tmpneighv6
+sed -i "s/  */ /g" /tmp/tmpneighv6 
+while read ip second iface fourth mac six seven
+do
+	tmp=`echo $iface | grep "^${LANIFACE}"` >/dev/null 2>&1
+        if [ -z "$tmp" ]; then
+		iface=`echo $iface | cut -d - -f 2 | sed 's/\_/./g' | awk '{print toupper($0)}' | sed s/WAN[1-9]*/\&-BRIDGE/g`
+        else
+		iface=`uci show network | grep "vlan" | grep "$iface$" | cut -f 2 -d . | awk '{print toupper($0)}'`
+	fi
+	gethostname "$mac"
+	if [ -n "$host" ]; then
+		type=2
+	else
+		type=1
+	fi
+	[ -z "$ip" ] && ip="-"
+	[ -z "$mac" ] && mac="-"
+	[ -z "$host" ] && host="-"
+	`echo "$iface,$host,$ip,$mac,$type," >> $NEIGHOUT_V6`
+done < /tmp/tmpneighv6

@@ -1,0 +1,23 @@
+
+config autoupdate 'autoupdate'
+	option notify_type 'gui'
+	option check_frequency 'monthly'
+
+config firmware 'firmware'
+	option version '0.0.0.1'
+	option update_optiontime '1:00'
+	option update_option 'never'
+	option notify 'true'
+
+config dongle 'dongle'
+	option version '0.0.0.1'
+	option update_optiontime '2:00'
+	option update_option 'never'
+	option notify 'true'
+
+config signature 'signature'
+	option version '0.0.0.1'
+	option update_optiontime '3:00'
+	option update_option 'never'
+	option notify 'true'
+

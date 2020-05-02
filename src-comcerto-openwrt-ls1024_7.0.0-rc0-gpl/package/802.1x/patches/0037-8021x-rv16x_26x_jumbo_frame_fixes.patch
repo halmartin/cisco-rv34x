@@ -1,0 +1,107 @@
+From eaacb9e9487007f3220c583ca1bd7e18f1304c30 Mon Sep 17 00:00:00 2001
+From: Manish Tiwari <manish.tiwari@nxp.com>
+Date: Wed, 31 Jan 2018 10:21:37 +0530
+Subject: [PATCH] PPSBR-1998 and PPSBR-1999 jumbo frame enable/disable fixes
+ checkins Signed-off-by: Manish Tiwari
+ <manish.tiwari@nxp.com>
+
+---
+ src/source/rtdot1x.c |   36 ++++++++++++++++++++++++++++++------
+ 1 file changed, 30 insertions(+), 6 deletions(-)
+
+diff --git a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+index a1b1b62..58b14b3 100644
+--- a/src/source/rtdot1x.c
++++ b/src/source/rtdot1x.c
+@@ -1,4 +1,7 @@
+-
++/* 05/12/2017   Manish <manish.tiwari@nxp.com>
++	Jumbo frames enable/disable fixes checkins
++	Note: Interface will go down when we enable/disable jumbo frame due to PFE limitations.This case handled here.
++*/
+ 
+ #include <net/if_arp.h>
+ #include <netpacket/packet.h>
+@@ -16,6 +19,7 @@
+ #include <stdarg.h>
+ #include <sys/types.h>
+ #include <sys/socket.h>
++#include <errno.h>
+ 
+ #include <linux/if.h>			/* for IFNAMSIZ and co... */
+ #include <linux/wireless.h>
+@@ -222,7 +226,7 @@ static void Handle_reload_config(
+ static void Handle_read(int sock, void *eloop_ctx, void *sock_ctx)
+ {                              
+ 	rtapd *rtapd = eloop_ctx;
+-	int len;
++	int len = -1, errno;
+ 	unsigned char buf[IEEE_8021X_MAX_PKT_SIZE], *pBuf = NULL;
+ 	unsigned short *eth_type_cpu=NULL;
+ 	u8 *sa, *da, *pos, *pos_vlan, apidx=0,pVal=0, isVlanTag=0,portnum, ii;
+@@ -242,8 +246,14 @@ static void Handle_read(int sock, void *eloop_ctx, void *sock_ctx)
+ 	if (len < 0)
+     	{
+ 		perror("recv");
+-        Handle_term(15,eloop_ctx,sock_ctx);
+-        return;
++                DBGPRINT(RT_DEBUG_TRACE, "perror %d (Handle_read sock = %d, len = %d)\n", errno, sock, len);
++		if((errno == ENETDOWN) || (errno == EINVAL))
++		 {
++                        DBGPRINT(RT_DEBUG_TRACE, "ERROR in recv So just return\n");
++                        return;
++                 }
++        	Handle_term(15,eloop_ctx,sock_ctx);
++        	return;
+ 	}
+ 
+ 	pBuf = &buf[0];
+@@ -441,7 +451,7 @@ static void Handle_read(int sock, void *eloop_ctx, void *sock_ctx)
+ static void Handle_Link_Monitor_Events(int sock, void *eloop_ctx, void *sock_ctx)
+ {                              
+ 	rtapd *rtapd = eloop_ctx;
+-	int len;
++	int len, errno;
+ 	unsigned int buf[2];
+         struct sta_info *sta, *free_sta;
+ 	u8	GroupMac[6] = {0x01, 0x80, 0xc2, 0x00, 0x00, 0x03};
+@@ -450,6 +460,14 @@ static void Handle_Link_Monitor_Events(int sock, void *eloop_ctx, void *sock_ctx
+ 	len = recv(sock, buf, sizeof(buf), 0);
+ 	if (len < 0)
+     	{
++		perror("recv"); 
++                DBGPRINT(RT_DEBUG_TRACE, "%s : perror =%d (sock = %d, len = %d)\n", __FUNCTION__, errno, sock, len);
++                if(errno == ENETDOWN || (errno == EINVAL))
++                {
++                        DBGPRINT(RT_DEBUG_TRACE, "Error received So just return\n");
++                        return;
++                }
++
+ 		DBGPRINT(RT_DEBUG_ERROR,"Handle_Link_Monitor_Events: recv failed");
+ 		return;
+ 	}
+@@ -507,7 +525,7 @@ int Apd_init_sockets(rtapd *rtapd)
+ {
+ 	struct ifreq ifr;
+ 	struct sockaddr_ll addr;
+-	int i;
++	int i, errno;
+ 	int s = -1, optval = 1;
+ 	struct sockaddr_in lb_addr;
+ 
+@@ -526,6 +544,12 @@ int Apd_init_sockets(rtapd *rtapd)
+         	else if (rv_prod_type_g  == PROD_TYPE_RV_160 || rv_prod_type_g  == PROD_TYPE_RV_260)
+         	{
+ 			rtapd->eth_sock[i] = socket(PF_PACKET, SOCK_RAW, htons(BCMSWITCH_ETH_TYPE));
++			if(rtapd->eth_sock[i] < 0)
++			{
++				perror("socket");
++	                	DBGPRINT(RT_DEBUG_ERROR,"%s sockets = %d , errno=%d\n", __FUNCTION__, rtapd->eth_sock[i], errno);
++			}
++			
+ 		}
+ 		else
+ 		{
+-- 
+1.7.9.5
+

@@ -1,0 +1,143 @@
+#!/bin/sh
+
+. /etc/boardInfo
+
+CERT_DIR=/etc/ssl/certs
+KEY_DIR=/etc/ssl/private
+CONF_FILE=/etc/ssl/openssl_ss.cnf
+PEM_EXT="pem"
+CERTS_STATS_COMMAND="/usr/bin/certscript"
+
+DEFAULT_CERT="Default"
+cert_name="Default"
+cert_organization_name="Cisco Systems, Inc."
+cert_organization_unit_name="Cisco Small Business"
+cert_valid_duration="10950"
+key_encryption_length="2048"
+cert_common_name=`uci get systeminfo.sysinfo.maclan` >/dev/null 2>&1
+[ -z "$cert_common_name" ] && {
+	cert_common_name="00:00:00:00:00:00"
+}
+
+
+generate_default_certificate() {
+	# Generate Key without password
+        `openssl genrsa -out $KEY_DIR/$cert_name.$PEM_EXT $key_encryption_length >/dev/null 2>&1`
+
+	# Generate Self Signed Certificate
+        `openssl req -new -x509 -config $CONF_FILE -days $cert_valid_duration -key $KEY_DIR/$cert_name.$PEM_EXT -out $CERT_DIR/$cert_name.$PEM_EXT -subj "/O=$cert_organization_name/OU=$cert_organization_unit_name/CN=$cert_common_name" >/dev/null 2>&1`
+
+	# Add uci section for this
+	`uci set certificate.$cert_name=generated_certificate`
+#	`uci set certificate.$cert_name.valid_duration=$valid_duration`
+	`uci set certificate.$cert_name.type=0`
+	`uci set certificate.$cert_name.cert_name=$cert_name`
+	`uci set certificate.$cert_name.sub_organization_name="$cert_organization_name"`
+	`uci set certificate.$cert_name.sub_organization_unit_name="$cert_organization_unit_name"`
+	`uci set certificate.$cert_name.sub_common_name="$cert_common_name"`
+	`uci set certificate.$cert_name.key_encryption=$key_encryption_length`			
+	`uci set certificate.$cert_name.signed_by=1`
+        `uci set certificate.$cert_name.signed_by_str="Self Signed"`
+        `uci set certificate.$cert_name.issuer_common_name="Self Signed"`
+        `uci set certificate.$cert_name.useby=-`
+        `uci set certificate.$cert_name.source=1`                                                                         
+        `uci set certificate.$cert_name.has_private_key=1`
+        `uci set certificate.$cert_name.allow_export=1`
+	
+	# update the subject
+	COMMA_SUBJECT=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -subject -nameopt RFC2253 | cut -d " " -f 2-`				
+	if [ -n "$COMMA_SUBJECT" ];then
+		`uci set certificate.$cert_name.subject="$COMMA_SUBJECT"`
+	else
+		`uci set certificate.$cert_name.subject=-`
+	fi
+
+	# add duration value to show in GUI.
+	`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -startdate| cut -d= -f2 > /tmp/tmpCertStartTime`
+	`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -enddate| cut -d= -f2 > /tmp/tmpCertEndTime`
+	`sed -i "s/  */ /g" /tmp/tmpCertStartTime`
+	`sed -i "s/  */ /g" /tmp/tmpCertEndTime`
+	while read mon day time year
+	do
+		year=`echo $year | cut -d ' ' -f 1`
+		case "$mon" in
+			Jan) mon=01 ;;
+			Feb) mon=02 ;;
+			Mar) mon=03 ;;
+			Apr) mon=04 ;;
+			May) mon=05 ;;
+			Jun) mon=06 ;;
+			Jul) mon=07 ;;
+			Aug) mon=08 ;;
+			Sep) mon=09 ;;
+			Oct) mon=10 ;;
+			Nov) mon=11 ;;
+			Dec) mon=12 ;;
+		esac
+		day_len=`echo $day| wc -c`
+		if [ "$day_len" = 2 ];then
+			day=0$day
+		fi
+		start_time="$year-$mon-$day"
+	done < /tmp/tmpCertStartTime
+	
+	while read mon day time year
+	do
+		year=`echo $year | cut -d ' ' -f 1`
+		case "$mon" in
+			Jan) mon=01 ;;
+			Feb) mon=02 ;;
+			Mar) mon=03 ;;
+			Apr) mon=04 ;;
+			May) mon=05 ;;
+			Jun) mon=06 ;;
+			Jul) mon=07 ;;
+			Aug) mon=08 ;;
+			Sep) mon=09 ;;
+			Oct) mon=10 ;;
+			Nov) mon=11 ;;
+			Dec) mon=12 ;;
+		esac
+		day_len=`echo $day| wc -c`
+		if [ "$day_len" = 2 ];then
+			day=0$day
+		fi
+		end_time="$year-$mon-$day"
+	done < /tmp/tmpCertEndTime
+		
+	`uci set certificate.$cert_name.duration="From $start_time To $end_time"`
+	rm -rf /tmp/tmpCertEndTime
+	rm -rf /tmp/tmpCertStartTime
+	
+	uci commit certificate
+	cp -f $TMP_CERT_FILE $MNT_CERT_FILE
+}
+
+check_default_cert () {
+	tmp=`uci get certificate.Default.cert_name` >/dev/null 2>&1
+	[ -z "$tmp" ] && {
+		return 1
+	}
+	tmp1=`uci get certificate.Default.key_encryption` >/dev/null 2>&1
+	if [ "$tmp1" = 1024 ] || [ "$tmp1" = "$key_encryption_length" ] ;then
+	{
+		# Delete the existing certificate
+		/usr/bin/delete_certificates delete_only_default_certificate
+		return 1
+	}
+	fi
+	return 0
+}
+
+check_default_cert
+
+temp=$?
+
+# Generate the default certificate
+if [ "$temp" = 1 ];then
+	generate_default_certificate
+	$CERTS_STATS_COMMAND add $DEFAULT_CERT
+	echo $DEFAULT_CERT
+else
+	echo $DEFAULT_CERT
+fi

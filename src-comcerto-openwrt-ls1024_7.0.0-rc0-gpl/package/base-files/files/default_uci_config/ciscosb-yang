@@ -1,0 +1,11 @@
+
+config model 'image1'
+	option version '1.0.1'
+
+config datastore 'startup'
+	option version '1.0.1'
+
+config datastore 'backup'
+
+config datastore 'mirror'
+

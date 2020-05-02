@@ -1,0 +1,32 @@
+--- a/src/pam_radius_auth.c	2017-11-09 14:59:22.930632738 +0530
++++ b/src/pam_radius_auth.c	2017-11-09 15:21:54.643846144 +0530
+@@ -422,8 +422,27 @@ static int pam_radius_extract_radresp_at
+    /*if group is not configured in server set the group  to default group*/
+    if (flag == FALSE)
+    {
+-     pam_set_data( pamh, "groupattr0", strdup("default") , _int_free );
+-     return (-1);
++        char cmd[48]={'\0'};
++        char default_group[32]={'\0'};
++        FILE *fp=NULL;
++        char *group=NULL;
++
++        sprintf(cmd,"uci get aaa.aaa_0.default_group");
++        fp=popen(cmd,"r");
++        if(fgets(default_group, sizeof(default_group), fp) == NULL)
++        {
++            printf("fgets failed\n");
++            pclose(fp);
++        }
++		else
++		{
++        default_group[strlen(default_group)-1]='\0';
++        pclose(fp);
++
++        group=strdup(default_group);
++     	pam_set_data( pamh, "groupattr0", group , _int_free );
++		}
++     return -1;
+    }
+    return flag;
+ }

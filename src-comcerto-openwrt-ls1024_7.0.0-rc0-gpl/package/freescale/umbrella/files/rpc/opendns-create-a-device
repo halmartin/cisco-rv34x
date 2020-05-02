@@ -1,0 +1,131 @@
+#!/bin/sh
+
+. /usr/share/libubox/jshn.sh
+
+DEVICE_ID_FILE=/mnt/configcert/umbrella/device-id
+RPC_OUTPUT=/tmp/odns_device_output
+RPC_DEBUG=/tmp/odns_debug_output
+CURL="/usr/bin/curl"
+
+#logger -t rpc-testing "Called $0 with args: $@"
+
+key=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "key") {print $(I+1)};}'`
+secret=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "secret") {print $(I+1)};}'`
+ca=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "ca") {print $(I+1)};}'`
+
+org_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "organization-id") {print $(I+1)};}'`
+origin_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "origin-id") {print $(I+1)};}'`
+
+DEV_NAME=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "name") {print $(I+1)};}'`
+DEV_TAG=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "tag") {print $(I+1)};}'`
+SERIAL_NUM=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "serial-number") {print $(I+1)};}'`
+MAC_ADDRESS=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "mac-address") {print $(I+1)};}'`
+MODEL=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "model") {print $(I+1)};}'`
+
+#Error Codes
+ODNS_SUCCESS=0
+ODNS_FAILURE=1
+errcode=$ODNS_SUCCESS
+
+#clear the old contents of the debug file
+echo -n "" > $RPC_DEBUG
+echo "$0: $key secret=$secret ca=$ca orgid=$org_id originid=$origin_id" > $RPC_DEBUG
+echo no. of arguments: $(( $#/2 )) >> $RPC_DEBUG
+
+#validating the input arguments
+if [ -z $org_id ];then
+    echo "not-ok __BEGIN error-code 1 error-message \"organization-id is missing\" not-ok __END"
+    exit 0
+elif [ -z $key ] || [ -z $secret ];then
+    echo "not-ok __BEGIN error-code 1 error-message \"key or secret is missing\" not-ok __END"
+    exit 0
+fi
+
+
+#Athentication Credentials
+KEY="$key:$secret"
+URL="https://management.api.umbrella.com/v1/organizations/$org_id"
+CONTENT_TYPE="Content-Type: application/json"
+
+#Get macaddr, model, serialnum is not passed in input args then get them from uci
+if [ -z $MAC_ADDR ];then
+    uci get systeminfo.sysinfo.macwan1 > /tmp/macaddr
+    sed -i "s/://g" /tmp/macaddr
+    MAC_ADDR=$(cat /tmp/macaddr)
+fi
+
+if [ -z $MODEL ];then
+    MODEL=$(uci get systeminfo.sysinfo.pid)
+fi
+
+if [ -z $SERIAL_NUM ];then
+    SERIAL_NUM=$(uci get systeminfo.sysinfo.serial_number)
+fi
+
+# Data to be passed to rest APIs
+DATA="{\"model\":\""$MODEL"\",\"macAddress\":\""$MAC_ADDR"\",\"name\":\""$DEV_NAME"\",\"serialNumber\":\""$SERIAL_NUM"\"}"
+echo $DATA >> $RPC_DEBUG
+
+create_a_device ()
+{
+	isFailure=$(cat $RPC_OUTPUT | grep error)
+	isAuthFailure=$(cat $RPC_OUTPUT | grep message)
+
+	if [ -n "$isAuthFailure" ]
+	then
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_get_var message message
+		echo "not-ok __BEGIN error-code 403 error-message \"$message\" not-ok __END"
+	elif [ -n "$isFailure" ]
+	then
+		#Failure case
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		#json_get_keys __keys
+		#echo "keys: $__keys"
+
+		json_get_var statusCode statusCode
+		json_get_var error error
+		json_get_var txId txId
+
+		echo "not-ok __BEGIN error-code $statusCode error-message \"$error\" tx-id \"$txId\" not-ok __END"
+	else
+		echo "success-code 201"
+
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_get_var deviceId deviceId
+		json_get_var deviceKey deviceKey
+		json_get_var name name
+		json_get_var serialNumber serialNumber
+		json_get_var createdAt createdAt
+		json_get_var originId originId
+		json_get_var organizationId organizationId
+
+		echo "device __BEGIN origin-id $originId device-id \"$deviceId\" device-key \"$deviceKey\" name \"$name\" serial-number \"$serialNumber\" created-at \"$createdAt\" organization-id \"$organizationId\" device __END"
+                #update device id in device-id file
+                echo $deviceId > $DEVICE_ID_FILE
+	fi
+}
+
+# Register a device to an organization identified by #org_id.
+$CURL $URL/networkdevices -X POST --user $KEY --header "Content-Type: application/json" --data $DATA -k 2>/dev/null > $RPC_OUTPUT
+[ "$?" != "0" ] && {
+  echo "not-ok __BEGIN error-code 1 error-message \"Network Error\" not-ok __END"
+  exit 0
+}
+
+#calling custom function
+
+create_a_device
+exit 0

@@ -1,0 +1,47 @@
+From 34d3b4416abb5228c3a7f67ef9efb1e9a614a3ec Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Mon, 16 Apr 2018 14:34:12 +0530
+Subject: [PATCH] PPSBR-1240 Enhanced get_if_index() function towork with PPP
+ interfaces
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ mcproxy/src/proxy/interfaces.cpp | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/mcproxy/src/proxy/interfaces.cpp b/mcproxy/src/proxy/interfaces.cpp
+index 093ad97..52c954a 100644
+--- a/mcproxy/src/proxy/interfaces.cpp
++++ b/mcproxy/src/proxy/interfaces.cpp
+@@ -16,6 +16,10 @@
+  * written by Sebastian Woelke, in cooperation with:
+  * INET group, Hamburg University of Applied Sciences,
+  * Website: http://mcproxy.realmv6.org/
++ *
++ *
++ * 16/4/2018	chaitanya.sakinam@nxp.com	 Enhanced get_if_index() to work with PPP interfaces
++ *
+  */
+ 
+ 
+@@ -200,6 +204,7 @@ unsigned int interfaces::get_if_index(const addr_storage& saddr) const
+ 
+     addr_storage recv_subnet;
+     addr_storage src_subnet;
++    addr_storage ppp_subnet;
+ 
+     const if_prop_map* prop_map;
+ 
+@@ -210,7 +215,8 @@ unsigned int interfaces::get_if_index(const addr_storage& saddr) const
+                 recv_subnet = *e.second.ip4_addr->ifa_netmask;
+                 src_subnet = *e.second.ip4_addr->ifa_addr;
+                 src_subnet.mask_ipv4(recv_subnet);
+-                if (src_subnet == recv_subnet.mask_ipv4(saddr)) {
++                ppp_subnet = *e.second.ip4_addr->ifa_ifu.ifu_dstaddr;
++                if (src_subnet == recv_subnet.mask_ipv4(saddr) || ((e.second.ip4_addr->ifa_flags & IFF_POINTOPOINT) && (ppp_subnet == saddr))) {
+                     return get_if_index(e.second.ip4_addr->ifa_name);
+                 }
+             }
+-- 
+1.9.1
+

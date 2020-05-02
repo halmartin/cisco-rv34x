@@ -1,0 +1,229 @@
+#!/bin/sh /etc/rc.common
+
+START=47
+STOP=47
+
+board=$__this_device
+start() {
+        local status
+
+	if [ "$board" = "RV160" -o "$board" = "RV160W" ]; then
+ 	 [ -x "/usr/bin/rtdot1xd" ] && {
+                status=$(uci get switch.dot1x_status.global_status)
+                #It is expected that Administrator enables 802.1x explicitely from UI
+                if [ $status = "enable" ]
+                then
+                {
+                	#Call switch command to set CPUTAG TRAPPING for 802.1x frames
+                	/usr/sbin/bcmssdk -F 1 -d 1
+
+                	#Create stats files for monitoring dot1x state
+                	ports='0 1 2 3'
+                	for p in $ports;do
+                        	touch /tmp/stats/dot1x_port$p
+                	done
+
+                	#Start the daemon
+                	/usr/bin/rtdot1xd -d 5
+                }
+                fi
+        }
+	elif [ "$board" = "RV260" -o "$board" = "RV260W" -o "$board" = "RV260P" ]; then
+	 [ -x "/usr/bin/rtdot1xd" ] && {
+                status=$(uci get switch.dot1x_status.global_status)
+                #It is expected that Administrator enables 802.1x explicitely from UI
+                if [ $status = "enable" ]
+                then
+                {
+                	#Call switch command to set CPUTAG TRAPPING for 802.1x frames
+                	/usr/sbin/bcmssdk -F 1 -d 1
+
+                	#Create stats files for monitoring dot1x state
+                	ports='0 1 2 3 4 5 6 7'
+                	for p in $ports;do
+                        	touch /tmp/stats/dot1x_port$p
+                	done
+
+                	#Start the daemon
+                	/usr/bin/rtdot1xd -d 5
+                }
+                fi
+        }
+
+	elif [ "$board" = "RV340" -o "$board" = "RV340W" ]; then
+        [ -x "/usr/bin/rtdot1xd" ] && {
+                status=$(uci get switch.dot1x_status.state)
+                #It is expected that Administrator enables 802.1x explicitely from UI
+                if [ $status = "enable" ]
+                then
+                {
+                #Call switch command to set CPUTAG TRAPPING for 802.1x frames
+                /usr/sbin/rtkssdk feature dot1x enable
+
+                #Create stats files for monitoring dot1x state
+                ports='1 2 3 4'
+		for p in $ports;do
+		touch /tmp/stats/dot1x_port$p
+		done
+
+		#Start the daemon
+                /usr/bin/rtdot1xd -d 2
+                /usr/sbin/swlinkmon &
+                }
+                fi
+        }
+	elif [ "$board" = "RV345" -o "$board" = "RV345P" ]; then
+	[ -x "/usr/bin/rtdot1xd" ] && {
+                status=$(uci get switch.dot1x_status.state)
+                #It is expected that Administrator enables 802.1x explicitely from UI
+                if [ $status = "enable" ]
+                then
+                {
+                #Call switch command to set CPUTAG TRAPPING for 802.1x frames
+                /usr/sbin/rtkssdk_diag -F 1 -d 1
+
+                #Create stats files for monitoring dot1x state
+                ports='0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15'
+                for p in $ports;do
+                touch /tmp/stats/dot1x_port$p
+                done
+
+                #Start the daemon
+                /usr/bin/rtdot1xd -d 2
+                }
+                fi
+        }
+	fi
+}
+stop() {
+
+	if [ "$board" = "RV160" -o "$board" = "RV160W" ]; then
+	[ -x "/usr/bin/rtdot1xd" ] && {
+		#Call switch command to reset CPUTAG TRAPPING for 802.1x frames
+		/usr/sbin/bcmssdk -F 1 -d 0
+
+		#Stop the daemon if exists
+		local z=""
+		z=$(pgrep rtdot1xd)
+
+		if [ -n "$z" ]
+		then
+		killall rtdot1xd
+
+		#Removing dot1x stats files
+		rm -rf /tmp/stats/dot1x_port*
+		
+		#Authorizing all ports 
+		ports='0 1 2 3'
+		for p in $ports;do
+			/usr/sbin/bcmssdk -D 1 -p $p -a 1
+		done
+		fi
+	}
+	elif [ "$board" = "RV260" -o "$board" = "RV260W" -o "$board" = "RV260P" ]; then
+	[ -x "/usr/bin/rtdot1xd" ] && {
+                #Call switch command to reset CPUTAG TRAPPING for 802.1x frames
+                /usr/sbin/bcmssdk -F 1 -d 0
+
+                #Stop the daemon if exists
+                local z=""
+                z=$(pgrep rtdot1xd)
+
+                if [ -n "$z" ]
+                then
+                killall rtdot1xd
+
+                #Removing dot1x stats files
+                rm -rf /tmp/stats/dot1x_port*
+
+                #Authorizing all ports 
+                ports='0 1 2 3 4 5 6 7'
+                for p in $ports;do
+                        /usr/sbin/bcmssdk -D 1 -p $p -a 1
+                done
+                fi
+        }
+	elif [ "$board" = "RV340" -o "$board" = "RV340W" ]; then
+        [ -x "/usr/bin/rtdot1xd" ] && {
+                #Call switch command to reset CPUTAG TRAPPING for 802.1x frames
+                /usr/sbin/rtkssdk feature dot1x disable
+                
+                #Stop the daemon if exists
+                local z=""
+                z=$(pgrep rtdot1xd)
+                
+                if [ -n "$z" ]
+                then
+                killall -9 swlinkmon
+                killall rtdot1xd
+
+		#Removing dot1x stats files
+             	rm -rf /tmp/stats/dot1x_port*
+               
+                #Authorizing all ports 
+                ports='1 2 3 4'
+                for p in $ports;do
+                rtkssdk dot1x -p $p -a 1
+                done
+                fi
+        }
+	elif [ "$board" = "RV345" -o "$board" = "RV345P" ]; then
+	[ -x "/usr/bin/rtdot1xd" ] && {
+                #Call switch command to reset CPUTAG TRAPPING for 802.1x frames
+                /usr/sbin/rtkssdk_diag -F 1 -d 0
+
+                #Stop the daemon if exists
+                local z=""
+                z=$(pgrep rtdot1xd)
+
+                if [ -n "$z" ]
+                then
+                killall rtdot1xd
+
+                #Removing dot1x stats files
+                rm -rf /tmp/stats/dot1x_port*
+
+                #Authorizing all ports 
+                ports='0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15'
+                for p in $ports;do
+                rtkssdk_diag -D -p $p -a 1
+                done
+                fi
+        }
+	fi
+	rm  /tmp/stats/Dot1xPortStatus
+}
+
+reload() {
+	local pid
+	if [ "$board" = "RV160" -o "$board" = "RV160W" ]; then
+	[ -x "/usr/bin/rtdot1xd" ] && {
+		pid=$(pgrep rtdot1xd)                                                                           
+		if [ -n "$pid" ]; then                                                                                     
+			`kill -SIGUSR2 $pid`                                     
+		fi                                       
+        }
+
+	elif [ "$board" = "RV260" -o "$board" = "RV260W" -o "$board" = "RV260P" ]; then
+	 [ -x "/usr/bin/rtdot1xd" ] && {
+		pid=$(pgrep rtdot1xd)                                                                           
+		if [ -n "$pid" ]; then                                                                                     
+			`kill -SIGUSR2 $pid`                                     
+		fi                                       
+        }       
+	elif [ "$board" = "RV340" -o "$board" = "RV340W" ]; then
+	[ -x "/usr/bin/rtdot1xd" ] && {
+		pid=$(pgrep rtdot1xd)                                                                           
+		if [ -n "$pid" ]; then                                                                                     
+			`kill -SIGUSR2 $pid`                                     
+		fi                                       
+        }	
+	elif [ "$board" = "RV345" -o "$board" = "RV345P" ]; then
+	[ -x "/usr/bin/rtdot1xd" ] && {
+        	pid=$(pgrep rtdot1xd)
+		if [ -n "$pid" ]; then
+			`kill -SIGUSR2 $pid`
+		fi
+        }
+	fi
+}

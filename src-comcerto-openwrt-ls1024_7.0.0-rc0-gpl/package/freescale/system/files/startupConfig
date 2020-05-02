@@ -1,0 +1,51 @@
+#!/bin/sh /etc/rc.common
+
+START=20
+
+CONFIG_SCRIPT="config_mgmt.sh"
+filePathUSB1=
+filePathUSB2=
+USB1PATH="/media/USB/USB1"
+USB2PATH="/media/USB/USB2"
+
+PID=`uci get systeminfo.sysinfo.pid`
+SN=`uci get systeminfo.sysinfo.serial_number`
+MAC=`uci get systeminfo.sysinfo.maclan`
+EXT="cfg"
+
+start () {
+
+	# Check if usb1 is mounted
+	if [ -d "$USB1PATH" ];then
+		filePathUSB1=`find $USB1PATH/ -name  $PID"-"$MAC"-"$SN"."$EXT | head -n 1`
+		[ -z "$filePathUSB1" ] && {
+			filePathUSB1=`find $USB1PATH/ -name  $PID"-"$SN"."$EXT | head -n 1`
+			[ -z "$filePathUSB1" ] && {
+				filePathUSB1=`find $USB1PATH/ -name  $PID"-"$MAC"."$EXT | head -n 1`
+				[ -z "$filePathUSB1" ] && {
+					filePathUSB1=`find $USB1PATH/ -name  $PID"."$EXT | head -n 1`
+				}
+			}	
+		}
+	fi
+
+	# Check if usb2 is mounted
+	if [ -d "$USB2PATH" ];then
+		filePathUSB2=`find $USB2PATH/ -name  $PID"-"$MAC"-"$SN"."$EXT | head -n 1`
+		[ -z "$filePathUSB2" ] && {
+			filePathUSB2=`find $USB2PATH/ -name  $PID"-"$SN"."$EXT | head -n 1`
+			[ -z "$filePathUSB2" ] && {
+				filePathUSB2=`find $USB2PATH/ -name  $PID"-"$MAC"."$EXT | head -n 1`
+				[ -z "$filePathUSB2" ] && {
+					filePathUSB2=`find $USB2PATH/ -name  $PID"."$EXT | head -n 1`
+				}
+			}	
+		}
+	fi
+
+	if [ -n "$filePathUSB1" ];then
+		$CONFIG_SCRIPT "BootConfig" $filePathUSB1
+	elif [ -n "$filePathUSB2" ];then
+		$CONFIG_SCRIPT "BootConfig" $filePathUSB2
+	fi	
+}

@@ -1,0 +1,53 @@
+--- linux-4.1.8/drivers/net/phy/phy.c.org	2018-01-05 17:58:50.775232810 +0800
++++ linux-4.1.8/drivers/net/phy/phy.c	2018-01-05 18:11:04.725232919 +0800
+@@ -64,14 +64,42 @@
+  */
+ void phy_print_status(struct phy_device *phydev)
+ {
+-	if (phydev->link) {
+-		netdev_info(phydev->attached_dev,
+-			"Link is Up - %s/%s - flow control %s\n",
+-			phy_speed_to_str(phydev->speed),
+-			DUPLEX_FULL == phydev->duplex ? "Full" : "Half",
+-			phydev->pause ? "rx/tx" : "off");
+-	} else	{
+-		netdev_info(phydev->attached_dev, "Link is Down\n");
++	int status;
++
++	if(phydev->drv->phy_id == 0x600d8595)
++	{
++		if (phydev->link) {
++			phy_write(phydev, 0x1e, 0x21);
++			status = phy_read(phydev, 0x1f);
++			if((status & (1 << 6)) == (1 << 6))
++			{
++				printk("WAN: SFP Link is Up - %s/%s - flow control %s\n",
++					phy_speed_to_str(phydev->speed),
++					DUPLEX_FULL == phydev->duplex ? "Full" : "Half",
++					phydev->pause ? "rx/tx" : "off");
++			}
++			else if((status & (1 << 7)) == (1 << 7))
++			{
++				printk("WAN: COPPER Link is Up - %s/%s - flow control %s\n",
++					phy_speed_to_str(phydev->speed),
++					DUPLEX_FULL == phydev->duplex ? "Full" : "Half",
++					phydev->pause ? "rx/tx" : "off");
++			}
++		} else	{
++			printk("WAN: Link is Down\n");
++		}
++	}
++	else
++	{
++		if (phydev->link) {
++			netdev_info(phydev->attached_dev,
++				"Link is Up - %s/%s - flow control %s\n",
++				phy_speed_to_str(phydev->speed),
++				DUPLEX_FULL == phydev->duplex ? "Full" : "Half",
++				phydev->pause ? "rx/tx" : "off");
++		} else	{
++			netdev_info(phydev->attached_dev, "Link is Down\n");
++		}
+ 	}
+ }
+ EXPORT_SYMBOL(phy_print_status);

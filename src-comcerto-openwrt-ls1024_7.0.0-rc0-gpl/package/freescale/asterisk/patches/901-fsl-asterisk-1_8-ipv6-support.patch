@@ -1,0 +1,323 @@
+diff -Naur asterisk-1.8.2.3/channels/chan_mspd.c asterisk-1.8.2.3.new/channels/chan_mspd.c
+--- asterisk-1.8.2.3/channels/chan_mspd.c	2016-09-18 18:42:26.769470082 +0300
++++ asterisk-1.8.2.3.new/channels/chan_mspd.c	2016-09-18 19:32:41.889199615 +0300
+@@ -255,6 +255,8 @@
+         }
+         else if (!strcasecmp(v->name, "rtpcutthru_mode")) {
+         }
++        else if (!strcasecmp(v->name, "ipv6_mode")) {
++        }
+         else if (!strcasecmp(v->name, "rsp_bwe_master")) {
+         }
+         else if (!strcasecmp(v->name, "rsp_bwe_high_band")) {
+@@ -1785,7 +1787,8 @@
+                     "\t : Interdigit-timeout  = %d \n"
+                     "\t : Dial-timeout        = %d \n"
+                     "\t : Fax mode            = %s \n"
+-                    "\t : RTP cut-through     = %s \n",
++                    "\t : RTP cut-through     = %s \n"
++                    "\t : IPv6                = %s \n",
+                     mspd_global.n_phones,
+                     mspd_global.context,
+                     mspd_global.flash_mode == THREEWAYCALL ? "Three-way calling" : "Call switching",
+@@ -1794,7 +1797,8 @@
+                     mspd_global.dial_timeout,
+                     mspd_global.interdigit_timeout,
+                     mspd_global_fax_mode_to_string(mspd_global_get_fax_mode()),
+-                    mspd_global_is_rtp_ct_mode() ? "Enabled" : "Disabled");
++                    mspd_global_is_rtp_ct_mode() ? "Enabled" : "Disabled",
++                    mspd_global_is_ipv6_mode() ? "Enabled" : "Disabled");
+ 
+     mspd_bwe_t *rsp_bwe = mspd_global_get_rsp_bwe();
+     if (rsp_bwe->bwe_master)
+diff -Naur asterisk-1.8.2.3/include/asterisk/mspd/defaults.h asterisk-1.8.2.3.new/include/asterisk/mspd/defaults.h
+--- asterisk-1.8.2.3/include/asterisk/mspd/defaults.h	2016-09-18 18:30:03.069300709 +0300
++++ asterisk-1.8.2.3.new/include/asterisk/mspd/defaults.h	2016-09-18 19:36:24.874661866 +0300
+@@ -34,6 +34,7 @@
+ 
+ #define DEF_GLOBAL_IP_ADDR            "169.254.0.1"
+ #define DEF_DEVICE_IP_ADDR            "169.254.0.2"
++#define DEF_DEVICE_IPV6_ADDR          "fec0:0:0:1f::de"
+ #define DEF_UD_SRC_PORT               30000
+ #define DEF_UD_DST_PORT               DEF_UD_SRC_PORT
+ #define DEF_UD_IP_ADDR                DEF_DEVICE_IP_ADDR
+diff -Naur asterisk-1.8.2.3/include/asterisk/mspd/device.h asterisk-1.8.2.3.new/include/asterisk/mspd/device.h
+--- asterisk-1.8.2.3/include/asterisk/mspd/device.h	2016-09-18 18:30:03.069300709 +0300
++++ asterisk-1.8.2.3.new/include/asterisk/mspd/device.h	2016-09-18 19:36:35.002549813 +0300
+@@ -25,6 +25,9 @@
+ U16 mspd_device_get_channel_id(mspd_device_t *dev);
+ U32 mspd_device_get_id(const mspd_device_t *dev);
+ const struct ast_sockaddr* mspd_device_get_ipaddr(const mspd_device_t *dev);
++const struct ast_sockaddr* mspd_device_get_ipv6addr(const mspd_device_t *dev);
++const U8 *mspd_device_get_mac_src(const mspd_device_t *dev);
++const U8 *mspd_device_get_mac_dst(const mspd_device_t *dev);
+ U16 mspd_device_get_conference_id(mspd_device_t *dev);
+ mspd_device_t* mspd_device_find_by_index(unsigned index);
+ int mspd_device_send_redirection_cmd(const struct ast_sockaddr* ud_dest_ipaddr, U16* enable_error);
+diff -Naur asterisk-1.8.2.3/include/asterisk/mspd/global.h asterisk-1.8.2.3.new/include/asterisk/mspd/global.h
+--- asterisk-1.8.2.3/include/asterisk/mspd/global.h	2016-09-18 18:30:03.069300709 +0300
++++ asterisk-1.8.2.3.new/include/asterisk/mspd/global.h	2016-09-18 19:36:47.941093090 +0300
+@@ -34,6 +34,7 @@
+ Boolean mspd_global_get_wideband(void);
+ Boolean mspd_global_get_ntt_callerid(void);
+ Boolean mspd_global_is_rtp_ct_mode(void);
++Boolean mspd_global_is_ipv6_mode(void);
+ mspd_bwe_t *mspd_global_get_rsp_bwe(void);
+ char* mspd_global_fax_mode_to_string(mspd_fax_mode_t type);
+ 
+diff -Naur asterisk-1.8.2.3/include/asterisk/netsock2.h asterisk-1.8.2.3.new/include/asterisk/netsock2.h
+--- asterisk-1.8.2.3/include/asterisk/netsock2.h	2016-09-18 18:21:31.489454174 +0300
++++ asterisk-1.8.2.3.new/include/asterisk/netsock2.h	2016-09-18 19:37:59.542415139 +0300
+@@ -362,6 +362,18 @@
+  * \since 1.8
+  *
+  * \brief
++ * Get an IPv6 address of an ast_sockaddr
++ *
++ * \warning You should rarely need this function. Only use if you know what
++ * you're doing.
++ * \return IPv6 address in network byte order
++ */
++uint32_t ast_sockaddr_ipv6(const struct ast_sockaddr *addr);
++
++/*!
++ * \since 1.8
++ *
++ * \brief
+  * Determine if the address is an IPv4 address
+  *
+  * \warning You should rarely need this function. Only use if you know what
+diff -Naur asterisk-1.8.2.3/main/mspd/channel.c asterisk-1.8.2.3.new/main/mspd/channel.c
+--- asterisk-1.8.2.3/main/mspd/channel.c	2016-09-18 18:55:40.470958292 +0300
++++ asterisk-1.8.2.3.new/main/mspd/channel.c	2016-09-18 19:38:47.516412526 +0300
+@@ -2,7 +2,10 @@
+ 
+ #include <vapi/vapi.h> 
+ #include <vapi/comcerto-api-defs.h> 
++#include <vapi/comcerto-ethernet-interface-types.h>
++#include <vapi/comcerto-ipv6-types.h>
+ #include <vapi/gtl.h>
++#include <linux/if_ether.h>	/* for ETH_P_IPV6 ETH_P_IPV6 */
+ 
+ #include "asterisk/lock.h"
+ #include "asterisk/utils.h"
+@@ -420,6 +423,9 @@
+ {
+     char srcstr[80];
+     char dststr[80];
++    VSTATUS status = 1;
++    mspd_device_t *dev = channel->dev;
++    
+     strncpy(srcstr, ast_sockaddr_stringify (src), sizeof(srcstr));
+     strncpy(dststr, ast_sockaddr_stringify (dst), sizeof(dststr));
+ 
+@@ -428,26 +434,60 @@
+             srcstr,
+             dststr);
+ 
+-    if (ast_sockaddr_cmp_addr(src, mspd_device_get_ipaddr(channel->dev))) {
++    if (ast_sockaddr_cmp_addr(src, mspd_device_get_ipaddr(dev))) {
+         MSPD_ERR("(%s): can't set ip-header: source address (%s) != device address (%s)\n",
+                 channel->name,
+                 ast_sockaddr_stringify (src),
+-                ast_sockaddr_stringify (mspd_device_get_ipaddr(channel->dev)));
++                ast_sockaddr_stringify (mspd_device_get_ipaddr(dev)));
+         return 1;
+     }
+ 
+-    VSTATUS     status = 1;
+-    SIpParams   ip_params;
+-
+-    // VAPI does not support IPv6. Should we request development?
+-    ip_params.uiDestIpAddr = htonl(ast_sockaddr_ipv4(dst));
+-    ip_params.usDestUdpPort = htons(ast_sockaddr_port(dst));
+-    ip_params.uiSrcIpAddr = htonl(ast_sockaddr_ipv4(src));
+-    ip_params.usSrcUdpPort = htons(ast_sockaddr_port(src));
+-    ip_params.ucIPServiceId = 0;
++    if (mspd_global_is_ipv6_mode()) {
++        U8 *ipv6_src_addr;
++        U8 *ipv6_dst_addr;      
++        U16 udp_src;
++        U16 udp_dst;
++        
++        //TODO: implemented IPv6 at global Asterisk level
++
++        status = VAPI_SetConnIPv6EthMac(channel->id, (U8 *)mspd_device_get_mac_src(dev), (U8 *)mspd_device_get_mac_dst(dev), NULL);
++        VAPI_REPORT (status, "VAPI_SetConnIPv6EthMac");
++
++        status = VAPI_SetIPConnMode(channel->id, eChanIpMode_IPv6, NULL);
++        VAPI_REPORT (status, "VAPI_SetIPConnMode");
++
++        ipv6_dst_addr = (U8 *)htonl(ast_sockaddr_ipv6(mspd_device_get_ipv6addr(dev)));
++        ipv6_src_addr = (U8 *)htonl(ast_sockaddr_ipv6(mspd_device_get_ipv6addr(dev)));       
++#if 1    
++        //WA: cross connection at udp level in pairs        
++        udp_dst = 0x7530 + channel->id*2;
++        udp_src = 0x7530 + channel->id*2;
++        if (channel->id%2 == 0) {
++            udp_src += 2;
++        } else {
++            udp_src -= 2;
++        }
+ 
+-    status = VAPI_SetConnIpParams(channel->id, &ip_params, NULL);
+-    VAPI_REPORT (status, "VAPI_SetConnIpParams");
++#else
++        udp_src = (U16)ast_sockaddr_port(src);
++        udp_dst = (U16)ast_sockaddr_port(dst);
++#endif
++        status = VAPI_SetConnIPv6Header(channel->id, ipv6_src_addr, ipv6_dst_addr, udp_src, udp_dst, NULL);
++        VAPI_REPORT (status, "VAPI_SetConnIPv6Header");
++        
++    } else {
++        SIpParams   ip_params;
++        
++        // VAPI does not support IPv6. Should we request development?
++        ip_params.uiDestIpAddr = htonl(ast_sockaddr_ipv4(dst));
++        ip_params.usDestUdpPort = htons(ast_sockaddr_port(dst));
++        ip_params.uiSrcIpAddr = htonl(ast_sockaddr_ipv4(src));
++        ip_params.usSrcUdpPort = htons(ast_sockaddr_port(src));
++        ip_params.ucIPServiceId = 0;
++        
++        status = VAPI_SetConnIpParams(channel->id, &ip_params, NULL);
++        VAPI_REPORT (status, "VAPI_SetConnIpParams");
++    }   
+ 
+     return status;
+ }
+diff -Naur asterisk-1.8.2.3/main/mspd/device.c asterisk-1.8.2.3.new/main/mspd/device.c
+--- asterisk-1.8.2.3/main/mspd/device.c	2016-09-18 18:30:03.089301016 +0300
++++ asterisk-1.8.2.3.new/main/mspd/device.c	2016-09-18 19:40:09.146044448 +0300
+@@ -31,6 +31,7 @@
+     U32                 device_id;
+ 
+     struct ast_sockaddr ipaddr;
++    struct ast_sockaddr ipv6addr;
+     U8                  mac_src[6];
+     U8                  mac_dst[6];
+ 
+@@ -562,9 +563,17 @@
+     status = set_packet_destination (dev, NIF_PORT_NULL, 0, 0);
+     VAPI_REPORT_ACT (status, "Setting default packet destination", return status);
+ 
+-    status = VAPI_SetEthMac(dev->device_id, CMD_LEVEL_DEVICE, (U8 *)dev->mac_dst, (U8 *)dev->mac_src, NULL);
++    status = VAPI_SetEthMac(dev->device_id, CMD_LEVEL_DEVICE, (U8 *)dev->mac_src, (U8 *)dev->mac_dst, NULL);
+     VAPI_REPORT_ACT (status, "VAPI_SetEthMac", return status);
+ 
++    if (mspd_global_is_ipv6_mode()) {
++        status = VAPI_SetDeviceIPv6EthMac(dev->device_id, (U8 *)dev->mac_src, (U8 *)dev->mac_dst, NULL);
++        VAPI_REPORT_ACT (status, "VAPI_SetDeviceIPv6EthMac", return status);
++        
++        status = VAPI_SetDeviceIPv6Addr(dev->device_id, (U8 *)htonl(ast_sockaddr_ipv6(&dev->ipv6addr)), NULL);
++        VAPI_REPORT_ACT (status, "VAPI_SetDeviceIPv6Addr", return status);           
++    }
++
+     ip_info.ucNumOfSrcIpAddr = 1;
+     ip_info.bIsMultipleMode = 0;
+     ip_info.ucEncapsulation = 2;        // Ethernet Layer
+@@ -739,6 +748,7 @@
+         return 1;
+ 
+     ast_parse_arg(DEF_DEVICE_IP_ADDR, PARSE_ADDR, &dev->ipaddr);
++    ast_parse_arg(DEF_DEVICE_IPV6_ADDR, PARSE_ADDR, &dev->ipv6addr);
+ 
+     memcpy (dev->mac_src, &HOST_CONTROL_MAC,   6);   // Set default ETH1 MAC address
+     memcpy (dev->mac_dst, &HOST_CONTROL_MAC,   6);
+@@ -785,6 +795,12 @@
+                 return 1;
+                 }
+         }
++        else if (!strcasecmp (v->name, "ipv6addr")) {		
++            if (ast_parse_arg(v->value, PARSE_ADDR, &dev->ipv6addr)) {
++                ast_log(LOG_ERROR, "Invalid address: %s\n", v->value);
++                return 1;
++            }
++        }	
+         else if (!strcasecmp (v->name, "srcmac")) {
+             if (ast_parse_mac (dev->mac_src, v))        // Redefine MAC address from config
+                 return 1;
+@@ -846,6 +862,10 @@
+         MSPD_ERR("Device %s has no IP-address\n", dev->name);
+         return 1;
+     }
++    if (!dev->ipv6addr.len) {
++        MSPD_ERR("Device %s has no IPv6-address\n", dev->name);
++        return 1;
++    }
+     if (!ast_sockaddr_cmp_addr(&(dev->ipaddr), mspd_global_get_ipaddr())) {
+         MSPD_ERR("Setup is invalid, IP-address of device %s "
+                 "is same as global IP-address\n", dev->name);
+@@ -932,6 +952,24 @@
+     return &dev->ipaddr;
+ }
+ 
++const struct ast_sockaddr*
++mspd_device_get_ipv6addr(const mspd_device_t *dev)
++{
++    return &dev->ipv6addr;
++}
++
++const U8 *
++mspd_device_get_mac_src(const mspd_device_t *dev)
++{
++    return &dev->mac_src[0];
++}
++
++const U8 *
++mspd_device_get_mac_dst(const mspd_device_t *dev)
++{
++    return &dev->mac_dst[0];
++}
++
+ U16
+ mspd_device_get_conference_id(mspd_device_t *dev)
+ {
+diff -Naur asterisk-1.8.2.3/main/mspd/global.c asterisk-1.8.2.3.new/main/mspd/global.c
+--- asterisk-1.8.2.3/main/mspd/global.c	2016-09-18 18:30:03.089301016 +0300
++++ asterisk-1.8.2.3.new/main/mspd/global.c	2016-09-18 19:40:37.552690507 +0300
+@@ -29,6 +29,7 @@
+ static Boolean wideband = False;
+ static Boolean ntt_callerid = False;
+ static Boolean rtp_ct_mode = False;
++static Boolean ipv6_mode = False;
+ static mspd_bwe_t rsp_bwe;
+ 
+ const struct ast_sockaddr* mspd_global_get_ipaddr(void)
+@@ -72,6 +73,11 @@
+     return rtp_ct_mode;
+ }
+ 
++Boolean mspd_global_is_ipv6_mode(void)
++{
++    return ipv6_mode;
++}
++
+ Boolean mspd_global_get_ntt_callerid(void)
+ {
+     return ntt_callerid;
+@@ -157,6 +163,9 @@
+         else if (!strcasecmp(v->name, "rtpcutthru_mode")) {
+             rtp_ct_mode = ast_true(v->value) ? True : False;
+         }
++        else if (!strcasecmp(v->name, "ipv6_mode")) {
++            ipv6_mode = ast_true(v->value) ? True : False;
++        }
+         else if(!strcasecmp(v->name, "rsp_bwe_master")) {
+             rsp_bwe.bwe_master = ast_true(v->value) ? True : False;
+         }
+diff -Naur asterisk-1.8.2.3/main/netsock2.c asterisk-1.8.2.3.new/main/netsock2.c
+--- asterisk-1.8.2.3/main/netsock2.c	2016-09-18 18:21:31.533454848 +0300
++++ asterisk-1.8.2.3.new/main/netsock2.c	2016-09-18 19:41:16.785575942 +0300
+@@ -369,6 +369,12 @@
+ 	return ntohl(sin->sin_addr.s_addr);
+ }
+ 
++uint32_t ast_sockaddr_ipv6(const struct ast_sockaddr *addr)
++{
++	const struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&addr->ss;
++	return ntohl(&sin6->sin6_addr);
++}
++
+ int ast_sockaddr_is_ipv4(const struct ast_sockaddr *addr)
+ {
+ 	return addr->ss.ss_family == AF_INET &&

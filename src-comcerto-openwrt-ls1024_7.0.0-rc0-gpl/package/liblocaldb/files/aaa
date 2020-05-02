@@ -1,0 +1,240 @@
+#!/bin/sh /etc/rc.common 
+
+START=99
+
+. /lib/config/uci.sh
+
+PAM_TEMP_PATH="/tmp/etc"
+PAM_ETC_PATH="/etc/pam.d"
+
+
+aaa_configure_default()
+{
+    service="$1"
+	
+	if [ "$service" == "pptp"  -o "$service" == "l2tp" ]
+	then
+		echo "auth binding pam_radius_auth.so retry=2" > $PAM_TEMP_PATH/$service
+		echo "auth binding pam_localdb.so" >> $PAM_TEMP_PATH/$service
+		echo "account required pam_authorize.so" >> $PAM_TEMP_PATH/$service
+	else
+	
+		echo "auth binding pam_radius_auth.so retry=2" > $PAM_TEMP_PATH/$service
+		echo "auth binding pam_ldap.so try_first_pass" >> $PAM_TEMP_PATH/$service
+		echo "auth binding pam_krb5.so try_first_pass keytab=/etc/krb5.keytab" >> $PAM_TEMP_PATH/$service
+		if [ "$service" != "weblogin" ]
+		then
+			echo "auth binding pam_localdb.so" >> $PAM_TEMP_PATH/$service
+		fi
+		echo "account required pam_authorize.so" >> $PAM_TEMP_PATH/$service
+	fi
+}
+
+aaa_auth_radius()
+{
+    local service="$1"
+    
+	echo "auth binding pam_radius_auth.so retry=2" >> $PAM_TEMP_PATH/$service
+        
+}
+
+aaa_auth_ldap()
+{
+    local service="$1"
+	
+	echo "auth binding pam_ldap.so try_first_pass" >> $PAM_TEMP_PATH/$service
+}
+
+aaa_auth_krb5()
+{
+    local service="$1"
+
+        echo "auth binding pam_krb5.so try_first_pass keytab=/etc/krb5.keytab" >> $PAM_TEMP_PATH/$service
+        
+}
+               
+aaa_auth_local()
+{
+    local service="$1"
+
+        if [ "$service" != "weblogin" ]                                                  
+        then
+            echo "auth binding pam_localdb.so" >> $PAM_TEMP_PATH/$service
+        fi
+        
+}
+
+aaa_authorize()
+{
+	local service="$1"
+	echo "account required pam_authorize.so" >> $PAM_TEMP_PATH/$service	
+}
+
+aaa_auth()
+{
+    local auth_name="$1"
+    local service="$2"
+        
+	if [ "$auth_name" = "local" ]
+	then
+		aaa_auth_local $service
+	elif [ "$auth_name" = "radius" ]
+	then
+		aaa_auth_radius $service
+		
+	elif [ "$auth_name" = "ldap" ]
+	then
+		aaa_auth_ldap $service
+	elif [ "$auth_name" = "ad" ]
+	then
+		aaa_auth_krb5 $service
+	fi
+                                                                            
+}
+
+aaa_configure_service()
+{
+
+	service="$1"
+	default="$2"
+	primary_auth="$3"
+	secondary_auth="$4"
+
+	echo -n "" > $PAM_TEMP_PATH/$service
+
+	if [ "$default" == "1" ]
+	then
+		aaa_configure_default $service		
+	else
+		if [ "$primary_auth" != "" ]                
+        then                                        
+                        aaa_auth $primary_auth $service                          
+        fi
+		if [ "$secondary_auth" != "" ]              
+        then                                        
+                        aaa_auth $secondary_auth $service                        
+        fi   		
+		aaa_authorize $service		
+	fi		
+
+}
+aaa_configure()
+{
+	
+	config_load aaa
+
+	#weblogin
+	config_get_bool weblogin_default weblogin default 
+	
+	config_get primary_auth weblogin primary
+		
+	config_get secondary_auth weblogin secondary
+
+	aaa_configure_service weblogin $weblogin_default $primary_auth $secondary_auth
+
+	#vpn
+	config_get_bool vpn_default vpn default
+
+	config_get primary_auth vpn primary
+		
+	config_get secondary_auth vpn secondary
+
+	aaa_configure_service ezvpn $vpn_default $primary_auth $secondary_auth
+	aaa_configure_service s2s-vpn $vpn_default $primary_auth $secondary_auth
+                                                                  
+	#anyconnect
+	config_get_bool anyconnect anyconnect default 
+
+	config_get primary_auth anyconnect primary 
+		
+	config_get secondary_auth anyconnect secondary         
+
+	aaa_configure_service anyconnect-vpn $anyconnect $primary_auth $secondary_auth
+	                                                                       
+	#captive_portal
+	config_get_bool captive_default captive_portal default 
+	
+	config_get primary_auth captive_portal primary
+		
+	config_get secondary_auth captive_portal secondary
+	
+	aaa_configure_service ssid $captive_default $primary_auth $secondary_auth
+	
+	#pptp
+	config_get_bool pptp_default pptp default
+	echo -n "" > $PAM_TEMP_PATH/pptp
+	
+	config_get primary_auth pptp primary
+	config_get secondary_auth pptp secondary
+
+	aaa_configure_service pptp $pptp_default $primary_auth $secondary_auth
+
+	#l2tp
+	config_get_bool l2tp_default l2tp default                            
+
+	config_get primary_auth l2tp primary
+
+	config_get secondary_auth l2tp secondary
+
+	aaa_configure_service l2tp $pptp_default $primary_auth $secondary_auth
+}
+
+boot() {
+
+	#create symbolic link
+	touch $PAM_TEMP_PATH/weblogin
+	if [ ! -L $PAM_ETC_PATH/weblogin ]; then
+		rm -f $PAM_ETC_PATH/weblogin
+		ln -s $PAM_TEMP_PATH/weblogin $PAM_ETC_PATH/weblogin
+	fi
+	
+	touch $PAM_TEMP_PATH/ezvpn	
+	if [ ! -L $PAM_ETC_PATH/ezvpn ]; then                                      
+                rm -f $PAM_ETC_PATH/ezvpn                                            
+                ln -s $PAM_TEMP_PATH/ezvpn $PAM_ETC_PATH/ezvpn             
+        fi
+	
+	touch $PAM_TEMP_PATH/s2s-vpn
+	if [ ! -L $PAM_ETC_PATH/s2s-vpn ]; then                                      
+                rm -f $PAM_ETC_PATH/s2s-vpn                                            
+                ln -s $PAM_TEMP_PATH/s2s-vpn $PAM_ETC_PATH/s2s-vpn               
+        fi
+
+	touch $PAM_TEMP_PATH/anyconnect-vpn
+	if [ ! -L $PAM_ETC_PATH/anyconnect-vpn ]; then                                      
+                rm -f $PAM_ETC_PATH/anyconnect-vpn                                          
+                ln -s $PAM_TEMP_PATH/anyconnect-vpn $PAM_ETC_PATH/anyconnect-vpn               
+        fi
+
+	touch $PAM_TEMP_PATH/ssid
+	if [ ! -L $PAM_ETC_PATH/ssid ]; then                                      
+                rm -f $PAM_ETC_PATH/ssid                                          
+                ln -s $PAM_TEMP_PATH/ssid $PAM_ETC_PATH/ssid             
+        fi
+
+	touch $PAM_TEMP_PATH/pptp
+	if [ ! -L $PAM_ETC_PATH/pptp ]; then                                      
+                rm -f $PAM_ETC_PATH/pptp                                           
+                ln -s $PAM_TEMP_PATH/pptp $PAM_ETC_PATH/pptp             
+        fi
+
+	touch $PAM_TEMP_PATH/l2tp
+	if [ ! -L $PAM_ETC_PATH/l2tp ]; then                                      
+                rm -f $PAM_ETC_PATH/l2tp                                            
+                ln -s $PAM_TEMP_PATH/l2tp $PAM_ETC_PATH/l2tp               
+        fi
+
+	start
+}
+
+start()
+{
+	aaa_configure
+    
+}
+
+reload()
+{
+	start
+}
+

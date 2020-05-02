@@ -1,0 +1,7 @@
+12:GSM Digital Cellular Systems (GERAN only)
+22:UTRAN only
+25:3GPP Systems (GERAN, UTRAN and E-UTRAN)
+28:E-UTRAN only
+29:GERAN and UTRAN
+30:GERAN and E-UTRAN
+31:UTRAN and E-UTRAN

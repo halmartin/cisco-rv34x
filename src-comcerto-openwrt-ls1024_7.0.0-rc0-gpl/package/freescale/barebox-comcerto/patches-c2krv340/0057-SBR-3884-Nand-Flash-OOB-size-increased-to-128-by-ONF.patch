@@ -1,0 +1,41 @@
+From f99dcc600136294a6a90d2a24070833d362236d4 Mon Sep 17 00:00:00 2001
+From: Sai Chaithanya <chaitanya.vinnakota@nxp.com>
+Date: Wed, 11 Jan 2017 18:04:51 +0530
+Subject: [PATCH 57/60] SBR-3884 Nand Flash OOB size increased to 128 by ONFI
+ check
+
+Signed-off-by: Sai Chaithanya <chaitanya.vinnakota@nxp.com>
+---
+ commands/version_rv340.c    | 2 +-
+ drivers/mtd/nand/nand_ids.c | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/commands/version_rv340.c b/commands/version_rv340.c
+index 0a0d941..779251e 100644
+--- a/commands/version_rv340.c
++++ b/commands/version_rv340.c
+@@ -24,7 +24,7 @@
+ #include <common.h>
+ #include <command.h>
+ 
+-const char version_string_rv340[] = "1.0.00.05";
++const char version_string_rv340[] = "1.0.00.06";
+ 
+ static int do_version_rv340(struct command *cmdtp, int argc, char *argv[])
+ {
+diff --git a/drivers/mtd/nand/nand_ids.c b/drivers/mtd/nand/nand_ids.c
+index 6b18dee..a3c3afc 100644
+--- a/drivers/mtd/nand/nand_ids.c
++++ b/drivers/mtd/nand/nand_ids.c
+@@ -99,7 +99,7 @@ struct nand_flash_dev nand_flash_ids[] = {
+ 
+ 	/* 2 Gigabit */
+ 	{__NANDSTR("NAND 256MiB 1,8V 8-bit"),	0xAA, 0, 256, 0, LP_OPTIONS},
+-	{__NANDSTR("NAND 256MiB 3,3V 8-bit"),	0xDA, 0, 256, 0, LP_OPTIONS},
++	//{__NANDSTR("NAND 256MiB 3,3V 8-bit"),	0xDA, 0, 256, 0, LP_OPTIONS},//Commented by NXP for OOB size correction to 128 instead of 64 bytes
+ 	{__NANDSTR("NAND 256MiB 1,8V 16-bit"),	0xBA, 0, 256, 0, LP_OPTIONS16},
+ #endif /* CONFIG_COMCERTO_NAND_ULOADER */
+ 
+-- 
+2.7.4
+

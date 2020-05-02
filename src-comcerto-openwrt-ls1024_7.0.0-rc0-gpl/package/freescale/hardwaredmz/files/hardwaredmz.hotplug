@@ -1,0 +1,35 @@
+#!/bin/sh
+# This script is executed as part of the hotplug event with
+# HOTPLUG_TYPE=iface, triggered by various scripts when an interface
+# is configured (ACTION=ifup) or deconfigured (ACTION=ifdown).  The
+# interface is available as INTERFACE, the real device as DEVICE.
+[ "$DEVICE" == "lo" ] && exit 0
+[ "$ACTION" == "rtupd" ] && exit 0
+
+local lan_status=`echo $INTERFACE |grep lan`
+
+case "$ACTION" in
+        ifup)
+	local status                                                                                                                   
+        status=`uci get dmz.hardwaredmz.enabled`                                                                   
+	if [ $status -eq 1 ]                                                                                                         
+        then
+              if [ "$lan_status" = "" ]
+              then
+                  /etc/init.d/hardwaredmz hotplug_reload
+              fi
+        fi
+        ;;
+        ifdown)
+        local status
+        status=`uci get dmz.hardwaredmz.enabled`
+        if [ $status -eq 1 ]
+        then
+              if [ "$lan_status" = "" ]
+              then
+                  /etc/init.d/hardwaredmz  hotplug_reload
+              fi
+        fi
+        ;;
+esac
+                                                                                                                

@@ -1,0 +1,453 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions.sh
+
+#TODO:need to check on this number
+START=98
+
+MODULENAME="umbrella"
+TEMPUCIPATH="/tmp/.uci"
+TEMPUCI_UMBRELLA_NAME="$TEMPUCIPATH/$MODULENAME"
+UCIPATH="/tmp/etc/config"
+UCI_UMBRELLA_NAME="$UCIPATH/$MODULENAME"
+
+#DNSCRYPT_CSVFILE=/usr/share/dnscrypt-proxy/dnscrypt-resolvers.csv
+DNSCRYPT_CSVFILE=/var/etc/dnscrypt-resolvers.csv
+DNSCRYPT_CONFIGFILE=/var/etc/dnscrypt-proxy.conf
+DNSMASQ_CONFIGFILE=/var/etc/dnsmasq.conf
+RESOLV_CONFIGFILE=/var/etc/resolv.conf
+BYPASS_DNAME_KEY="Forward domains:"
+
+#Network as router identity
+ROUTER_ID_NETWORK=1
+#Network device as router identity
+ROUTER_ID_NETDEV=2
+
+UM_ENABLE=1
+UM_DISABLE=0
+
+um_print() {
+  logger -p 6 -t Umbrella ": $1"
+}
+
+um_update_dnsdrop_firewall_rule()
+{
+	local um_status=$1
+
+	if [ "$um_status" = "1" ];then
+		local dns_acl=$(uci get umbrella.global_config_0.dns_acl)
+		if [ "$dns_acl" == "1" ]
+		then
+			um_print "$MODULENAME enabled adding firewall rule ...!"
+			iptables -w -F um_forward_filter
+			iptables -w -I um_forward_filter -p tcp --dport 53 -j DROP
+			iptables -w -I um_forward_filter -p udp --dport 53 -j DROP
+			ip6tables -w -F um_forward_filter
+			ip6tables -w -I um_forward_filter -p tcp --dport 53 -j DROP
+			ip6tables -w -I um_forward_filter -p udp --dport 53 -j DROP
+		else
+			um_print "$MODULENAME disabling firewall rule ...!"
+			iptables -w -F um_forward_filter
+			ip6tables -w -F um_forward_filter
+		fi
+	else
+		um_print "$MODULENAME disabled firewall rule ...!"
+		#The first rule i.e the head rule will be deleted
+		iptables -w -F um_forward_filter
+		ip6tables -w -F um_forward_filter
+	fi
+}
+
+#Fun <new-key>
+um_update_dnscrypt_key()
+{
+	#$1 is client key value
+	local new_key=$1
+	local old_key
+
+	#extract old key from csv file always.
+	[ -n "$old_key" ] || {
+		old_key=$(cat $DNSCRYPT_CSVFILE | grep -w "\"Cisco OpenDNS\"" | awk '{print $13}' -F ,)
+	}
+
+	sed -i "s/$old_key/$new_key/g" $DNSCRYPT_CSVFILE
+}
+
+#Though we added this function, we are not using it.
+config_split_dns_DNSMASQ()
+{
+	local cfg="$1"
+
+	config_get vpn_domains "$cfg" split_dns_domain
+	config_get vpn_dns_servers "$cfg" split_dns_server
+
+	[ -n "$vpn_domains" ] && [ -n "$vpn_dns_servers" ] && {
+		for domain in $vpn_domains
+		do
+			for server in $vpn_dns_servers
+			do
+				uci add_list dhcp.@dnsmasq[0].um_vpn_server="/$domain/$server"
+			done
+		done
+	}
+}
+
+config_split_dns_DNSCRYPT()
+{
+	local cfg="$1"
+
+	config_get vpn_domains "$cfg" split_dns_domain
+	config_get vpn_dns_servers "$cfg" split_dns_server
+
+	[ -n "$vpn_domains" ] && [ -n "$vpn_dns_servers" ] && {
+		uci add_list dnscrypt-proxy.@global[0].vpn_split_dns="Forward domains:\"$vpn_domains\"to:\"$vpn_dns_servers\""
+	}
+}
+
+um_config_bypass_domains()
+{
+	#local mode=$1 #1 means network #2 networkdevice mode #3 for delete of domains
+	#With the latest implementation, DNSCrypt proxy will front end the DNS queries in network device mode. In network mode
+	#	if dnscrypt is enabled then DNScrypt will take care of DNS quereies.
+	local mode=$1 #1 means dnscrypt enabled #0 dnscrypt disabled #3 for delete of domains
+	#local wanDNSIP=$(cat /tmp/resolv.conf.auto | grep -re "nameserver" | grep -ve ":\|127.0.0.1" | head -n 2  |  awk '{print $2}')
+
+	uci del dhcp.@dnsmasq[0].um_server
+	uci del dhcp.@dnsmasq[0].um_rserver
+	#uci del dhcp.@dnsmasq[0].um_vpn_server
+	uci del dnscrypt-proxy.@global[0].local_domain_bypass
+	uci del dnscrypt-proxy.@global[0].vpn_split_dns
+	if [ "$mode" == "0" ]
+	then
+		domains=$(uci get umbrella.global_config_0.local_domain_bypass)
+		for i in $domains
+		do
+			#for j in $wanDNSIP
+			#do
+				uci add_list dhcp.@dnsmasq[0].um_rserver="$i"
+				um_print "configuring server:$i/WANIP"
+			#done
+		done
+		#Since updown script of strongswan already adds its DNS to DNSMASQ, we are not adding it here.
+		#config_foreach config_split_dns_DNSMASQ vpn_bypass_domains
+	elif [ "$mode" == "1" ]
+	then
+		domains=$(uci get umbrella.global_config_0.local_domain_bypass)
+		for i in $domains
+		do
+			#for j in $wanDNSIP
+			#do
+				uci add_list dnscrypt-proxy.@global[0].local_domain_bypass="$i"
+				um_print "configuring server:$i/WANIP"
+			#done
+		done
+
+		config_foreach config_split_dns_DNSCRYPT vpn_bypass_domains
+	fi
+	uci commit dhcp
+	uci commit dnscrypt-proxy
+}
+
+start()
+{
+	#Handling save and reboot case.
+	uci commit umbrella
+	config_load umbrella
+
+	config_get_bool um_status global_config_0 enable
+	config_get router_id global_config_0 router_id
+
+	mkdir -p /mnt/configcert/umbrella/
+	touch /mnt/configcert/umbrella/device-id
+	cp /usr/share/dnscrypt-proxy/dnscrypt-resolvers.csv /var/etc/dnscrypt-resolvers.csv
+
+	[ "$um_status" == "0" ] && {
+		exit 0
+	}
+
+	if [ "$router_id" == "$ROUTER_ID_NETWORK" ]
+	then
+		config_get bdnscrypt network_config_0 dnscrypt 0
+		config_get public_key network_config_0 public_key
+		if [ -n "$public_key" ] && [ $bdnscrypt -eq 1 ];then
+			um_update_dnscrypt_key "$public_key"
+		fi
+
+		um_network_enable $bdnscrypt
+	elif [ "$router_id" == "$ROUTER_ID_NETDEV" ]
+	then
+		config_get public_key netdev_config_0 public_key
+		if [ -n "$public_key" ];then
+			um_update_dnscrypt_key "$public_key"
+		fi
+
+		um_netdev_enable
+	fi
+}
+
+stop()
+{
+	#As if like umbrella disable.
+	config_load umbrella
+
+	config_get_bool um_status global_config_0 enable
+	config_get router_id global_config_0 router_id
+
+	if [ "$router_id" == "$ROUTER_ID_NETWORK" ]
+	then
+		um_network_disable
+	elif [ "$router_id" == "$ROUTER_ID_NETDEV" ]
+	then
+		um_netdev_disable
+	fi
+}
+
+um_network_enable()
+{
+	local isDnscryptEnabled=$1
+	#local router_id=$(uci get umbrella.global_config_0.router_id)
+
+	#um_config_bypass_domains $router_id
+	um_config_bypass_domains $isDnscryptEnabled
+	um_update_dnsdrop_firewall_rule 1
+
+	if [ $isDnscryptEnabled -eq 1 ]
+	then
+		uci set dhcp.@dnsmasq[0].port=0
+		uci commit dhcp
+		/etc/init.d/dnsmasq reload
+
+		/etc/init.d/dnscrypt-proxy start
+	else
+		/etc/init.d/dnscrypt-proxy stop 2>/dev/null
+
+		uci del dhcp.@dnsmasq[0].port #It will pick up default DNS port also.
+		uci set dhcp.@dnsmasq[0].noresolv=1
+		uci del dhcp.@dnsmasq[0].resolvfile
+		uci add_list dhcp.@dnsmasq[0].um_server="208.67.220.220"
+		uci add_list dhcp.@dnsmasq[0].um_server="208.67.222.222"
+		uci commit dhcp
+		/etc/init.d/dnsmasq reload
+	fi
+}
+
+um_network_disable()
+{
+	#Just like without umbrella w.r.t dnsmasq conf file. Default BB2 behavior
+	#revert back dnsmasq.conf file.
+
+	um_update_dnsdrop_firewall_rule 0
+
+	um_config_bypass_domains 3
+
+	#If DNSCrypt is enabled then dnscrypt-proxy would have picked up the DNS resolution.
+	uci del dhcp.@dnsmasq[0].port #It will pick up default DNS port also.
+	#kill dnscrypt-proxy
+	/etc/init.d/dnscrypt-proxy stop 2>/dev/null
+
+	#If DNSCrypt is disabled.
+	uci del_list dhcp.@dnsmasq[0].um_server="127.0.0.1#40"
+	uci del_list dhcp.@dnsmasq[0].um_server="208.67.220.220"
+	uci del_list dhcp.@dnsmasq[0].um_server="208.67.222.222"
+	uci set dhcp.@dnsmasq[0].noresolv=0
+	uci set dhcp.@dnsmasq[0].resolvfile="/tmp/resolv.conf.auto"
+	uci commit dhcp
+
+	/etc/init.d/dnsmasq reload
+}
+
+enable_DNS_in_dnsmasq()
+{
+	uci del dhcp.@dnsmasq[0].port
+	uci commit dhcp
+	/etc/init.d/dnsmasq reload
+}
+
+um_netdev_enable()
+{
+	um_config_bypass_domains 1
+	um_update_dnsdrop_firewall_rule 1
+
+	#disable DNS in dnsmasq
+	uci set dhcp.@dnsmasq[0].port=0
+	uci commit dhcp
+	/etc/init.d/dnsmasq reload
+
+	/etc/init.d/dnscrypt-proxy start
+}
+
+um_netdev_disable()
+{
+	# Just like without umbrella w.r.t dnsmasq conf file. Default BB2 behavor
+	um_network_disable
+}
+
+um_netdev_set_local_domain_bypass () 
+{
+	um_netdev_enable
+}
+
+um_network_set_local_domain_bypass ()
+{
+	um_network_enable $1
+}
+
+um_network_dnscrypt_disable_toenable ()
+{
+	um_network_enable 1
+}
+
+um_network_dnscrypt_enable_todisable ()
+{
+	um_network_enable 0 
+}
+
+reload ()
+{
+	local um_status network network_device
+        local public_key
+	local isVPNReload="$1"
+
+        um_print "Initialising $MODULENAME module ...!"
+
+	config_load umbrella
+
+	config_get_bool um_status global_config_0 enable
+	config_get router_id global_config_0 router_id
+
+        if [ $router_id -eq $ROUTER_ID_NETWORK ];then
+	#Network mode
+		config_get bdnscrypt network_config_0 dnscrypt
+		prev_bdnscrypt=$(uci get $UCIPATH/umbrella.network_config_0.dnscrypt)
+		public_key=$(uci get umbrella.network_config_0.public_key)
+		ldomain_bypass=$(uci get umbrella.global_config_0.local_domain_bypass)
+        elif [ $router_id -eq $ROUTER_ID_NETDEV ];then
+		#config_get bdnscrypt netdev_config_0 dnscrypt
+            	bdnscrypt=1
+		public_key=$(uci get umbrella.netdev_config_0.public_key)
+		ldomain_bypass=$(uci get umbrella.global_config_0.local_domain_bypass)
+        fi
+
+	[ "$ldomain_bypass" == "" ] && {
+		ldomain_bypass=$(uci get $UCIPATH/umbrella.global_config_0.local_domain_bypass)
+	}
+	#If ldomain_bypass is NULL, there may be chances that VPN bypass domains changed. Check that as well.
+	[ -n "$ldomain_bypass" ] || {
+		[ -n "$isVPNReload" ] && ldomain_bypass="vpn_reload"
+	}
+
+        #Validation of configuration variables
+        if [ $um_status -ne $UM_ENABLE ] && [ $um_status -ne $UM_DISABLE ];then
+            um_print "Umbrella status value must be either 1 or 0 not $um_status"
+            exit 1
+        elif [ $router_id -ne $ROUTER_ID_NETWORK ] && [ $router_id -ne $ROUTER_ID_NETDEV ];then
+            um_print "Umbrella Router Identifier value must be either 1 or 2 not $router_id"
+            exit 1
+        elif [ $bdnscrypt -ne "0" ] && [ $bdnscrypt -ne "1" ];then
+            um_print "Invalid dnscrypt enable value $bdnscrypt"
+            exit 1
+        fi
+
+        #check if dnscrypt key is enabled then get new public key to update the existing
+        if [ "$bdnscrypt" -eq 1 ];then
+            if [ -n "$public_key" ];then
+		#Fun <new-key>
+		#logger -t skc-testing "###calling fun um_update_dnscrypt_key "$public_key""
+                um_update_dnscrypt_key "$public_key"
+	    fi
+        fi
+
+        #netdev=$(uci get umbrella.netdev_config.network_device_as_id)
+        prev_status=$(uci get $UCIPATH/umbrella.global_config_0.enable)
+        prev_router_id=$(uci get $UCIPATH/umbrella.global_config_0.router_id)
+
+	if [ $um_status -eq 0 ] && [ $prev_status -eq 1 ];then
+	#{
+	    #if umbrella is disable from enable 
+                if [ $prev_router_id -eq $ROUTER_ID_NETWORK ];then
+                    um_network_disable 
+                elif [ $prev_router_id -eq $ROUTER_ID_NETDEV ];then
+                    um_netdev_disable
+                else
+                    um_print "Invalid router id option...!"
+                    exit 1;
+                fi
+	#}
+	elif [ $um_status -eq 1 ] && [ $prev_status -eq 0 ];then
+	#{
+	        #if umbrella is enable from disable
+                  if [ $router_id -eq $ROUTER_ID_NETWORK ];then
+                      um_network_enable $bdnscrypt
+                  elif [ $router_id -eq $ROUTER_ID_NETDEV ];then
+                      um_netdev_enable 
+                  else
+                      um_print "Invalid router id option...!"
+                      exit 1;
+                  fi
+	#}
+	elif [ $um_status -eq 1 ] && [ $um_status -eq $prev_status ];then
+	#{
+            #if umbrella status is already enable and no change in status
+                #No change in the router identification option
+		if [ $prev_router_id -eq $router_id ]; then
+		#{
+			um_print "No change in Umbrella Router Identifier Option:$router_id...!"
+			#if it is network option
+			if [ $router_id -eq $ROUTER_ID_NETWORK ];then
+			#{
+				#dns crypt enable from disable
+				if [ $bdnscrypt -eq 1 ] && [ $prev_bdnscrypt -eq 0 ];then
+					um_print "dnscrypt selected in network option...!"
+					um_network_dnscrypt_disable_toenable  #Assuming we write only start of dnscrypt-proxy
+				elif [ $bdnscrypt -eq 0 ] && [ $prev_bdnscrypt -eq 1 ];then
+					#dns crypt disable from enable
+					um_network_dnscrypt_enable_todisable  #Assuming we only disable 
+				else 
+					#if bypass domains added
+					if [ -n "$ldomain_bypass" ];then
+						#assuming dnsmasq reload only.
+						#Since we have coded in generic way, we needed to stop dnscrypt too.
+						/etc/init.d/dnscrypt-proxy stop 2>/dev/null
+						um_network_set_local_domain_bypass $bdnscrypt
+					fi
+					#Just check and add if dns_acl is changed.
+					um_update_dnsdrop_firewall_rule 1
+				fi
+			#}
+			else
+			#{
+				#if it is network device mode
+				#In this option dnscrypt must always be enabled 
+				if [ $bdnscrypt -eq 0 ];then
+					um_print "dnscrypt must always be enabled in network device option...!"
+					exit 1
+				fi
+
+				#if bypass domains added  
+				if [ -n "$ldomain_bypass" ];then
+					#Since we have coded in generic way, we needed to stop dnscrypt too.
+					/etc/init.d/dnscrypt-proxy stop 2>/dev/null
+					um_netdev_set_local_domain_bypass
+				fi
+				#Just check and add if dns_acl is changed.
+				um_update_dnsdrop_firewall_rule 1
+			#}
+			fi
+		#}
+		else
+		#{ #Change in router identification.
+			#as the mode changes, dsncrypt proxy should be restarted accordingly.
+			/etc/init.d/dnscrypt-proxy stop 2>/dev/null
+			if [ $router_id -eq $ROUTER_ID_NETWORK ]; then
+				um_network_enable $bdnscrypt
+			else
+				um_netdev_enable
+			fi
+		#}
+		fi
+	#}
+	fi
+
+	#TODO: need to further investigate
+	uci commit umbrella
+}

@@ -1,0 +1,48 @@
+#!/bin/sh
+
+[ "$DEVICE" == "lo" ] && exit 0
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+local isboot=$(uci_get_state system.core.booted)
+[ "$isboot" != "1" ] && exit 0
+
+is_reload=0
+case "$INTERFACE" in
+	*_PD|*_tun1|*_tun2)
+		all_vlan_data=$(uci show network | grep ip6class=$INTERFACE | cut -d . -f 2)
+		#some code here now.
+		for vlan_iface in $all_vlan_data
+		do
+		#{
+			#PD is the source of IP address. check if DHCPv6 server is enabled.
+			server_uci=$(uci show dhcp | grep $vlan_iface | grep dhcp6_ | awk -F '.' '{print $2}')
+			if [ -n "$server_uci" ]
+			then
+				is_reload=1
+				break
+			else
+				continue
+			fi
+		#}
+		done
+		[ "$is_reload" == "0" ] && {
+			exit 0
+		}
+		;;
+	vlan*)
+		exit 0
+		;;
+	gre*)
+		exit 0
+		;;
+esac
+
+#grep -Eq "option '?dns_type'? '?isp'?" /tmp/etc/config/dhcp || exit 0
+
+case "$ACTION" in
+	ifup|ifupdate|ifdown)
+		/etc/init.d/dnsmasq reload &
+	;;
+esac

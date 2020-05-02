@@ -1,0 +1,115 @@
+From 60324ba045a4aa9a4bec1eaeb0146666d8c77f7a Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Mon, 5 Oct 2015 13:43:57 +0530
+Subject: [PATCH 20/60] SBR-92 Adjusted Indentations
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ commands/imageenv.c | 72 ++++++++++++++++++++++++++---------------------------
+ 1 file changed, 36 insertions(+), 36 deletions(-)
+
+diff --git a/commands/imageenv.c b/commands/imageenv.c
+index df68dc4..a15f900 100644
+--- a/commands/imageenv.c
++++ b/commands/imageenv.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2015 Vinaykumar Masane-B47602 <vinaykumar.masane@freescale>,
+- * Koneti Nagesh-B47094 <nagesh.koneti@freescale.com> 
++ * Koneti Nagesh-B47094 <nagesh.koneti@freescale.com>
+  * Freescale Semicondunctors Pvt. Ltd.
+  *
+  * See file CREDITS for list of people who contributed to this
+@@ -45,46 +45,46 @@
+  */
+ static int do_imageenv(struct command *cmdtp, int argc, char *argv[])
+ {
+-	int ret;
+-	int fd;
+-	char *buf;
+-	int err = 0;
++  int ret;
++  int fd;
++  char *buf;
++  int err = 0;
+ 
+ 
+-	buf = xmalloc(BUFSIZE);
++  buf = xmalloc(BUFSIZE);
+ 
+-		fd = open("/dev/nand0.env", O_RDONLY);
+-		if (fd < 0) {
+-			err = 1;
+-			printf("could not open the file\n");
+-			goto out;
+-		}
++  fd = open("/dev/nand0.env", O_RDONLY);
++  if (fd < 0) {
++    err = 1;
++    printf("could not open the file\n");
++    goto out;
++  }
+ 
+-		ret = read(fd, buf, BUFSIZE);
+-		if(ret < 0)
+-		{
+-		  err=1;
+-			printf("Reading from the file failed\n");
+-			close(fd);
+-			goto out;
+-		 }
+-		close(fd);
++  ret = read(fd, buf, BUFSIZE);
++  if(ret < 0)
++  {
++    err=1;
++    printf("Reading from the file failed\n");
++    close(fd);
++    goto out;
++  }
++  close(fd);
+ 
+-		if (buf[0] == 0x32)
+-		{
+-			 setenv("active","image2");
+-			 setenv("inactive","image1");
+-		}
+-	  else if(buf[0] == 0x31)
+-		{
+-			 setenv("active","image1");
+-			 setenv("inactive","image2");
+-		}
++  if (buf[0] == 0x32)
++  {
++    setenv("active","image2");
++    setenv("inactive","image1");
++  }
++  else if(buf[0] == 0x31)
++  {
++    setenv("active","image1");
++    setenv("inactive","image2");
++  }
+ 
+ out:
+-	free(buf);
++  free(buf);
+ 
+-	return err;
++  return err;
+ }
+ 
+ BAREBOX_CMD_HELP_START(imageenv)
+@@ -94,7 +94,7 @@ BAREBOX_CMD_HELP_TEXT ("Currently only active image ID supportedt\n")
+ BAREBOX_CMD_HELP_END
+ 
+ BAREBOX_CMD_START(imageenv)
+-	.cmd		= do_imageenv,
+-	.usage		= "read active image ID",
+-	BAREBOX_CMD_HELP(cmd_imageenv_help)
++  .cmd    = do_imageenv,
++  .usage    = "read active image ID",
++  BAREBOX_CMD_HELP(cmd_imageenv_help)
+ BAREBOX_CMD_END
+-- 
+2.7.4
+

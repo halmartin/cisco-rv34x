@@ -1,0 +1,47 @@
+#!/bin/sh
+# This script is executed as part of the hotplug event with
+# HOTPLUG_TYPE=iface, triggered by various scripts when an interface
+# is configured (ACTION=ifup) or deconfigured (ACTION=ifdown).  The
+# interface is available as INTERFACE, the real devicie as DEVICE.
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+ru_check=`uci get systeminfo.sysinfo.region 2> /dev/null`
+if [ "$ru_check" = "RU" ]; then
+	exit 0
+fi
+
+#logger -t button-hotplug-strongswan Device: $DEVICE   $INTERFACE/ Action: $ACTION
+[ "$DEVICE" == "lo" ] && exit 0
+
+#NOTE:  DEVICE consists of the physical interface name in it.
+#	INTERFACE consists of the logical name that we refer into the network configuration file.
+
+#This File is created just to sync the connected routes of Main table to table 220.
+
+case "$ACTION" in
+        ifup)
+		local subnet nw mask
+		#Now, add this route to routing table 220.
+		network_get_subnet subnet $INTERFACE
+		nw=`ipcalc.sh $subnet | grep NETWORK | cut -d = -f 2`
+		mask=`ipcalc.sh $subnet | grep NETMASK | cut -d = -f 2`
+		board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+		if [ "$board" = "RV340W" -o "$board" = "RV160W" -o "$board" = "RV260W" ];then
+			id=$(echo $INTERFACE | grep "vlan" | sed s/vlan//)
+			[ -n "$id" ] && {
+				[ "$(uci show wireless | grep "vlanid=$id\|disabled=0" | awk -F '.' '{print $2}'| uniq -c | grep -v '^ *1')" ] && {
+					DEVICE="br-$INTERFACE"
+				}
+			}
+		fi
+		ip route add $nw/$mask dev $DEVICE table 220
+        ;;
+        ifdown)
+		ip route flush dev $DEVICE table 220
+        ;;
+	rtupd)
+		ip route del default table 220 2>/dev/null # Deleting this route for all events, since we don't know when it comes. No harm even if it is not there. 
+	;;
+esac

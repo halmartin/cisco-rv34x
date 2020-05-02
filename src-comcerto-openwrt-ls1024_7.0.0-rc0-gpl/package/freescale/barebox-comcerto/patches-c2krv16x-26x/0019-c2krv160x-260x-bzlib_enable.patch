@@ -1,0 +1,25 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Enable bzlib(porting this patch from SDK5.4.1 20170105 version NXP's patch).
+--- barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig.org	2017-01-19 16:05:23.625252219 +0800
++++ barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	2017-01-19 16:06:18.376502504 +0800
+@@ -226,9 +226,9 @@
+ # booting
+ #
+ CONFIG_CMD_BOOTM=y
+-# CONFIG_CMD_BOOTM_ZLIB is not set
+-# CONFIG_CMD_BOOTM_BZLIB is not set
+-# CONFIG_CMD_BOOTM_SHOW_TYPE is not set
++CONFIG_CMD_BOOTM_ZLIB=y
++CONFIG_CMD_BOOTM_BZLIB=y
++CONFIG_CMD_BOOTM_SHOW_TYPE=y
+ CONFIG_CMD_BOOTZ=y
+ CONFIG_CMD_BOOTU=y
+ CONFIG_CMD_RESET=y
+@@ -372,6 +372,7 @@
+ # CONFIG_FS_FAT is not set
+ CONFIG_PARTITION_NEED_MTD=y
+ CONFIG_ZLIB=y
++CONFIG_BZLIB=y
+ CONFIG_CRC32=y
+ # CONFIG_DIGEST is not set
+ # CONFIG_GENERIC_FIND_NEXT_BIT is not set

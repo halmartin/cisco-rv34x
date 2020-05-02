@@ -1,0 +1,48 @@
+--- barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig.org	2017-04-14 10:33:32.057545819 +0800
++++ barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	2017-04-14 10:33:55.777547753 +0800
+@@ -315,7 +315,7 @@
+ CONFIG_NAND_WRITE=y
+ CONFIG_NAND_ECC_SOFT=y
+ # CONFIG_NAND_ECC_HW is not set
+-CONFIG_NAND_ECC_HW_SYNDROME=y
++# CONFIG_NAND_ECC_HW_SYNDROME is not set
+ # CONFIG_NAND_ECC_HW_NONE is not set
+ CONFIG_NAND_COMCERTO_ECC_8_HW_BCH=y
+ # CONFIG_NAND_COMCERTO_ECC_24_HW_BCH is not set
+--- barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig.org	2017-04-14 10:33:37.307547787 +0800
++++ barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig	2017-04-14 10:33:55.777547753 +0800
+@@ -268,9 +268,9 @@
+ CONFIG_NAND=y
+ # CONFIG_MTD_NAND_ECC_BCH is not set
+ # CONFIG_NAND_WRITE is not set
+-# CONFIG_NAND_ECC_SOFT is not set
++CONFIG_NAND_ECC_SOFT=y
+ # CONFIG_NAND_ECC_HW is not set
+-CONFIG_NAND_ECC_HW_SYNDROME=y
++# CONFIG_NAND_ECC_HW_SYNDROME is not set
+ # CONFIG_NAND_ECC_HW_NONE is not set
+ CONFIG_NAND_COMCERTO_ECC_8_HW_BCH=y
+ # CONFIG_NAND_COMCERTO_ECC_24_HW_BCH is not set
+--- barebox-2011.06.0/drivers/mtd/nand/comcerto_nand.c.org	2017-04-14 10:33:49.177547786 +0800
++++ barebox-2011.06.0/drivers/mtd/nand/comcerto_nand.c	2017-04-14 10:34:55.408797864 +0800
+@@ -860,7 +860,7 @@
+ 
+ 	/* 20 us command delay time */
+ 	nand_device->chip_delay = 20;
+-	nand_device->ecc.mode = NAND_ECC_HW_SYNDROME;
++	nand_device->ecc.mode = NAND_ECC_SOFT;
+ 
+ #if defined(CONFIG_MACH_COMCERTO_C2K_ASIC) && defined(CONFIG_NAND_TYPE_SLC)
+ 	nand_device->options = NAND_BUSWIDTH_16;
+@@ -975,9 +975,11 @@
+ 	nand_device->scan_bbt = comcerto_scan_bbt;
+ #endif /* CONFIG_COMCERTO_NAND_BBT */
+ 
++#ifdef CONFIG_NAND_ECC_HW_SYNDROME
+ #ifndef CONFIG_COMCERTO_NAND_ULOADER
+ 	nand_init_ecc_hw_syndrome(nand_device);
+ #endif
++#endif
+ 
+ 	nand_device->options |= NAND_NO_SUBPAGE_WRITE;
+ 

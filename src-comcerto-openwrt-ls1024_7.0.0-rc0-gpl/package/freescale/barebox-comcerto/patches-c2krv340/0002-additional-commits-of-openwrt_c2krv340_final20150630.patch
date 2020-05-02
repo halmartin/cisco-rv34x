@@ -1,0 +1,67 @@
+From bf6bedb4cd834a4b78d0c1088e48093addea8d84 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy K <ganeshreddy@freescale.com>
+Date: Fri, 3 Jul 2015 22:49:22 +0530
+Subject: [PATCH 02/60] additional commits of
+ openwrt_c2krv340_final20150630.patch to barebox repo
+
+ barebox build is not happening because of PEGATRON RV340 enablemnet. Hence correcting in our LSconfiguration files also.
+
+Signed-off-by: Ganesh Reddy K <ganeshreddy@freescale.com>
+---
+ arch/arm/configs/comcerto-2k_mfcnevm_defconfig              | 1 +
+ arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig        | 1 +
+ arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig | 1 +
+ arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig      | 1 +
+ 4 files changed, 4 insertions(+)
+
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_defconfig
+index 785c177..5b1d993 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_defconfig
+@@ -38,6 +38,7 @@ CONFIG_COMCERTO_C2000=y
+ #
+ # CONFIG_MACH_COMCERTO_C2K_EVM is not set
+ CONFIG_MACH_COMCERTO_C2K_MFCNEVM=y
++# CONFIG_MACH_COMCERTO_C2K_RV340 is not set
+ # CONFIG_MACH_COMCERTO_C2K_ASIC is not set
+ # CONFIG_MACH_COMCERTO_C2K_RTSM is not set
+ 
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig
+index 313af36..9e5d1ac 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig
+@@ -38,6 +38,7 @@ CONFIG_COMCERTO_C2000=y
+ #
+ # CONFIG_MACH_COMCERTO_C2K_EVM is not set
+ CONFIG_MACH_COMCERTO_C2K_MFCNEVM=y
++# CONFIG_MACH_COMCERTO_C2K_RV340 is not set
+ # CONFIG_MACH_COMCERTO_C2K_ASIC is not set
+ # CONFIG_MACH_COMCERTO_C2K_RTSM is not set
+ 
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig
+index 328b846..584da50 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig
+@@ -37,6 +37,7 @@ CONFIG_COMCERTO_C2000=y
+ #
+ # CONFIG_MACH_COMCERTO_C2K_EVM is not set
+ CONFIG_MACH_COMCERTO_C2K_MFCNEVM=y
++# CONFIG_MACH_COMCERTO_C2K_RV340 is not set
+ # CONFIG_MACH_COMCERTO_C2K_ASIC is not set
+ # CONFIG_MACH_COMCERTO_C2K_RTSM is not set
+ 
+diff --git a/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig b/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig
+index 25c11a0..c84d516 100644
+--- a/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig
+@@ -37,6 +37,7 @@ CONFIG_COMCERTO_C2000=y
+ #
+ # CONFIG_MACH_COMCERTO_C2K_EVM is not set
+ CONFIG_MACH_COMCERTO_C2K_MFCNEVM=y
++# CONFIG_MACH_COMCERTO_C2K_RV340 is not set
+ # CONFIG_MACH_COMCERTO_C2K_ASIC is not set
+ # CONFIG_MACH_COMCERTO_C2K_RTSM is not set
+ 
+-- 
+2.7.4
+

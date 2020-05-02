@@ -1,0 +1,22 @@
+diff -aurN a/src/interfaces.c b/src/interfaces.c
+--- a/src/interfaces.c	2016-06-16 12:17:15.078578523 +0530
++++ b/src/interfaces.c	2016-06-16 12:08:48.998578523 +0530
+@@ -537,7 +537,18 @@
+ 	if ((port->p_id =
+ 		calloc(1, port->p_id_len)) == NULL)
+ 		fatal(NULL);
++	if (strcmp(hardware->h_ifname,"eth3")==0 ) {
++	memcpy(port->p_id, "LAN", port->p_id_len);
++	}
++	else if (strcmp(hardware->h_ifname,"eth2")==0 ) {
++	memcpy(port->p_id, "WAN1", port->p_id_len);
++	}
++	else if (strcmp(hardware->h_ifname,"eth0")==0 ) {
++	memcpy(port->p_id, "WAN2", port->p_id_len);
++	}
++	else {
+ 	memcpy(port->p_id, hardware->h_ifname, port->p_id_len);
++	}
+ 	if (buffer[strlen(buffer) - 1] == '\n')
+ 		buffer[strlen(buffer) - 1] = '\0';
+ 	port->p_descr = strdup(hardware->h_ifname);

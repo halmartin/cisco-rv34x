@@ -1,0 +1,16 @@
+--- a/net/bridge/br_fdb.c	2017-04-13 23:43:36.577721028 -0500
++++ b/net/bridge/br_fdb.c	2017-04-13 23:52:13.981744962 -0500
+@@ -633,9 +633,10 @@ void br_fdb_update(struct net_bridge *br
+ 
+ 				fdb_update.dev = source->dev;
+ 				fdb_update.mac_addr = fdb->addr.addr;
+-				//FIXME
+-				//__rtmsg_ifinfo(RTM_NEWLINK, br->dev, 0, GFP_ATOMIC);
+-				//FIXME
++				/* rtmsg_ifinfo/__rtmsg_ifinfo needs to be called under lock */
++				rtnl_lock();
++				rtmsg_ifinfo(RTM_NEWLINK,br->dev, 0, GFP_ATOMIC);
++				rtnl_unlock();
+ 				call_brevent_notifiers(BREVENT_FDB_UPDATE, &fdb_update);
+ #endif
+ 				fdb->dst = source;

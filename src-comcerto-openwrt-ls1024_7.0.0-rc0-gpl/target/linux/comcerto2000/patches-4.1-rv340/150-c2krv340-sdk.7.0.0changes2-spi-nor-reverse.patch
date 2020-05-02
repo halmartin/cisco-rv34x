@@ -1,0 +1,145 @@
+diff -aurN '--exclude-from=/tmp/files' linux-4.1.8-orig/arch/arm/mach-comcerto/board-c2krv340.c linux-4.1.8/arch/arm/mach-comcerto/board-c2krv340.c
+--- linux-4.1.8-orig/arch/arm/mach-comcerto/board-c2krv340.c	2017-08-30 16:55:02.920489062 +0530
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv340.c	2017-08-31 17:01:17.766839269 +0530
+@@ -71,6 +71,7 @@
+ 
+ #include <linux/phy.h>
+ 
++extern struct smp_operations comcerto_smp_ops;
+ extern void platform_reserve(void);
+ extern void device_map_io (void);
+ extern void device_irq_init(void);
+@@ -279,10 +280,10 @@
+ struct spi_controller_data spi_ctrl_data =  {
+         .poll_mode = 1,
+ };
+-
++ 
+ #if defined(CONFIG_SPI_MSPD_HIGH_SPEED)
+ struct spi_controller_pdata hs_spi_pdata = {
+-	.use_dma = 1,
++	.use_dma = 0,
+ 	.num_chipselects = 2,
+ 	.bus_num = 1,
+ 	.max_freq = 5000000,
+@@ -309,25 +310,25 @@
+ 	{
+ 		/* FIXME: for chipselect-0 */
+ 		.modalias = "spidev",
+-		.chip_select = 0,
++		 .chip_select = 0,
+ 		.max_speed_hz = 5000000,
+ 		.bus_num = 0,
+-		.irq = -1,
+-		.mode = SPI_MODE_3,
+-		.platform_data = &spi_pdata,
+-		.controller_data = &spi_ctrl_data,
++		 .irq = -1,
++		 .mode = SPI_MODE_3,
++		 .platform_data = &spi_pdata,
++		 .controller_data = &spi_ctrl_data,
+ 	},
+-	{
++        {
+ 		/* FIXME: for chipselect-0 */
+ 		.modalias = "m25p80",
+-		.chip_select = 0,
++                .chip_select = 0,
+ 		.max_speed_hz = 5000000,
+ 		.bus_num = 1,
+-		.irq = -1,
+-		.mode = SPI_MODE_3,
++                .irq = -1,
++                .mode = SPI_MODE_3,
+ 		.platform_data = &comcerto_spi_flash_data,
+-		.controller_data = &spi_ctrl_data,
+-	},
++                .controller_data = &spi_ctrl_data,
++        },
+ };
+ #endif
+ 
+@@ -588,6 +589,7 @@
+ 		.end    = COMCERTO_AXI_IPSEC_BASE + COMCERTO_AXI_IPSEC_SIZE - 1,
+ 		.flags  = IORESOURCE_MEM,
+ 	},
++
+ 	{
+ 		.name	= "hif",
+ 		.start  = IRQ_PFE_HIF,
+@@ -747,6 +749,7 @@
+ MACHINE_START(COMCERTO, "Comcerto 2000 RV340")
+ 	/* Mindspeed Technologies Inc. */
+ 	.atag_offset    = COMCERTO_AXI_DDR_BASE + 0x100,
++	.smp		= smp_ops(comcerto_smp_ops),
+ 	.reserve	= platform_reserve,
+ 	.map_io		= platform_map_io,
+ 	.init_irq	= platform_irq_init,
+@@ -754,7 +757,7 @@
+ 	.init_time      = comcerto_timer_init,
+ #ifdef CONFIG_ZONE_DMA
+ 	.dma_zone_size	= SZ_32M + 11*SZ_4M,
++#endif
+ 	.restart        = ls1024_restart,
+         .reboot_mode    = REBOOT_SOFT,
+-#endif
+ MACHINE_END
+diff -aurN '--exclude-from=/tmp/files' linux-4.1.8-orig/drivers/mtd/devices/m25p80.c linux-4.1.8/drivers/mtd/devices/m25p80.c
+--- linux-4.1.8-orig/drivers/mtd/devices/m25p80.c	2017-08-30 14:20:11.820665708 +0530
++++ linux-4.1.8/drivers/mtd/devices/m25p80.c	2017-08-31 17:40:22.518794690 +0530
+@@ -348,6 +348,7 @@
+ 
+ 	data = dev_get_platdata(&spi->dev);
+ 
++	pr_debug("%s:\n", __FUNCTION__) ;
+ 	flash = devm_kzalloc(&spi->dev, sizeof(*flash), GFP_KERNEL);
+ 	if (!flash)
+ 		return -ENOMEM;
+@@ -392,7 +393,6 @@
+ 	ret = spi_nor_scan(nor, flash_name, mode);
+ 	if (ret)
+ 		return ret;
+-
+ 	ppdata.of_node = spi->dev.of_node;
+ 
+ 	return mtd_device_parse_register(&flash->mtd, NULL, &ppdata,
+diff -aurN '--exclude-from=/tmp/files' linux-4.1.8-orig/drivers/mtd/spi-nor/spi-nor.c linux-4.1.8/drivers/mtd/spi-nor/spi-nor.c
+--- linux-4.1.8-orig/drivers/mtd/spi-nor/spi-nor.c	2017-08-30 14:20:11.812665708 +0530
++++ linux-4.1.8/drivers/mtd/spi-nor/spi-nor.c	2017-08-31 17:40:03.638795049 +0530
+@@ -816,7 +816,36 @@
+ 	if (ret)
+ 		return ret;
+ 
++	write_enable(nor);
++
++	page_offset = to & (nor->page_size - 1);
++
++	/* do all the bytes fit onto one page? */
++	if (page_offset + len <= nor->page_size) {
+ 	nor->write(nor, to, len, retlen, buf);
++	} else {
++		/* the size of data remaining on the first page */
++		page_size = nor->page_size - page_offset;
++		nor->write(nor, to, page_size, retlen, buf);
++
++		/* write everything in nor->page_size chunks */
++		for (i = page_size; i < len; i += page_size) {
++			page_size = len - i;
++			if (page_size > nor->page_size)
++				page_size = nor->page_size;
++
++			ret = spi_nor_wait_till_ready(nor);
++			if (ret)
++				goto write_err;
++
++			write_enable(nor);
++
++			nor->write(nor, to + i, page_size, retlen, buf + i);
++		}
++	}
++
++	ret = spi_nor_wait_till_ready(nor);
++write_err:
+ 	spi_nor_unlock_and_unprep(nor, SPI_NOR_OPS_WRITE);
+ 	return ret;
+ }

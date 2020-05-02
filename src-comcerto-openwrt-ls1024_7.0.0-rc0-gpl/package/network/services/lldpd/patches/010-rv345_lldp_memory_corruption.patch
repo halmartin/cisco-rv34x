@@ -1,0 +1,236 @@
+diff -ruaN b/src/lldp.c a/src/lldp.c
+--- b/src/lldp.c	2016-09-08 12:31:03.999083260 +0530
++++ a/src/lldp.c	2016-09-08 12:27:41.039083284 +0530
+@@ -40,6 +40,10 @@
+ 
+ #define CPUTAGPROTOCOL 0x8899
+ 
++
++#define NOTRECEIVED "Not received"
++#define NOTRECEIVED_LEN 12
++
+ extern char PID_RV34X[10];
+ 
+ inline static int
+@@ -148,7 +152,7 @@
+                 cputag[9]=0x00;
+                 cputag[10]=0x00; 
+                 cputag[11]=0x00;
+-
++	
+                 for(j=0;j<=15;j++)
+                 {
+                     sprintf(cmd,"uci get lldpd.config.lan%d",j);
+@@ -231,7 +235,6 @@
+             
+         }    
+     }
+-	
+     if ((packet = (u_int8_t*)malloc(length)) == NULL)
+ 		return ENOMEM;
+ 	memset(packet, 0, length);
+@@ -240,35 +243,35 @@
+ 	/* Ethernet header */
+    if(strcmp(port->p_descr,LAN_INTERFACE)==0)
+    {
+-
+-
+-		if (strcmp(PID_RV34X,"RV340") == 0)
+-		{
+-			if (!(
+-	      /* LLDP multicast address */
+-	      POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
+-	      /* Source MAC address */
+-	      POKE_BYTES(&hardware->h_lladdr, sizeof(hardware->h_lladdr)) && POKE_BYTES(cputag, CPUTAGLEN) && 
+-	      /* LLDP frame */
+-	      POKE_UINT16(ETHERTYPE_LLDP)))
+-		goto toobig;
+-    }
+-		else if (strcmp(PID_RV34X,"RV345") == 0)
+-		{ 
+-			if (!(
+-			      /* LLDP multicast address */
+-			      POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
+-			      /* Source MAC address */
+-			      POKE_BYTES(&hardware->h_lladdr, sizeof(hardware->h_lladdr)) && POKE_BYTES(cputag, RV345_CPUTAGLEN) && 
+-			      /* LLDP frame */
+-			      POKE_UINT16(ETHERTYPE_LLDP)))
+-				goto toobig;
+-		}
+-		else
+-		{
+-        		LLOG_INFO("---- Invalid PID ---- ");
+-		}
++	if (strcmp(PID_RV34X,"RV340") == 0)
++	{
++		LLOG_INFO("LLDP SEND RV340");
++		if (!(
++		      /* LLDP multicast address */
++		      POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
++		      /* Source MAC address */
++		      POKE_BYTES(&hardware->h_lladdr, sizeof(hardware->h_lladdr)) && POKE_BYTES(cputag, CPUTAGLEN) && 
++		      /* LLDP frame */
++		      POKE_UINT16(ETHERTYPE_LLDP)))
++			goto toobig;
++    	}
++	else if (strcmp(PID_RV34X,"RV345") == 0)
++	{ 
++		LLOG_INFO("LLDP SEND RV345");
++		if (!(
++		      /* LLDP multicast address */
++		      POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
++		      /* Source MAC address */
++		      POKE_BYTES(&hardware->h_lladdr, sizeof(hardware->h_lladdr)) && POKE_BYTES(cputag, RV345_CPUTAGLEN) && 
++		      /* LLDP frame */
++		      POKE_UINT16(ETHERTYPE_LLDP)))
++			goto toobig;
+ 	}
++	else
++	{
++        	LLOG_INFO("---- Invalid PID ---- ");
++	}
++   }
+    	else 
+ 	{
+     if (!(
+@@ -356,8 +359,7 @@
+ 			  POKE_UINT8(0) &&
+ 			  POKE_END_LLDP_TLV))
+ 			goto toobig;
+-	}
+-
++}
+ 	/* Port description */
+ 	if (!(
+ 	      POKE_START_LLDP_TLV(LLDP_TLV_PORT_DESCR) &&
+@@ -605,6 +607,7 @@
+ 	      POKE_END_LLDP_TLV))
+ 		goto toobig;
+ 
++	LLOG_INFO("LLDP packet sending out cputag[10] = %x : cputag[11] = %x", cputag[10], cputag[11]);
+ 	if (hardware->h_ops->send(global, hardware,
+ 		(char *)packet, pos - packet) == -1) {
+ 		LLOG_WARN("unable to send packet on real device for %s",
+@@ -651,8 +654,8 @@
+     struct lldpd_hardware *hardware,
+     struct lldpd_chassis **newchassis, struct lldpd_port **newport)
+ {
+-	struct lldpd_chassis *chassis;
+-	struct lldpd_port *port;
++	struct lldpd_chassis *chassis = NULL;
++	struct lldpd_port *port = NULL;
+ 	const char lldpaddr[] = LLDP_MULTICAST_ADDR;
+ 	const char dot1[] = LLDP_TLV_ORG_DOT1;
+ 	const char dot3[] = LLDP_TLV_ORG_DOT3;
+@@ -696,21 +699,22 @@
+ 	TAILQ_INIT(&port->p_ppvids);
+ 	TAILQ_INIT(&port->p_pids);
+ #endif
++       LLOG_INFO(" -- Decapsulating the VLAN frames --");
+     /* Decapsulate VLAN frames */
+     if (((struct ethhdr*)frame)->h_proto == htons(CPUTAGPROTOCOL)) {
+ 
+ 	if (strcmp(PID_RV34X,"RV340") == 0)
+         {
+-          portno=frame[PORTOFFSET];
+-        	LLOG_INFO(" ---- RV340 LLDP ---- %d", portno);
+-          memmove(frame+CPUTAGLEN,frame,2*ETH_ALEN);
+-          frame=frame+CPUTAGLEN;
+-          s=s-CPUTAGLEN;
++		  portno=frame[PORTOFFSET];
++		  LLOG_INFO("RV340 LLDP port [%d]", portno);
++		  memmove(frame+CPUTAGLEN,frame,2*ETH_ALEN);
++		  frame=frame+CPUTAGLEN;
++		  s=s-CPUTAGLEN;
+         }
+         else if (strcmp(PID_RV34X,"RV345") == 0)
+         {
+-          	portno=frame[RV345_PORTOFFSET];
+-        	LLOG_INFO("---- RV345 LLDP ---- %d", portno);
++		portno=frame[RV345_PORTOFFSET];
++		LLOG_INFO("RV345 LLDP port [%d]", portno);
+ 		memmove(frame+RV345_CPUTAGLEN,frame,2*ETH_ALEN);
+ 		frame=frame+RV345_CPUTAGLEN;
+ 		s=s-RV345_CPUTAGLEN;
+@@ -784,6 +788,7 @@
+ 			break;
+ 		case LLDP_TLV_CHASSIS_ID:
+ 		case LLDP_TLV_PORT_ID:
++
+ 			CHECK_TLV_SIZE(2, "Port Id");
+ 			tlv_subtype = PEEK_UINT8;
+ 			if ((tlv_subtype == 0) || (tlv_subtype > 7)) {
+@@ -818,7 +823,7 @@
+                                          hardware->h_ifname);
+                  break;
+             }
+-            if ((b = (char *)calloc(1, tlv_size + 1 + 9)) == NULL) {
++            if ((b = (char *)calloc(1, tlv_size + 1 + sizeof(PORT_DETAILS))) == NULL) {
+                 LLOG_WARN("unable to allocate memory for string tlv "
+                                 "received on %s",
+                                  hardware->h_ifname);
+@@ -826,9 +831,9 @@
+             }
+             PEEK_BYTES(b, tlv_size);
+ 	    snprintf (PORT_DETAILS, sizeof (PORT_DETAILS)," port=%d",portno);	    
+-	    strcat (b, PORT_DETAILS);
++	    strncat (b, PORT_DETAILS, strlen(PORT_DETAILS));
+             port->p_descr = b;
+-            LLOG_INFO("port description %s",port->p_descr);
++            LLOG_INFO("port description is present %s",port->p_descr);
+             break;
+ 		case LLDP_TLV_SYSTEM_NAME:
+ 		case LLDP_TLV_SYSTEM_DESCR:
+@@ -1252,30 +1257,42 @@
+ 		    hardware->h_ifname);
+ 		goto malformed;
+ 	}
+-#define NOTRECEIVED "Not received"
+ 	if (chassis->c_name == NULL) {
+-		if ((chassis->c_name = (char *)calloc(1, strlen(NOTRECEIVED) + 1)) == NULL) {
++            LLOG_INFO("chassis->c_name is NULL");
++		if ((chassis->c_name = (char *)calloc(1, NOTRECEIVED_LEN + 1)) == NULL) {
+ 			LLOG_WARNX("unable to allocate null chassis name");
+ 			goto malformed;
+ 		}
+-		memcpy(chassis->c_name, NOTRECEIVED, strlen(NOTRECEIVED));
++		memset(chassis->c_name,0,sizeof(chassis->c_name));
++		memcpy(chassis->c_name, NOTRECEIVED, NOTRECEIVED_LEN);
++            	LLOG_INFO(" chassis->c_name = [%s]", chassis->c_name);
+ 	}
+ 	if (chassis->c_descr == NULL) {
+-		if ((chassis->c_descr = (char *)calloc(1, strlen(NOTRECEIVED) + 1)) == NULL) {
++            LLOG_INFO("chassis->c_descr is NULL");
++		if ((chassis->c_descr = (char *)calloc(1, NOTRECEIVED_LEN + 1)) == NULL) {
+ 			LLOG_WARNX("unable to allocate null chassis description");
+ 			goto malformed;
+ 		}
+-		memcpy(chassis->c_descr, NOTRECEIVED, strlen(NOTRECEIVED));
++		memset(chassis->c_descr,0,sizeof(chassis->c_descr));
++		memcpy(chassis->c_descr, NOTRECEIVED, NOTRECEIVED_LEN);
++            	LLOG_INFO(" chassis->c_descr = [%s]", chassis->c_descr);
+ 	}
+ 	if (port->p_descr == NULL) {
+-		if ((port->p_descr = (char *)calloc(1, strlen(NOTRECEIVED) + strlen(PORT_DETAILS) + 1)) == NULL) {
++            	LLOG_INFO("port->p_descr is NULL");
++		if ((port->p_descr = (char *)calloc(1, NOTRECEIVED_LEN + sizeof(PORT_DETAILS) + 1)) == NULL) {
+ 			LLOG_WARNX("unable to allocate null port description");
+ 			goto malformed;
+ 		}
+-		memcpy(port->p_descr, NOTRECEIVED, strlen(NOTRECEIVED));
+-	    snprintf (PORT_DETAILS, sizeof (PORT_DETAILS)," port=%d",portno);	    
+-	    strcat (port->p_descr, PORT_DETAILS);
+-            LLOG_INFO("port description %s",port->p_descr);
++			
++		memset(port->p_descr,0,sizeof(port->p_descr));
++		memcpy(port->p_descr, NOTRECEIVED, NOTRECEIVED_LEN);
++            	LLOG_INFO("port->p_descr = [%s]", port->p_descr);
++		
++	    	snprintf (PORT_DETAILS, sizeof(PORT_DETAILS)," port=%d",portno);	    
++            	LLOG_INFO("PORT_DETAILS  [%s] and length [%d] ", PORT_DETAILS, strlen(PORT_DETAILS));
++
++	    	strncat (port->p_descr, PORT_DETAILS, strlen(PORT_DETAILS));
++            	LLOG_INFO("Final  port description [%s] and length [%d]",port->p_descr, strlen(port->p_descr));
+ 	}
+ 	*newchassis = chassis;
+ 	*newport = port;

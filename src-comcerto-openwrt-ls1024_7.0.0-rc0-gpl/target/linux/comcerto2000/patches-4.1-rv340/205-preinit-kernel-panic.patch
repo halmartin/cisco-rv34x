@@ -1,0 +1,32 @@
+From 461ccca2d857a145b1420062917ace57aebd91db Mon Sep 17 00:00:00 2001
+From: Subramanyam <reddi.m@nxp.com>
+Date: Wed, 19 Sep 2018 16:06:19 +0530
+Subject: [PATCH 2/2] Addressed kernel panic, when switch firmware from BB2 to
+ MR0.5
+
+Signed-off-by: Subramanyam <reddi.m@nxp.com>
+---
+ init/main.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/init/main.c b/init/main.c
+index 2a89545..45b6872 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -957,10 +957,11 @@ static int __ref kernel_init(void *unused)
+ 		ret = run_init_process(execute_command);
+ 		if (!ret)
+ 			return 0;
+-		panic("Requested init %s failed (error %d).",
++		pr_err("Requested init %s failed (error %d).",
+ 		      execute_command, ret);
+ 	}
+-	if (!try_to_run_init_process("/sbin/init") ||
++	if (!try_to_run_init_process("/etc/preinit") ||
++	    !try_to_run_init_process("/sbin/init") ||
+ 	    !try_to_run_init_process("/etc/init") ||
+ 	    !try_to_run_init_process("/bin/init") ||
+ 	    !try_to_run_init_process("/bin/sh"))
+-- 
+1.9.1
+

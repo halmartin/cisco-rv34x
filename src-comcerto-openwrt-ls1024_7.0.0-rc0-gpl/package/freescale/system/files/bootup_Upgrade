@@ -1,0 +1,88 @@
+#!/bin/sh
+
+filePathUSB1=
+filePathUSB2=
+USB1PATH="/media/USB/USB1"
+USB2PATH="/media/USB/USB2"
+USB1FILELIST="/tmp/usb1filelist"
+USB2FILELIST="/tmp/usb2filelist"
+TMPLIST="/tmp/usbList"
+USB1_FILE="FILE://USB1"
+USB2_FILE="FILE://USB2"
+if [ "$_this_board" = "RV160" -o "$_this_board" = "RV160W" -o "$_this_board" = "RV260" -o "$_this_board" = "RV260W" -o "$_this_board" = "RV260P" ];then
+platform_led_script="rv16x_26x_led.sh"
+FRM_APPLY_SCRIPT="sh /usr/bin/rv16x_26x_fw_unpack.sh"
+else
+platform_led_script="rv340_led.sh"
+FRM_APPLY_SCRIPT="sh /usr/bin/rv340_fw_unpack.sh"
+fi
+
+PID=`uci get systeminfo.sysinfo.pid`
+SN=`uci get systeminfo.sysinfo.serial_number`
+MAC=`uci get systeminfo.sysinfo.maclan | sed -e "s/://g"`
+EXT="img"
+errcode=
+
+start () {
+	# Check if usb1 is mounted
+	if [ -d "$USB1PATH" ];then
+		find $USB1PATH/ -type f -iname "*.img" | sort > $TMPLIST
+		`cat $TMPLIST | grep -i "${PID}-${MAC}-${SN}.${EXT}" > $USB1FILELIST`
+		`cat $TMPLIST | grep -i "${PID}-${SN}.${EXT}" >> $USB1FILELIST`
+		`cat $TMPLIST | grep -i "${PID}-${MAC}.${EXT}" >> $USB1FILELIST`
+		`cat $TMPLIST | grep -i "${PID}.${EXT}" >> $USB1FILELIST`
+		while read line 
+		do
+			FIRMWARE_NAME=${line#*$USB1PATH/}
+			logger -t system -p local0.notice "Found image $USB1_FILE/$FIRMWARE_NAME in USB1. Performing firmware upgrade."
+			
+			# Initiate the firmware process and check
+			`$FRM_APPLY_SCRIPT $line "1" 2>/dev/null 1>/dev/null`	
+			errcode=$?
+			[ "$errcode" = 0 ] && {
+				logger -t system -p local0.notice "Firmware updated to $(basename $FIRMWARE_NAME) from USB1."
+				rm -rf $USB1FILELIST
+				rm -rf $TMPLIST
+				# Reboot the system
+				`/usr/bin/system-reboot firmware-state inactive option none &` 
+				exit 0
+			}
+			# Stop the diag and try next image
+			pgrep -f "$platform_led_script diag" | xargs kill -9 > /dev/null 2>&1
+			sleep 1
+			`/usr/bin/$platform_led_script diag off` >/dev/null 2>&1
+		done < $USB1FILELIST
+	fi
+	
+	if [ -d "$USB2PATH" ];then
+		find $USB2PATH/ -type f -iname "*.img" | sort > $TMPLIST
+		`cat $TMPLIST | grep -i "${PID}-${MAC}-${SN}.${EXT}" > $USB2FILELIST`
+		`cat $TMPLIST | grep -i  "${PID}-${SN}.${EXT}" >> $USB2FILELIST`
+		`cat $TMPLIST | grep -i "${PID}-${MAC}.${EXT}" >> $USB2FILELIST`
+		`cat $TMPLIST | grep -i "${PID}.${EXT}" >> $USB2FILELIST`
+		while read line 
+		do
+			FIRMWARE_NAME=${line#*$USB2PATH/}
+			logger -t system -p local0.notice "Found image $USB2_FILE/$FIRMWARE_NAME in USB2. Performing firmware upgrade."
+			
+			# Initiate the firmware process and check
+			`$FRM_APPLY_SCRIPT $line "1" 2>/dev/null 1>/dev/null`	
+			errcode="$?"
+			[ "$errcode" = 0 ] && {
+				logger -t system -p local0.notice "Firmware updated to $(basename $FIRMWARE_NAME) from USB2."
+				rm -rf $USB1FILELIST
+				rm -rf $USB2FILELIST
+				rm -rf $TMPLIST
+				# Reboot the system
+				`/usr/bin/system-reboot firmware-state inactive option none &` 
+				exit 0
+			}
+			# Stop the diag and try next image
+			pgrep -f "$platform_led_script diag" | xargs kill -9 > /dev/null 2>&1
+			sleep 1
+			`/usr/bin/$platform_led_script diag off` >/dev/null 2>&1
+		done < $USB2FILELIST
+	fi	
+}
+
+start

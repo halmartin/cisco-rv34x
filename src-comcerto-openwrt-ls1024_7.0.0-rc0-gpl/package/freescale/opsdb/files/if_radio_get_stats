@@ -1,0 +1,269 @@
+#!/bin/sh
+
+IF_RADIO_STAT_FILE="/tmp/stats/if_radio_stats"
+
+cat /dev/null > ${IF_RADIO_STAT_FILE}
+
+board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+
+local i=-1                                    
+while grep -qs "^ *wl$((++i)):" /proc/net/dev; do
+	device="wl$i"
+
+	if [ "$device" = "wl0" ];then
+		if [ "$board" = "RV160W" ];then
+			WLANPORT="WLAN1"
+		elif [ "$board" = "RV340W" ];then
+			WLANPORT="WLAN1"
+		else 
+			WLANPORT="WLAN0"
+		fi
+	else
+		if [ "$board" = "RV160W" ];then
+			WLANPORT="WLAN0"
+		elif [ "$board" = "RV340W" ];then
+			WLANPORT="WLAN2"
+		else
+			WLANPORT="WLAN1"
+		fi
+	fi
+	
+	rateset_line="$(wl -i $device rateset | wc -l)"
+	
+	line=1
+	RATE_BASIC=""
+	RATE=""
+	HT_MCS=""
+	VHT_MCS1=""
+	VHT_MCS2=""
+	VHT_MCS3=""
+	VHT_MCS4=""
+	TRANSMIT_RATE_SUPPORTED=""
+	while [ $line -le $rateset_line ];do
+		[ $line -eq 1 ] && {
+			output="$(wl -i $device rateset | head -n 1 | sed 's/\[ \| \]//g')"
+			for idx in $output; do
+				rate="$idx"
+				if [ -n "$(echo $idx | grep '(b)')" ]; then
+					TRANSMIT_RATE_SUPPORTED="${TRANSMIT_RATE_SUPPORTED}${rate}#"
+	
+					rate="$(echo $idx | sed 's/(b)//g')"
+					rate="$(echo $rate | awk '{printf ("%.0f", $1*10)}')"
+					RATE_BASIC="${RATE_BASIC}${rate}#"
+					RATE="${RATE}${rate}#"
+				else
+					TRANSMIT_RATE_SUPPORTED="${TRANSMIT_RATE_SUPPORTED}${rate}#"
+	
+					rate="$(echo $rate | awk '{printf ("%.0f", $1*10)}')"
+					RATE="${RATE}${rate}#"
+				fi
+			done
+		}
+		
+		[ $line -eq 2 ] && {
+			output="$(wl -i $device rateset | head -n 2 | tail -n 1 | sed 's/MCS SET : \[ \|\]//g')"
+			for idx in $output; do
+				HT_MCS="${HT_MCS}${idx}#"
+			done
+		}
+		
+		[ $line -eq 3 ] && {
+			output="$(wl -i $device rateset | head -n 3 | tail -n 1 | sed 's/VHT SET : //g')"
+			output="$(echo $output | sed 's/x[^d]//g')"
+			for idx in $output; do
+				VHT_MCS1="${VHT_MCS1}${idx}#"
+			done
+		}
+		
+		[ $line -eq 4 ] && {
+			output="$(wl -i $device rateset | head -n 4 | tail -n 1 | sed 's/ * : //g') "
+			output="$(echo $output | sed 's/x[^d]//g')"
+			for idx in $output; do
+				VHT_MCS2="${VHT_MCS2}${idx}#"
+			done
+		}
+		
+		[ $line -eq 5 ] && {
+			output="$(wl -i $device rateset | head -n 5 | tail -n 1 | sed 's/ * : //g')"
+			output="$(echo $output | sed 's/x[^d]//g')"
+			for idx in $output; do
+				VHT_MCS3="${VHT_MCS3}${idx}#"
+			done
+		}
+		
+		[ $line -eq 6 ] && {
+			output="$(wl -i $device rateset | head -n 6 | tail -n 1 | sed 's/ * : //g')"
+			output="$(echo $output | sed 's/x[^d]//g')"
+			for idx in $output; do
+				VHT_MCS4="${VHT_MCS4}${idx}#"
+			done
+		}
+		line=`expr $line + 1`
+	done
+	
+	STATUS=1
+	[ "$(wl -i $device bss)" = "up" ] && STATUS=0
+	LAST_CHANGE=0
+	UP_STREAM=0
+	
+	rate="$(wl -i $device maxrate)"
+	MAX_BIT_RATE=$(echo $rate | sed 's/ Mbps//')
+	
+	SUPPORTED_FREQUENCY_BANDS=
+	supported_bands=$(wl -i $device band)
+	for band in $supported_bands;do
+		case "$band" in
+		a)
+			SUPPORTED_FREQUENCY_BANDS="${SUPPORTED_FREQUENCY_BANDS}1#"
+		;;
+		b)
+			SUPPORTED_FREQUENCY_BANDS="${SUPPORTED_FREQUENCY_BANDS}0#"
+		;;
+		auto)
+			if [ "$board" = "RV160W" ];then
+				if [ "$device" = "wl1" ];then
+					SUPPORTED_FREQUENCY_BANDS="${SUPPORTED_FREQUENCY_BANDS}0#"
+				else
+					SUPPORTED_FREQUENCY_BANDS="${SUPPORTED_FREQUENCY_BANDS}1#"
+				fi
+			else
+				if [ "$device" = "wl0" ];then
+					SUPPORTED_FREQUENCY_BANDS="${SUPPORTED_FREQUENCY_BANDS}0#"
+				else
+					SUPPORTED_FREQUENCY_BANDS="${SUPPORTED_FREQUENCY_BANDS}1#"
+				fi
+			fi
+		;;
+		esac
+	done
+
+	SUPPORTED_STANDARDS=
+	band="$(uci get wireless.${device}.hwmode)"
+	for _band in $band;do
+		case "$_band" in
+		11a|a)
+			SUPPORTED_STANDARDS="${SUPPORTED_STANDARDS}0#"
+		;;
+		11b|b)
+			SUPPORTED_STANDARDS="${SUPPORTED_STANDARDS}1#"
+		;;
+		11g|g)
+			SUPPORTED_STANDARDS="${SUPPORTED_STANDARDS}2#"
+		;;
+		11n|n)
+			SUPPORTED_STANDARDS="${SUPPORTED_STANDARDS}3#"
+		;;
+		11ac|ac)
+			SUPPORTED_STANDARDS="${SUPPORTED_STANDARDS}4#"
+		;;
+		esac
+	done
+
+	POSSIBLE_CHANNEL=
+	if [ "$board" = "RV160W" ];then
+		if [ "$device" = "wl1" ]; then
+			if [ "$band_radio" = "E" -o "$band_radio" = "I" -o "$band_radio" = "C" -o "$band_radio" = "J" -o "$band_radio" = "R" ];then
+				POSSIBLE_CHANNEL="1#2#3#4#5#6#7#8#9#10#11#12#13#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}5u#6u#7u#8u#9u#10u#11u#12u#13u#1l#2l#3l#4l#5l#6l#7l#8l#9l#"
+			else
+				POSSIBLE_CHANNEL="1#2#3#4#5#6#7#8#9#10#11#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}5u#6u#7u#8u#9u#10u#11u#1l#2l#3l#4l#5l#6l#7l#"
+			fi
+		else
+			POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}36#40#44#48#52#56#60#64#"
+			if [ "$band_radio" = "E" -o "$band_radio" = "J" ];then
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}100#104#108#112#116#132#136#140#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#104u#112u#136u#36l#44l#52l#60l#100l#108l#132l#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#106/80#"
+			elif [ "$band_radio" = "I" -o "$band_radio" = "C" ];then
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}149#153#157#161#165#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#153u#161u#149l#157l#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#155/80#"
+			elif [ "$band_radio" = "R" ];then
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#44l#52l#60l#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#"
+			else
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}100#104#108#112#116#132#136#140#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}149#153#157#161#165#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#104u#112u#136u#153u#161u#36l#44l#52l#60l#100l#108l#132l#149l#157l#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#106/80#155/80#"
+			fi
+		fi
+	elif [ "$board" = "RV340W" ];then
+			band_radio="$(uci get systeminfo.sysinfo.pid | cut -d'-' -f2)"
+			if [ "$device" = "wl0" ]; then
+				if [ "$band_radio" = "E" -o "$band_radio" = "C" ];then
+					POSSIBLE_CHANNEL="1#2#3#4#5#6#7#8#9#10#11#12#13#"
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}5u#6u#7u#8u#9u#10u#11u#12u#13u#1l#2l#3l#4l#5l#6l#7l#8l#9l#"
+				else
+					POSSIBLE_CHANNEL="1#2#3#4#5#6#7#8#9#10#11#"
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}5u#6u#7u#8u#9u#10u#11u#1l#2l#3l#4l#5l#6l#7l#"
+				fi
+			else
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}36#40#44#48#52#56#60#64#"
+				if [ "$band_radio" = "E" ];then
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}100#104#108#112#116#132#136#140#"
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#104u#112u#136u#36l#44l#52l#60l#100l#108l#132l#"
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#106/80#"
+				elif [ "$band_radio" = "C" ]; then
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#44l#52l#60l#"
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#"
+				else
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}100#104#108#112#116#132#136#140#"
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}149#153#157#161#165#"
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#104u#112u#136u#153u#161u#36l#44l#52l#60l#100l#108l#132l#149l#157l#"
+					POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#106/80#155/80#"
+				fi
+			fi
+	else
+		if [ "$device" = "wl0" ]; then
+			if [ "$band_radio" = "E" -o "$band_radio" = "I" -o "$band_radio" = "C" -o "$band_radio" = "J" -o "$band_radio" = "R" ];then
+				POSSIBLE_CHANNEL="1#2#3#4#5#6#7#8#9#10#11#12#13#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}5u#6u#7u#8u#9u#10u#11u#12u#13u#1l#2l#3l#4l#5l#6l#7l#8l#9l#"
+			else
+				POSSIBLE_CHANNEL="1#2#3#4#5#6#7#8#9#10#11#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}5u#6u#7u#8u#9u#10u#11u#1l#2l#3l#4l#5l#6l#7l#"
+			fi
+		else
+			POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}36#40#44#48#52#56#60#64#"
+			if [ "$band_radio" = "E" -o "$band_radio" = "J" ];then
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}100#104#108#112#116#132#136#140#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#104u#112u#136u#36l#44l#52l#60l#100l#108l#132l#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#106/80#"
+			elif [ "$band_radio" = "I" -o "$band_radio" = "C" ];then
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}149#153#157#161#165#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#153u#161u#149l#157l#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#155/80#"
+			elif [ "$band_radio" = "R" ];then
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#44l#52l#60l#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#"
+			else
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}100#104#108#112#116#132#136#140#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}149#153#157#161#165#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}40u#48u#56u#64u#104u#112u#136u#153u#161u#36l#44l#52l#60l#100l#108l#132l#149l#157l#"
+				POSSIBLE_CHANNEL="${POSSIBLE_CHANNEL}42/80#58/80#106/80#155/80#"
+			fi
+		fi
+	fi
+	
+	channels_used_s="$(wl -i $device chanspec)"
+	channels_used_s="${channels_used_s%% *}"
+	channels_used="${channels_used_s%%[/ul]*}"
+	case "$channels_used_s" in
+		*/80) channels_used="$(wl -i $device status | grep Chanspec | awk '{print $4}')"
+		;;
+	esac
+	CHANNELS_IN_USE=
+	CHANNELS_IN_USE="${CHANNELS_IN_USE}${channels_used}#"
+	AUTO_CHANNEL_SUPPORTED=0
+	[ -e /usr/sbin/acsd ] && AUTO_CHANNEL_SUPPORTED=1
+	
+	TRANSMIT_POWER_SUPPORTED="0#25#50#75#100#"
+	
+	IEEE80211H_SUPPORTED=1
+	echo "$WLANPORT,$RATE_BASIC,$RATE,$HT_MCS,$VHT_MCS1,$VHT_MCS2,$VHT_MCS3,$VHT_MCS4,"\
+"$STATUS,$LAST_CHANGE,$UP_STREAM,$MAX_BIT_RATE,$SUPPORTED_FREQUENCY_BANDS,"\
+"$TRANSMIT_RATE_SUPPORTED,$SUPPORTED_STANDARDS,$POSSIBLE_CHANNEL,$CHANNELS_IN_USE,"\
+"$AUTO_CHANNEL_SUPPORTED,$TRANSMIT_POWER_SUPPORTED,$IEEE80211H_SUPPORTED" >> ${IF_RADIO_STAT_FILE}
+done
+

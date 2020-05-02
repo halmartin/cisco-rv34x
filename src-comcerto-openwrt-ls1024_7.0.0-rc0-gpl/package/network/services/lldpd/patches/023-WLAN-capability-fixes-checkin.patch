@@ -1,0 +1,66 @@
+From 24f078adf638f3fbe7c8dad02485e7d500fd7943 Mon Sep 17 00:00:00 2001
+From: Manish Tiwari <manish.tiwari@nxp.com>
+Date: Wed, 16 May 2018 20:49:57 +0530
+Subject: [PATCH] SBR-4201 WLAN capability fixes checkins
+
+- Porting issue from PP to BB2-MR1
+- GPIO pin is active low in PP but active high in BB2-MR1
+
+Signed-off-by: Manish Tiwari <manish.tiwari@nxp.com>
+---
+ src/lldpd.c |   27 +++++++++++++++++++++++----
+ 1 file changed, 23 insertions(+), 4 deletions(-)
+
+diff --git a/src/lldpd.c b/src/lldpd.c
+index 6601540..21d20cc 100644
+--- a/src/lldpd.c
++++ b/src/lldpd.c
+@@ -1,3 +1,6 @@
++/* 16/05/2018   Manish <manish.tiwari@nxp.com>
++   WLAN capability support added 
++*/
+ /* 11/05/2018   Manish <manish.tiwari@nxp.com>
+    Initialization of lldp_8021x_init function 
+ */
+@@ -981,11 +984,7 @@ lldpd_update_localchassis(struct lldpd *cfg)
+        	/* check wireless */
+        	if ((strncmp(PID_RV34X,"RV260W",6) == 0) || (strncmp(PID_RV34X,"RV160W",6) == 0))
+ 	{
+-		if (strncmp(PID_RV34X,"RV340W",6) == 0)
+-		fp = fopen("/sys/class/gpio/gpio14/value", "r");
+-		else
+ 		fp = fopen("/sys/class/gpio/gpio6/value", "r");
+-		
+ 		if(fp != NULL)
+ 		{
+ 			ch = fgetc(fp);
+@@ -999,6 +998,26 @@ lldpd_update_localchassis(struct lldpd *cfg)
+ 			LLOG_WARN("Not able to open file");
+ 		}
+ 	}
++	else if(strncmp(PID_RV34X,"RV340W",6) == 0)
++	{
++		fp = fopen("/sys/class/gpio/gpio14/value", "r");
++		if(fp != NULL)
++		{
++			ch = fgetc(fp);
++			if((ch == '1') || (ch == "1"))
++				LOCAL_CHASSIS(cfg)->c_cap_enabled |= LLDP_CAP_WLAN;
++		
++			pclose(fp);
++		}
++		else
++		{
++			LLOG_WARN("Not able to open file");
++		}
++	}
++	else
++	{
++			//LLOG_WARN("Wrong PID ... please check");
++	}
+ 
+ #ifdef ENABLE_LLDPMED
+ 	if (LOCAL_CHASSIS(cfg)->c_cap_available & LLDP_CAP_TELEPHONE)
+-- 
+1.7.9.5
+

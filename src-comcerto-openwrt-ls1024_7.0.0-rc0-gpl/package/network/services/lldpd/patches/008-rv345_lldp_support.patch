@@ -1,0 +1,162 @@
+diff -ruaN c/src/lldp.c d/src/lldp.c
+--- c/src/lldp.c	2016-08-25 21:20:09.992137748 +0530
++++ d/src/lldp.c	2016-08-25 21:26:49.340145245 +0530
+@@ -34,8 +34,14 @@
+ #define LAN_INTERFACE "eth3"
+ #define PORTOFFSET 19
+ #define CPUTAGLEN 8
++
++#define RV345_CPUTAGLEN 12
++#define RV345_PORTOFFSET 15
++
+ #define CPUTAGPROTOCOL 0x8899
+ 
++extern char PID_RV34X[10];
++
+ inline static int
+ lldpd_af_to_lldp_proto(int af)
+ {
+@@ -138,7 +144,11 @@
+ 	/* Ethernet header */
+    if(strcmp(port->p_descr,LAN_INTERFACE)==0)
+    {
+-	if (!(
++
++
++		if (strcmp(PID_RV34X,"RV340") == 0)
++		{
++			if (!(
+ 	      /* LLDP multicast address */
+ 	      POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
+ 	      /* Source MAC address */
+@@ -147,7 +157,24 @@
+ 	      POKE_UINT16(ETHERTYPE_LLDP)))
+ 		goto toobig;
+     }
+-   else {
++		else if (strcmp(PID_RV34X,"RV345") == 0)
++		{ 
++			if (!(
++			      /* LLDP multicast address */
++			      POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
++			      /* Source MAC address */
++			      POKE_BYTES(&hardware->h_lladdr, sizeof(hardware->h_lladdr)) && POKE_BYTES(cputag, RV345_CPUTAGLEN) && 
++			      /* LLDP frame */
++			      POKE_UINT16(ETHERTYPE_LLDP)))
++				goto toobig;
++		}
++		else
++		{
++        		LLOG_INFO("---- Invalid PID ---- ");
++		}
++	}
++   	else 
++	{
+     if (!(
+         /* LLDP multicast address */
+          POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
+@@ -539,7 +566,7 @@
+ 	int tlv_size, tlv_type, tlv_subtype;
+ 	u_int8_t *pos, *tlv;
+ 	char *b;
+-	char PORT_DETAILS[8]= {0};
++	char PORT_DETAILS[10]= {0};
+ #ifdef ENABLE_DOT1
+ 	struct lldpd_vlan *vlan;
+ 	int vlan_len;
+@@ -575,10 +602,28 @@
+ #endif
+     /* Decapsulate VLAN frames */
+     if (((struct ethhdr*)frame)->h_proto == htons(CPUTAGPROTOCOL)) {
++
++	if (strcmp(PID_RV34X,"RV340") == 0)
++        {
+           portno=frame[PORTOFFSET];
++        	LLOG_INFO(" ---- RV340 LLDP ---- %d", portno);
+           memmove(frame+CPUTAGLEN,frame,2*ETH_ALEN);
+           frame=frame+CPUTAGLEN;
+           s=s-CPUTAGLEN;
++        }
++        else if (strcmp(PID_RV34X,"RV345") == 0)
++        {
++          	portno=frame[RV345_PORTOFFSET];
++        	LLOG_INFO("---- RV345 LLDP ---- %d", portno);
++		memmove(frame+RV345_CPUTAGLEN,frame,2*ETH_ALEN);
++		frame=frame+RV345_CPUTAGLEN;
++		s=s-RV345_CPUTAGLEN;
++        }
++        else
++        {
++                LLOG_INFO(" ---- Invalid PID -----");
++
++        }
+         
+         sprintf(cmd,"uci get lldpd.config.lan%d",portno);
+         fp=popen(cmd,"r");
+@@ -677,7 +722,7 @@
+                                          hardware->h_ifname);
+                  break;
+             }
+-            if ((b = (char *)calloc(1, tlv_size + 1 + 7)) == NULL) {
++            if ((b = (char *)calloc(1, tlv_size + 1 + 9)) == NULL) {
+                 LLOG_WARN("unable to allocate memory for string tlv "
+                                 "received on %s",
+                                  hardware->h_ifname);
+diff -ruaN c/src/lldpd.c d/src/lldpd.c
+--- c/src/lldpd.c	2016-08-25 21:20:23.620138004 +0530
++++ d/src/lldpd.c	2016-08-25 21:26:40.260145074 +0530
+@@ -35,6 +35,8 @@
+ #include <arpa/inet.h>
+ #include <net/if_arp.h>
+ 
++char PID_RV34X[10] = {0};
++
+ static void		 usage(void);
+ 
+ static struct protocol protos[] =
+@@ -121,6 +123,34 @@
+ 	exit(1);
+ }
+ 
++/** Function to get the Product ID **/
++int get_PID_RV34X(char* PID)
++{
++  FILE *fp=NULL;
++  char cmd[256];
++
++  sprintf(cmd,"uci get systeminfo.sysinfo.pid | awk -F'-' '{print $1}'");
++
++  if((fp = popen(cmd,"r"))!=NULL)
++  {
++        memset(cmd,0,256);
++        fgets(cmd,256,fp);
++  }
++  pclose(fp);
++
++  if (strncmp(cmd,"RV340",5) == 0)
++  {
++        strcpy(PID,"RV340");
++        return 0;
++  }
++  else if (strncmp(cmd,"RV345",5) == 0)
++  {
++        strcpy(PID,"RV345");
++        return 0;
++  }
++  return -1;
++}
++
+ struct lldpd_hardware *
+ lldpd_get_hardware(struct lldpd *cfg, char *name, int index, struct lldpd_ops *ops)
+ {
+@@ -1038,6 +1068,10 @@
+ 	int smart = 15;
+ 	int receiveonly = 0;
+ 
++	/** Fetch the Product ID **/
++        get_PID_RV34X(PID_RV34X);
++        LLOG_INFO("PID of board is %s \n",PID_RV34X);
++
+ 	saved_argv = argv;
+ 
+ 	/*

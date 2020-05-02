@@ -1,0 +1,11 @@
+diff -Naur ls1012-rcw/Makefile.inc ls1012-rcw-2/Makefile.inc
+--- ls1012-rcw/Makefile.inc	2016-05-11 16:14:25.853559000 +0530
++++ ls1012-rcw-2/Makefile.inc	2016-05-17 17:26:32.627658000 +0530
+@@ -1,6 +1,6 @@
+ DESTDIR = .
+ INSTALL = install
+-PYTHON ?= python2
++PYTHON ?= python
+ RCW = $(PYTHON) ../rcw.py
+ 
+ rcw_sources := $(wildcard */*.rcw)

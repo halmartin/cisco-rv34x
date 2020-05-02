@@ -1,0 +1,43 @@
+#!/bin/sh
+. /etc/boardInfo
+
+manualtime=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "current-datetime") {print $(I+1)};}'`
+year=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "year") {print $(I+1)};}'`
+
+setManualTime () {
+	/etc/init.d/system set_dst_and_timezone 1
+
+	date_value=`echo $manualtime | cut -d T -f 1`
+	current_year=`echo $date_value | cut -d - -f 1`
+	time_value=`echo $manualtime | cut -d T -f 2 | cut -d - -f 1`
+
+	date -s "$date_value $time_value" >/dev/null 2>&1
+	/usr/bin/dstHandler
+	
+	`hwclock -w` >/dev/null 2>&1
+
+        date_and_time=`date "+%H:%M"`
+	Min=`echo $date_and_time | cut -d : -f 2`
+	Hour=`echo $date_and_time | cut -d : -f 1`
+
+	# Add cronjob for this.
+	uci del crontabs.FlashTime
+	uci set crontabs.FlashTime=crontab
+	uci set crontabs.FlashTime.minutes=$Min
+	uci set crontabs.FlashTime.hours=$Hour
+	uci set crontabs.FlashTime.days=*/1
+	uci set crontabs.FlashTime.months=*
+	uci set crontabs.FlashTime.weekdays=*
+	uci set crontabs.FlashTime.command=/usr/bin/updateFlashTime
+	uci set crontabs.FlashTime.enabled=1
+	uci commit crontabs
+	/etc/init.d/cron reload
+
+	# Set the time to flash
+        clockTime=`date "+%Y.%m.%d-%H:%M:%S"`
+        echo "$clockTime" > $TimeFile
+}
+
+# Called from GUI
+setManualTime
+

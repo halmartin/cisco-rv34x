@@ -1,0 +1,94 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add phy support.
+--- barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c.org	2017-01-19 15:15:32.378377610 +0800
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c	2017-01-19 15:16:20.808377731 +0800
+@@ -51,8 +51,6 @@
+ #include <mach/ddr.h>
+ #include <mach/reset.h>
+ 
+-#define PHY_DEVICE      "phy0"
+-
+ #ifdef CONFIG_SPI
+ static struct spi_board_info c2k_spi_dev_1[] = {
+         {
+@@ -358,8 +356,6 @@
+ 
+ #if defined(CONFIG_NET_COMCERTO_2000)
+ 	register_device(&c2000_eth0);
+-	register_device(&c2000_eth1);
+-	register_device(&c2000_eth2);
+ #endif
+ 	register_device(&c2k_nor_dev);
+ 
+@@ -439,34 +435,12 @@
+ 
+ int c2000_eth_board_init(int gemac_port)
+ {
+-        struct mii_device *mdev;
+-        struct cdev *cdev;
+-
+-        cdev = cdev_by_name(PHY_DEVICE);
+-	if(!cdev)
+-	{
+-		printf("No MII Device registered !!\n");
+-		return -1;
+-	}
+-
+-        mdev = cdev->priv;
++	__raw_writel(__raw_readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) | (GPIO_44|GPIO_45), COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++	__raw_writel(__raw_readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~(GPIO_44|GPIO_45), COMCERTO_GPIO_EXT_OUTPUT_REG);
++	mdelay(1000);
++	__raw_writel(__raw_readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | (GPIO_44|GPIO_45), COMCERTO_GPIO_EXT_OUTPUT_REG);
+ 
+-        //eth0 port is chosen as criteria for bringingup out of reset because
+-        //all MDIO access can happen through EMAC0 and without bringing eth0 first
+-        //no Switch/PHY configuration can happen and no point in removing reset without eth0
+-	if(gemac_port == 0)
+-	{
+-
+-		//AR8327 Switch init
+-		athrs17_init(mdev);
+-		//AR8327 WAN PHY4 init
+-		athrs17_phy_setup(mdev,EMAC0_PHY_ADDR);
+-	}
+-	else
+-	{
+-		//AR8327 LAN PHYs init
+-		athrs17_phy_setup(mdev,EMAC1_PHY_ADDR);
+-	}
++	return 0;
+ }
+ 
+ device_initcall(c2000_device_init);
+--- barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/config.h.org	2017-01-19 15:15:22.898378138 +0800
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/config.h	2017-01-19 15:16:20.808377731 +0800
+@@ -14,11 +14,11 @@
+ 
+ #define NOR_FLASH_SIZE          64 * 1024 * 1024
+ 
+-#define EMAC0_PHY_ADDR	4
++#define EMAC0_PHY_ADDR	1
+ #define EMAC1_PHY_ADDR	0
+ #define EMAC0_FLAGS 	0
+ #define EMAC1_FLAGS 	GEMAC_NO_PHY
+-#define EMAC2_FLAGS 	0
++#define EMAC2_FLAGS 	GEMAC_NO_PHY
+ 
+ #define EXP_CS0_BASE_VAL	0x0
+ #define EXP_CS0_SEG_SIZE_VAL	0x7FFF
+--- barebox-2011.06.0/drivers/net/comcerto/c2000_eth.c.org	2017-01-19 15:15:48.448378251 +0800
++++ barebox-2011.06.0/drivers/net/comcerto/c2000_eth.c	2017-01-19 15:16:20.808377731 +0800
+@@ -439,6 +439,13 @@
+ 		miidev_restart_aneg(&priv->miidev);
+ 	}
+ 
++	c2000_phy_write(&priv->miidev, priv->miidev.address, 0x1E, 0x21);
++	c2000_phy_write(&priv->miidev, priv->miidev.address, 0x1F, c2000_phy_read(&priv->miidev, priv->miidev.address, 0x1F) & ~(3 << 1));
++	c2000_phy_write(&priv->miidev, priv->miidev.address, 0x1E, 0x810);
++	c2000_phy_write(&priv->miidev, priv->miidev.address, 0x1F, c2000_phy_read(&priv->miidev, priv->miidev.address, 0x1F) | (1 << 0));
++	c2000_phy_write(&priv->miidev, priv->miidev.address, 0x1E, 0x2F);
++	c2000_phy_write(&priv->miidev, priv->miidev.address, 0x1F, c2000_phy_read(&priv->miidev, priv->miidev.address, 0x1F) | (1 << 7));
++
+ 	return 0;
+ }
+ 

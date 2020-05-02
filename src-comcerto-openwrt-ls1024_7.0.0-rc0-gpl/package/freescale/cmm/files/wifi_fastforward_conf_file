@@ -1,0 +1,60 @@
+#WiFi fastforward configuration
+#direct_path_rx-This option/optimization is implmented for Broadcom wireless driver.
+#               For other devices/drivers this option should be disabled.
+# add required devices/drivers configuration below, based on the max. no. of interfaces
+# disable unused devices/drivers configuration.
+config wifi_fastforward
+        option ifname   wl0
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl1
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl0.1
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl0.2
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl0.3
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl1.1
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl1.2
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl1.3
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1

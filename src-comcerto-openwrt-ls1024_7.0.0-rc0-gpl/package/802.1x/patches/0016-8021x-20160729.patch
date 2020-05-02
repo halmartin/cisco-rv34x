@@ -1,0 +1,31 @@
+diff -rauN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-07-29 19:10:28.726183882 +0530
++++ b/src/source/ieee802_1x.c	2016-07-29 18:45:38.402184060 +0530
+@@ -87,7 +87,7 @@
+ {
+   FILE *fp=NULL;
+   char cmd[SIZE];
+-  char *token, *ptr,last_token[SIZE];
++  char *token, *ptr,*ptr1,last_token[SIZE];
+ 
+ /** Get the NAS IP address **/
+   sprintf(cmd,"ip r get ");
+@@ -98,6 +98,7 @@
+     memset(cmd,0,SIZE);
+     fgets(cmd,SIZE,fp);
+     ptr = (char *)strdup(cmd);
++    ptr1 = ptr;
+     token = strsep(&ptr, " ");
+ 
+     while(token != NULL)
+@@ -123,6 +124,10 @@
+     DBGPRINT(RT_DEBUG_ERROR, "Open output stream failed with popen\n");
+     return -1;				
+   }
++
++  if(ptr1)
++    free(ptr1);
++
+   pclose(fp);
+ 
+   if(token != NULL)

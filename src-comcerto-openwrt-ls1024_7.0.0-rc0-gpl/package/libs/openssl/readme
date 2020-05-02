@@ -1,0 +1,7 @@
+Changes done.
+The below patches are added to support with ocf.
+1.   300-FSL-ocf-20120202.patch
+2.   310-FSL-hw_genrsa.patch
+3.   320-FSL-rc4-40_and_SHA2_support.patch
+4.   330-FSL-cert_gen_fix.patch
+

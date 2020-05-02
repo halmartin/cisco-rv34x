@@ -1,0 +1,81 @@
+diff -ruaN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-08-01 14:45:15.965988231 +0530
++++ b/src/source/ieee802_1x.c	2016-08-01 14:54:16.669988166 +0530
+@@ -720,7 +720,6 @@
+ static void handle_eap_response(struct sta_info *sta, struct eap_hdr *eap, u8 *data, size_t len)
+ {
+ 	u8 type;
+-	struct eap_hdr *last_eap_hdr;
+ 
+ 	assert(sta->eapol_sm != NULL);
+         
+@@ -741,17 +740,7 @@
+ 	}
+ 
+ 	if (sta->last_eap_supp != NULL)
+-	{
+-		last_eap_hdr = (struct eap_hdr *)sta->last_eap_supp;
+-		if ((eap->identifier == last_eap_hdr->identifier) &&
+-		    (eap->length == last_eap_hdr->length))
+-		{
+-			DBGPRINT(RT_DEBUG_INFO,"Already Received Response with this EAP Identifier, (last Id (%d), current Id(%d)\n",
+-				   last_eap_hdr->identifier, eap->identifier);
+-			return;
+-		}
+ 		free(sta->last_eap_supp);
+-	}
+ 	sta->last_eap_supp_len = sizeof(*eap) + len;
+ 	sta->last_eap_supp = (u8 *) malloc(sta->last_eap_supp_len);
+ 	if (sta->last_eap_supp == NULL)
+diff -ruaN a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2016-08-01 14:45:06.809988232 +0530
++++ b/src/source/rtdot1x.c	2016-08-01 14:54:29.765988165 +0530
+@@ -459,7 +459,8 @@
+ 									ifr.ifr_name, rtapd->eth_sock[i], addr.sll_ifindex);
+ 	}
+ 
+-	// 2. init wireless interface socket for EAP negotiation      		
++	// 2. init wireless interface socket for EAP negotiation
++#if 0      		
+ 	for (i = 0; i < rtapd->conf->num_eap_if; i++)
+ 	{
+ 		rtapd->wlan_sock[i] = socket(PF_PACKET, SOCK_RAW, htons(RTKSWITCH_ETH_TYPE));
+@@ -497,7 +498,7 @@
+ 	    DBGPRINT(RT_DEBUG_TRACE, "EAP raw packet socket binding on %s (socknum=%d,ifindex=%d)\n", 
+ 									ifr.ifr_name, rtapd->wlan_sock[i], addr.sll_ifindex);
+ 	}
+-
++#endif
+ 	// 3. Get wireless interface MAC address
+     for(i = 0; i < 1 /*rtapd->conf->SsidNum*/; i++)//NOT required for non-WLAN 802.1x
+     {
+@@ -896,7 +897,7 @@
+                         pclose(fp);
+                         if (rv_get_portControl(i+1) == ForceAuthorized)
+                         sprintf(str, "rtkssdk dot1x -p %d -a 1",(i+1));
+-                        if(NULL != (fp = popen(str,"r")));
++                        if(NULL != (fp = popen(str,"r")))
+                         pclose(fp);
+                 }
+         }
+@@ -912,7 +913,7 @@
+                         pclose(fp);
+                         if (rv_get_portControl(i+1) == ForceAuthorized)
+                         sprintf(str, "rtkssdk_diag -D 1 -p %d -a 1",(i+1));
+-                        if(NULL != (fp = popen(str,"r")));
++                        if(NULL != (fp = popen(str,"r")))
+                         pclose(fp);
+                 }
+         }
+diff -ruaN a/src/source/sta_info.c b/src/source/sta_info.c
+--- a/src/source/sta_info.c	2016-08-01 15:00:06.973988125 +0530
++++ b/src/source/sta_info.c	2016-08-01 14:54:45.273988163 +0530
+@@ -173,7 +173,7 @@
+ 
+ 	DBGPRINT(RT_DEBUG_TRACE,"Create a new STA for port %d\n", port);
+ 
+-	s->SockNum = apd->wlan_sock[0];
++	s->SockNum = apd->eth_sock[0];
+ 	if (!sa)
+ 		memcpy(s->addr, GroupMac, ETH_ALEN);
+ 	else

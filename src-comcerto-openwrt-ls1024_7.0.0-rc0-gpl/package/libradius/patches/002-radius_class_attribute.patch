@@ -1,0 +1,11 @@
+--- a/src/pam_radius_auth.c	2015-07-09 16:53:54.670621783 +0530
++++ b/src/pam_radius_auth.c	2015-07-09 16:55:36.882622920 +0530
+@@ -1335,7 +1335,7 @@ error:
+           {
+              if(pam_radius_extract_radresp_attrib(pamh ,recv_buffer,
+                                                  sizeof(recv_buffer),
+-                                                 PW_VENDOR_SPECIFIC,
++                                                 PW_CLASS,
+                                                  &rad_attr_len,
+                                                  &rad_attr_val) == 0)
+                {

@@ -1,0 +1,248 @@
+From a2088d78f2bdab4ff44fc7134e19cf891c0c8be6 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Wed, 11 Apr 2018 15:20:46 +0530
+Subject: [PATCH] These changes are related to BB2 specific ethtool changes.
+
+Signed-off-by: nageshkoneti <b47094@freescale.com>
+---
+ ethtool-copy.h |   77 ++++++++++++++++++++++++++++++++++++++++++++
+ ethtool.c      |   97 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 174 insertions(+)
+
+diff --git a/ethtool-copy.h b/ethtool-copy.h
+index 4801eef..b873757 100644
+--- a/ethtool-copy.h
++++ b/ethtool-copy.h
+@@ -48,6 +48,12 @@ struct ethtool_cmd {
+ 				   */
+ 	__u32	lp_advertising;	/* Features the link partner advertises */
+ 	__u32	reserved[2];
++
++	__u32	eth_test_mode;	/* [Po-Yao]: add a cmd for ethernet test mode */
++	__u32	eth_mdix_mode;	/* [Po-Yao]: add a cmd for ethernet mdix mode */
++	__u32	phy_eee_enable;	/* [Po-Yao]: add a cmd for phy eee enable */
++	__u32	phy_ssc_enable;	/* [Po-Yao]: add a cmd for phy ssc enable */
++	__u32	phy_clkout_enable;	/* [Po-Yao]: add a cmd for phy clkout enable */
+ };
+ 
+ static __inline__ void ethtool_cmd_speed_set(struct ethtool_cmd *ep,
+@@ -57,6 +63,45 @@ static __inline__ void ethtool_cmd_speed_set(struct ethtool_cmd *ep,
+ 	ep->speed = (__u16)speed;
+ 	ep->speed_hi = (__u16)(speed >> 16);
+ }
++/* [Po-Yao]: add a cmd for ethernet test mode */
++static __inline__ void ethtool_cmd_eth_test_mode_set(struct ethtool_cmd *ep,
++                                                     __u32  eth_test_mode)
++{
++
++        ep->eth_test_mode = eth_test_mode;
++}
++
++/* [Po-Yao]: add a cmd for ethernet mdix mode */
++static __inline__ void ethtool_cmd_eth_mdix_mode_set(struct ethtool_cmd *ep,
++                                                     __u32  eth_mdix_mode)
++{
++
++        ep->eth_mdix_mode = eth_mdix_mode;
++}
++
++/* [Po-Yao]: add a cmd for phy eee enable */
++static __inline__ void ethtool_cmd_phy_eee_enable_set(struct ethtool_cmd *ep,
++                                                      __u32  phy_eee_enable)
++{
++
++        ep->phy_eee_enable = phy_eee_enable;
++}
++
++/* [Po-Yao]: add a cmd for phy ssc enable */
++static __inline__ void ethtool_cmd_phy_ssc_enable_set(struct ethtool_cmd *ep,
++                                                      __u32  phy_ssc_enable)
++{
++
++        ep->phy_ssc_enable = phy_ssc_enable;
++}
++
++/* [Po-Yao]: add a cmd for phy clkout enable */
++static __inline__ void ethtool_cmd_phy_clkout_enable_set(struct ethtool_cmd *ep,
++                                                      __u32  phy_clkout_enable)
++{
++
++        ep->phy_clkout_enable = phy_clkout_enable;
++}
+ 
+ static __inline__ __u32 ethtool_cmd_speed(const struct ethtool_cmd *ep)
+ {
+@@ -955,6 +1000,33 @@ enum ethtool_sfeatures_retval_bits {
+  * it was forced up into this mode or autonegotiated.
+  */
+ 
++/* [Po-Yao]: add a unknown command */
++#define ETH_UNKNOWN_COMMAND     0x99
++/* [Po-Yao]: add a cmd for ethernet test mode */
++#define ETH_TEST_MODE_1                0x1
++#define ETH_TEST_MODE_4                0x4
++
++/* [Po-Yao]: add a cmd for ethernet mdix mode on/off. */
++
++#define ETH_MDIX_MODE_MDI           0x00
++#define ETH_MDIX_MODE_MDIX          0x01
++#define ETH_MDIX_MODE_AUTO          0x02
++
++/* [Po-Yao]: add a cmd for phy eee enable on/off. */
++
++#define PHY_EEE_ENABLE_ENABLE           0x01
++#define PHY_EEE_ENABLE_DISABLE          0x00
++
++/* [Po-Yao]: add a cmd for phy ssc enable on/off. */
++
++#define PHY_SSC_ENABLE_ENABLE           0x01
++#define PHY_SSC_ENABLE_DISABLE          0x00
++
++/* [Po-Yao]: add a cmd for phy clkout enable on/off. */
++
++#define PHY_CLKOUT_ENABLE_ENABLE           0x01
++#define PHY_CLKOUT_ENABLE_DISABLE          0x00
++
+ /* The forced speed, 10Mb, 100Mb, gigabit, 2.5Gb, 10GbE. */
+ #define SPEED_10		10
+ #define SPEED_100		100
+@@ -991,6 +1063,11 @@ enum ethtool_sfeatures_retval_bits {
+ #define AUTONEG_DISABLE		0x00
+ #define AUTONEG_ENABLE		0x01
+ 
++/* Set ethernet test mode 1/4. */
++
++#define ETH_TEST_MODE_1          0x01
++#define ETH_TEST_MODE_4          0x04
++
+ /* MDI or MDI-X status/control - if MDI/MDI_X/AUTO is set then
+  * the driver is required to renegotiate link
+  */
+diff --git a/ethtool.c b/ethtool.c
+index 345c21c..6cfb832 100644
+--- a/ethtool.c
++++ b/ethtool.c
+@@ -2263,6 +2263,12 @@ static int do_gset(struct cmd_context *ctx)
+ static int do_sset(struct cmd_context *ctx)
+ {
+ 	int speed_wanted = -1;
++	int eth_test_mode_wanted  = -1;  /* [Po-yao]: add ioctl for ethernet test mode */
++	int eth_mdix_mode_wanted  = -1;  /* [Po-yao]: add ioctl for ethernet mdix mode */
++	int phy_eee_enable_wanted = -1;  /* [Po-yao]: add ioctl for phy eee enable */
++	int phy_ssc_enable_wanted = -1;  /* [Po-yao]: add ioctl for phy ssc enable */
++	int phy_clkout_enable_wanted = -1;  /* [Po-yao]: add ioctl for phy clkout enable */
++
+ 	int duplex_wanted = -1;
+ 	int port_wanted = -1;
+ 	int mdix_wanted = -1;
+@@ -2410,6 +2416,76 @@ static int do_sset(struct cmd_context *ctx)
+ 					ARRAY_SIZE(cmdline_msglvl));
+ 				break;
+ 			}
++                /* [Po-Yao]: add a cmd for ethernet test mode */
++                } else if (!strcmp(argp[i], "test_mode")) {
++                        gset_changed = 1;
++                        i += 1;
++                        if (i >= argc)
++                                exit_bad_args();
++                        eth_test_mode_wanted = get_int(argp[i],0);
++
++                        if( (ETH_TEST_MODE_1 != eth_test_mode_wanted) && (ETH_TEST_MODE_4 != eth_test_mode_wanted) )
++			    exit_bad_args();
++
++                /* [Po-Yao]: add a cmd for ethernet mdix mode */
++                } else if (!strcmp(argp[i], "mdix")) {
++                        i += 1;
++                        if (i >= argc)
++                                exit_bad_args();
++                        if (!strcmp(argp[i], "mdi")) {
++                                gset_changed = 1;
++                                eth_mdix_mode_wanted = ETH_MDIX_MODE_MDI;
++                        } else if (!strcmp(argp[i], "mdix")) {
++                                gset_changed = 1;
++                                eth_mdix_mode_wanted = ETH_MDIX_MODE_MDIX;
++                        } else if (!strcmp(argp[i], "auto")) {
++                                gset_changed = 1;
++                                eth_mdix_mode_wanted = ETH_MDIX_MODE_AUTO;
++                        } else {
++                                exit_bad_args();
++                        }
++                /* [Po-Yao]: add a cmd for phy eee enable */
++                } else if (!strcmp(argp[i], "eee_enable")) {
++                        i += 1;
++                        if (i >= argc)
++                                exit_bad_args();
++                        if (!strcmp(argp[i], "on")) {
++                                gset_changed = 1;
++                                phy_eee_enable_wanted = PHY_EEE_ENABLE_ENABLE;
++                        } else if (!strcmp(argp[i], "off")) {
++                                gset_changed = 1;
++                                phy_eee_enable_wanted = PHY_EEE_ENABLE_DISABLE;
++                        } else {
++                                exit_bad_args();
++                        }
++                /* [Po-Yao]: add a cmd for phy ssc enable */
++                } else if (!strcmp(argp[i], "ssc_enable")) {
++                        i += 1;
++                        if (i >= argc)
++                                exit_bad_args();
++                        if (!strcmp(argp[i], "on")) {
++                                gset_changed = 1;
++                                phy_ssc_enable_wanted = PHY_SSC_ENABLE_ENABLE;
++                        } else if (!strcmp(argp[i], "off")) {
++                                gset_changed = 1;
++                                phy_ssc_enable_wanted = PHY_SSC_ENABLE_DISABLE;
++                        } else {
++                                exit_bad_args();
++                        }
++                /* [Po-Yao]: add a cmd for phy clkout enable */
++                } else if (!strcmp(argp[i], "clkout_enable")) {
++                        i += 1;
++                        if (i >= argc)
++                                exit_bad_args();
++                        if (!strcmp(argp[i], "on")) {
++                                gset_changed = 1;
++                                phy_clkout_enable_wanted = PHY_CLKOUT_ENABLE_ENABLE;
++                        } else if (!strcmp(argp[i], "off")) {
++                                gset_changed = 1;
++                                phy_clkout_enable_wanted = PHY_CLKOUT_ENABLE_DISABLE;
++                        } else {
++                                exit_bad_args();
++                        }
+ 		} else {
+ 			exit_bad_args();
+ 		}
+@@ -2457,9 +2533,30 @@ static int do_sset(struct cmd_context *ctx)
+ 		if (err < 0) {
+ 			perror("Cannot get current device settings");
+ 		} else {
++                        /* [Po-Yao]: add default value */
++                        ecmd.eth_test_mode     = ETH_UNKNOWN_COMMAND;
++                        ecmd.eth_mdix_mode     = ETH_UNKNOWN_COMMAND;
++                        ecmd.phy_eee_enable    = ETH_UNKNOWN_COMMAND;
++                        ecmd.phy_ssc_enable    = ETH_UNKNOWN_COMMAND;
++                        ecmd.phy_clkout_enable = ETH_UNKNOWN_COMMAND;
+ 			/* Change everything the user specified. */
+ 			if (speed_wanted != -1)
+ 				ethtool_cmd_speed_set(&ecmd, speed_wanted);
++                        /* [Po-Yao]: add a cmd for ethernet test mode */
++                        if (eth_test_mode_wanted != -1)
++                                ethtool_cmd_eth_test_mode_set(&ecmd, eth_test_mode_wanted);
++                        /* [Po-Yao]: add a cmd for ethernet mdix mode */
++                        if (eth_mdix_mode_wanted != -1)
++                                ethtool_cmd_eth_mdix_mode_set(&ecmd, eth_mdix_mode_wanted);
++                        /* [Po-Yao]: add a cmd for phy eee enable */
++                        if (phy_eee_enable_wanted != -1)
++                                ethtool_cmd_phy_eee_enable_set(&ecmd, phy_eee_enable_wanted);
++                        /* [Po-Yao]: add a cmd for phy ssc enable */
++                        if (phy_ssc_enable_wanted != -1)
++                                ethtool_cmd_phy_ssc_enable_set(&ecmd, phy_ssc_enable_wanted);
++                        /* [Po-Yao]: add a cmd for phy clkout enable */
++                        if (phy_clkout_enable_wanted != -1)
++                                ethtool_cmd_phy_clkout_enable_set(&ecmd, phy_clkout_enable_wanted);
+ 			if (duplex_wanted != -1)
+ 				ecmd.duplex = duplex_wanted;
+ 			if (port_wanted != -1)
+-- 
+1.7.9.5
+

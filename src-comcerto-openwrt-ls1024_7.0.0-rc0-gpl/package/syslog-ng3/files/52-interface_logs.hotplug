@@ -1,0 +1,38 @@
+#!/bin/sh
+. /lib/functions/network.sh
+
+category="network"
+case "$ACTION" in
+	ifup)
+		iface=$INTERFACE
+		ipaddris=
+		unset ipaddris
+		tmp=`echo $iface | grep -v "usb"`
+		if [ -n "$tmp" ];then
+			network_get_wanip ipaddris $INTERFACE		
+		else
+			tmp=`echo $iface | grep "^usb[12]$"`
+			if [ -n "$tmp" ];then
+				proto=`uci get network.$INTERFACE.proto` >/dev/null 2>&1
+				[ "$proto" = "qmi" ] && iface=$iface"_4"
+				network_get_wanip ipaddris $iface
+			else
+				return 0
+			fi
+			category="mobile"
+		fi
+		
+		[ -n "$ipaddris" ] && {
+			/usr/bin/logInterface "$category" "info" "$INTERFACE: interface is now up with $ipaddris" &
+		}
+	;;
+	ifdown)
+		tmp=`echo $INTERFACE | grep "usb"`
+		if [ -n "$tmp" ];then
+			tmp=`echo $INTERFACE | grep "usb1_4\|usb1_6\|usb2_4\|usb2_6"`
+			[ -n "$tmp" ] && return 0
+			category="mobile"
+		fi
+		/usr/bin/logInterface "$category" "info" "$INTERFACE: interface is now down" &
+	;;
+esac	

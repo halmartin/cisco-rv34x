@@ -1,0 +1,421 @@
+diff --git a/arch/arm/mach-comcerto/Kconfig b/arch/arm/mach-comcerto/Kconfig
+index 0ab5699..dcc3a32 100644
+--- a/arch/arm/mach-comcerto/Kconfig
++++ b/arch/arm/mach-comcerto/Kconfig
+@@ -212,6 +212,7 @@ config COMCERTO_MSP
+ 
+ config COMCERTO_SATA
+ 	bool "Comcerto SATA"
++	select AHCI_COMCERTO
+ 	select ATA
+ 	select ATA_VERBOSE_ERROR
+ 	select SATA_AHCI_PLATFORM
+diff --git a/arch/arm/mach-comcerto/comcerto-2000.c b/arch/arm/mach-comcerto/comcerto-2000.c
+index 9ad3cc6..c27a720 100644
+--- a/arch/arm/mach-comcerto/comcerto-2000.c
++++ b/arch/arm/mach-comcerto/comcerto-2000.c
+@@ -55,6 +55,7 @@
+ #include <asm/hardware/cache-l2x0.h>
+ #include <mach/comcerto-2000.h>
+ #include <linux/ahci_platform.h>
++#include <mach/serdes-c2000.h>
+ #include <linux/clockchips.h>
+ #include <linux/clk.h>
+ #include <mach/comcerto-2000/clock.h>
+@@ -72,10 +73,6 @@ DEFINE_MUTEX(exp_bus_lock);
+ EXPORT_SYMBOL(exp_bus_lock);
+ #endif /* CONFIG_COMCERTO_EXP_BUS_LOCK */
+ 
+-//#define        C2K_SGMII_SUPPORT
+-#define        C2K_SGMII_CONFIG_SUPPORT
+-#include <mach/serdes-c2000.h>
+-
+ struct c2k_gpio_pin_stat_info c2k_gpio_pin_stat =
+ {
+ 	.c2k_gpio_pins_0_31 = 0x0,
+@@ -171,26 +168,6 @@ static struct map_desc comcerto_io_desc[] __initdata =
+ 	},
+ };
+ 
+-static void sgmii_init(void)
+-{
+-	printk("%s: sgmii initialize serdes2 !!\n\n", __func__);
+-
+-	//Bring Serdes2 out of reset
+-	c2000_block_reset(COMPONENT_SERDES2,0);
+-
+-	writel(readl(COMCERTO_DWC1_CFG_BASE + 0x58) & ~0xFF33, COMCERTO_DWC1_CFG_BASE + 0x58);
+-	writel((readl(COMCERTO_DWC1_CFG_BASE + 0x54) & ~0xFF33) | 0x133, COMCERTO_DWC1_CFG_BASE + 0X54);
+-
+-	/* Serdes Initialization. */
+-	if( serdes_phy_init(2,  gemac2_phy_reg_file_sgmii,
+-				sizeof(gemac2_phy_reg_file_sgmii) / sizeof(serdes_regs_t),
+-				SD_DEV_TYPE_SGMII) )
+-	{
+-		printk(KERN_ERR "%s: Failed to initialize serdes2 !!\n", __func__);
+-		return -1;
+-	}
+-}
+-
+ #if defined(CONFIG_COMCERTO_64K_PAGES)
+ #define PFE_DMA_SIZE		(4 * SZ_1M)
+ #else
+@@ -476,102 +453,6 @@ void comcerto_l2cc_init(void)
+ }
+ #endif
+ 
+-#if defined(CONFIG_COMCERTO_SATA)
+-
+-#define SERDES_PHY1     1
+-#define SERDES_PHY2     2
+-
+-static int comcerto_ahci_init(struct device *dev, void __iomem *mmio)
+-{
+-	struct serdes_regs_s *p_sata_phy_reg_file;
+-	int serdes_regs_size;
+-        u32 val;
+-	int ref_clk_24;
+-
+-	/* Move SATA controller to DDRC2 port */
+-	writel(readl(COMCERTO_GPIO_FABRIC_CTRL_REG) | 0x2, COMCERTO_GPIO_FABRIC_CTRL_REG);
+-
+-	val = readl(COMCERTO_GPIO_SYSTEM_CONFIG);
+-	ref_clk_24 = val & (BIT_5_MSK|BIT_7_MSK);
+-
+-	if(ref_clk_24)
+-	{
+-		p_sata_phy_reg_file = &sata_phy_reg_file_24[0];
+-		serdes_regs_size = sizeof(sata_phy_reg_file_24);
+-		printk(KERN_INFO "SATA Serdes: 24Mhz ref clk\n");
+-	}
+-	else
+-	{
+-	#ifndef	C2K_SGMII_SUPPORT
+-		p_sata_phy_reg_file = &sata_phy_reg_file_48[0];
+-		serdes_regs_size = sizeof(sata_phy_reg_file_48);
+-		printk(KERN_INFO "SATA Serdes: 48Mhz ref clk\n");
+-	#endif
+-	}
+-
+-	//Take SATA AXI domain out of reset
+-	c2000_block_reset(COMPONENT_AXI_SATA,0);
+-	//Bring SATA PMU and OOB out of reset
+-	c2000_block_reset(COMPONENT_SATA_PMU,0);
+-	c2000_block_reset(COMPONENT_SATA_OOB,0);
+-
+-        if ( (val & BOOT_SERDES1_CNF_SATA0) || (!(val & BOOT_SERDES2_CNF_SATA1)) || (val & BOOT_SERDES2_CNF_SATA1))
+-        {
+-                if (val & BOOT_SERDES1_CNF_SATA0)
+-                {
+-			//Bring Serdes1 out of reset
+-			c2000_block_reset(COMPONENT_SERDES1,0);
+-			//Bring SATA0 out of reset
+-			c2000_block_reset(COMPONENT_SERDES_SATA0,0);
+-
+-                        /* Serdes Initialization. */
+-                        if( serdes_phy_init(SERDES_PHY1,  p_sata_phy_reg_file,
+-                                                serdes_regs_size / sizeof(serdes_regs_t),
+-                                                SD_DEV_TYPE_SATA) )
+-                        {
+-                                printk(KERN_ERR "%s: Failed to initialize serdes1 !!\n", __func__);
+-                                return -1;
+-                        }
+-
+-                }
+-
+-                if (!(val & BOOT_SERDES2_CNF_SATA1))
+-                {
+-			//Bring Serdes2 out of reset
+-			c2000_block_reset(COMPONENT_SERDES2,0);
+-			//Bring SATA1 out of reset
+-			c2000_block_reset(COMPONENT_SERDES_SATA1,0);
+-
+-                        /* Serdes Initialization. */
+-                        if( serdes_phy_init(SERDES_PHY2,  p_sata_phy_reg_file,
+-                                                serdes_regs_size / sizeof(serdes_regs_t),
+-                                                SD_DEV_TYPE_SATA) )
+-                        {
+-                                printk(KERN_ERR "%s: Failed to initialize serdes2 !!\n", __func__);
+-                                return -1;
+-                        }
+-                }
+-
+-		if (val & BOOT_SERDES2_CNF_SATA1)
+-		{
+-			printk("pratap:%s: Initializing serdes2 for SGMII val=0x%x... \n", __func__, val);
+-			#ifdef CONFIG_C2K_RV340
+-			/* GPIO01 - RTL8382M & RTL8231 Reset
+-			Setting now GPIO01 as low
+-			It should be set High after kernel bootups and prior to switch init */
+-			writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_PIN_1, COMCERTO_GPIO_OE_REG);
+-			writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_PIN_1, COMCERTO_GPIO_OUTPUT_REG);
+-			udelay(1000);
+-			#endif
+-			sgmii_init();
+-                }
+-        } else
+-                return -1;
+-
+-        return 0;
+-}
+-#endif
+-
+ static struct resource comcerto_pmu_resources[] = {
+ 	{
+ 		.start	= IRQ_A9_PMU0,
+@@ -849,10 +730,6 @@ static struct platform_device comcerto_dwc_otg_device = {
+ #endif
+ 
+ #if defined(CONFIG_COMCERTO_SATA)
+-static struct ahci_platform_data comcerto_ahci_pdata = {
+-        .init = comcerto_ahci_init,
+-};
+-
+ static struct resource comcerto_ahci_resource[] = {
+         [0] = {
+                 .start  = COMCERTO_AXI_SATA_BASE,
+@@ -869,12 +746,11 @@ static struct resource comcerto_ahci_resource[] = {
+ static u64 comcerto_ahci_dmamask = DMA_BIT_MASK(32);
+ 
+ struct platform_device comcerto_device_ahci = {
+-        .name           = "ahci",
++        .name           = "ahci_comcerto",
+         .id             = -1,
+         .resource       = comcerto_ahci_resource,
+         .num_resources  = ARRAY_SIZE(comcerto_ahci_resource),
+         .dev            = {
+-                .platform_data          = &comcerto_ahci_pdata,
+                 .dma_mask               = &comcerto_ahci_dmamask,
+                 .coherent_dma_mask      = DMA_BIT_MASK(32),
+         },
+diff --git a/drivers/ata/Kconfig b/drivers/ata/Kconfig
+index 9dca4b9..0a47605 100644
+--- a/drivers/ata/Kconfig
++++ b/drivers/ata/Kconfig
+@@ -98,6 +98,14 @@ config SATA_AHCI_PLATFORM
+ 
+ 	  If unsure, say N.
+ 
++config AHCI_COMCERTO
++	tristate "Comcerto AHCI SATA support"
++	depends on ARCH_COMCERTO
++	help
++	  This option enables support for Comcerto AHCI SATA controller.
++
++	  If unsure, say N.
++
+ config AHCI_DA850
+ 	tristate "DaVinci DA850 AHCI SATA support"
+ 	depends on ARCH_DAVINCI_DA850
+diff --git a/drivers/ata/Makefile b/drivers/ata/Makefile
+index 40f7865..5154c35 100644
+--- a/drivers/ata/Makefile
++++ b/drivers/ata/Makefile
+@@ -10,6 +10,7 @@ obj-$(CONFIG_SATA_INIC162X)	+= sata_inic162x.o
+ obj-$(CONFIG_SATA_SIL24)	+= sata_sil24.o
+ obj-$(CONFIG_SATA_DWC)		+= sata_dwc_460ex.o
+ obj-$(CONFIG_SATA_HIGHBANK)	+= sata_highbank.o libahci.o
++obj-$(CONFIG_AHCI_COMCERTO)	+= ahci_comcerto.o libahci.o libahci_platform.o
+ obj-$(CONFIG_AHCI_DA850)	+= ahci_da850.o libahci.o libahci_platform.o
+ obj-$(CONFIG_AHCI_IMX)		+= ahci_imx.o libahci.o libahci_platform.o
+ obj-$(CONFIG_AHCI_MVEBU)	+= ahci_mvebu.o libahci.o libahci_platform.o
+diff --git a/drivers/ata/ahci_comcerto.c b/drivers/ata/ahci_comcerto.c
+new file mode 100644
+index 0000000..5c5ebe9
+--- /dev/null
++++ b/drivers/ata/ahci_comcerto.c
+@@ -0,0 +1,194 @@
++/*
++ * Comcerto AHCI SATA platform driver
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2, or (at your option)
++ * any later version.
++ */
++
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/pm.h>
++#include <linux/device.h>
++#include <mach/reset.h>
++#include <linux/platform_device.h>
++#include <linux/libata.h>
++#include <mach/comcerto-2000.h>
++#include <linux/ahci_platform.h>
++#include <mach/comcerto-2000/clock.h>
++#include <mach/comcerto-2000/pm.h>
++#include "ahci.h"
++
++//#define        C2K_SGMII_SUPPORT
++#define        C2K_SGMII_CONFIG_SUPPORT
++#include <mach/serdes-c2000.h>
++
++#define DRV_NAME "ahci_comcerto"
++
++#define SERDES_PHY1     1
++#define SERDES_PHY2     2
++
++static void sgmii_init(void)
++{
++	printk("%s: sgmii initialize serdes2 !!\n\n", __func__);
++
++	//Bring Serdes2 out of reset
++	c2000_block_reset(COMPONENT_SERDES2,0);
++
++	writel(readl(COMCERTO_DWC1_CFG_BASE + 0x58) & ~0xFF33, COMCERTO_DWC1_CFG_BASE + 0x58);
++	writel((readl(COMCERTO_DWC1_CFG_BASE + 0x54) & ~0xFF33) | 0x133, COMCERTO_DWC1_CFG_BASE + 0X54);
++
++	/* Serdes Initialization. */
++	if( serdes_phy_init(2,  gemac2_phy_reg_file_sgmii,
++				sizeof(gemac2_phy_reg_file_sgmii) / sizeof(serdes_regs_t),
++				SD_DEV_TYPE_SGMII) )
++	{
++		printk(KERN_ERR "%s: Failed to initialize serdes2 !!\n", __func__);
++		return -1;
++	}
++}
++
++static void comcerto_sata_init(struct device *dev, void __iomem *mmio)
++{
++	struct serdes_regs_s *p_sata_phy_reg_file;
++	int serdes_regs_size;
++        u32 val;
++	int ref_clk_24;
++
++	/* Move SATA controller to DDRC2 port */
++	writel(readl(COMCERTO_GPIO_FABRIC_CTRL_REG) | 0x2, COMCERTO_GPIO_FABRIC_CTRL_REG);
++
++	val = readl(COMCERTO_GPIO_SYSTEM_CONFIG);
++	ref_clk_24 = val & (BIT_5_MSK|BIT_7_MSK);
++
++	if(ref_clk_24)
++	{
++		p_sata_phy_reg_file = &sata_phy_reg_file_24[0];
++		serdes_regs_size = sizeof(sata_phy_reg_file_24);
++		printk(KERN_INFO "SATA Serdes: 24Mhz ref clk\n");
++	}
++	else
++	{
++	#ifndef	C2K_SGMII_SUPPORT
++		p_sata_phy_reg_file = &sata_phy_reg_file_48[0];
++		serdes_regs_size = sizeof(sata_phy_reg_file_48);
++		printk(KERN_INFO "SATA Serdes: 48Mhz ref clk\n");
++	#endif
++	}
++
++	//Take SATA AXI domain out of reset
++	c2000_block_reset(COMPONENT_AXI_SATA,0);
++	//Bring SATA PMU and OOB out of reset
++	c2000_block_reset(COMPONENT_SATA_PMU,0);
++	c2000_block_reset(COMPONENT_SATA_OOB,0);
++
++        if ( (val & BOOT_SERDES1_CNF_SATA0) || (!(val & BOOT_SERDES2_CNF_SATA1)) || (val & BOOT_SERDES2_CNF_SATA1))
++        {
++                if (val & BOOT_SERDES1_CNF_SATA0)
++                {
++			//Bring Serdes1 out of reset
++			c2000_block_reset(COMPONENT_SERDES1,0);
++			//Bring SATA0 out of reset
++			c2000_block_reset(COMPONENT_SERDES_SATA0,0);
++
++                        /* Serdes Initialization. */
++                        if( serdes_phy_init(SERDES_PHY1,  p_sata_phy_reg_file,
++                                                serdes_regs_size / sizeof(serdes_regs_t),
++                                                SD_DEV_TYPE_SATA) )
++                        {
++                                printk(KERN_ERR "%s: Failed to initialize serdes1 !!\n", __func__);
++                                return -1;
++                        }
++
++                }
++
++                if (!(val & BOOT_SERDES2_CNF_SATA1))
++                {
++			//Bring Serdes2 out of reset
++			c2000_block_reset(COMPONENT_SERDES2,0);
++			//Bring SATA1 out of reset
++			c2000_block_reset(COMPONENT_SERDES_SATA1,0);
++
++                        /* Serdes Initialization. */
++                        if( serdes_phy_init(SERDES_PHY2,  p_sata_phy_reg_file,
++                                                serdes_regs_size / sizeof(serdes_regs_t),
++                                                SD_DEV_TYPE_SATA) )
++                        {
++                                printk(KERN_ERR "%s: Failed to initialize serdes2 !!\n", __func__);
++                                return -1;
++                        }
++                }
++
++		if (val & BOOT_SERDES2_CNF_SATA1)
++		{
++			printk("pratap:%s: Initializing serdes2 for SGMII val=0x%x... \n", __func__, val);
++			#ifdef CONFIG_C2K_RV340
++			/* GPIO01 - RTL8382M & RTL8231 Reset
++			Setting now GPIO01 as low
++			It should be set High after kernel bootups and prior to switch init */
++			writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_PIN_1, COMCERTO_GPIO_OE_REG);
++			writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_PIN_1, COMCERTO_GPIO_OUTPUT_REG);
++			udelay(1000);
++			#endif
++			sgmii_init();
++                }
++        } else
++                return -1;
++
++        return 0;
++}
++
++static const struct ata_port_info ahci_comcerto_port_info = {
++	.flags		= AHCI_FLAG_COMMON,
++	.pio_mask	= ATA_PIO4,
++	.udma_mask	= ATA_UDMA6,
++	.port_ops	= &ahci_platform_ops,
++};
++
++static struct scsi_host_template ahci_platform_sht = {
++	AHCI_SHT(DRV_NAME),
++};
++
++static int ahci_comcerto_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct ahci_host_priv *hpriv;
++	int rc;
++
++	hpriv = ahci_platform_get_resources(pdev);
++	if (IS_ERR(hpriv))
++		return PTR_ERR(hpriv);
++
++	rc = ahci_platform_enable_resources(hpriv);
++	if (rc)
++		return rc;
++
++	comcerto_sata_init(dev, hpriv->mmio);
++
++	rc = ahci_platform_init_host(pdev, hpriv, &ahci_comcerto_port_info,
++				     &ahci_platform_sht);
++	if (rc)
++		goto disable_resources;
++
++	return 0;
++disable_resources:
++	ahci_platform_disable_resources(hpriv);
++	return rc;
++}
++
++static SIMPLE_DEV_PM_OPS(ahci_comcerto_pm_ops, ahci_platform_suspend,
++			 ahci_platform_resume);
++
++static struct platform_driver ahci_comcerto_driver = {
++	.probe = ahci_comcerto_probe,
++	.remove = ata_platform_remove_one,
++	.driver = {
++		.name = DRV_NAME,
++		.pm = &ahci_comcerto_pm_ops,
++	},
++};
++module_platform_driver(ahci_comcerto_driver);
++
++MODULE_DESCRIPTION("Comcerto AHCI SATA platform driver");
++MODULE_LICENSE("GPL");

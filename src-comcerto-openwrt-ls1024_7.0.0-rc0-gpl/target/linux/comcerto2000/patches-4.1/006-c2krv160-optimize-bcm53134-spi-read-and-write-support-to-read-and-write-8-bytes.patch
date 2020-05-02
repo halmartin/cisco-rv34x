@@ -1,0 +1,162 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Optimize bcm53134 spi read and write support to read and write 8 bytes.
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-01-17 16:50:42.415252442 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-01-17 16:52:24.588378118 +0800
+@@ -351,7 +351,7 @@
+ 		/* FIXME: for chipselect-0 */
+ 		.modalias = "bcm53134_switch",
+ 		.chip_select = 0,
+-		.max_speed_hz = 4*1000*1000,
++		.max_speed_hz = 1*1000*1000,
+ 		.bus_num = 1,
+ 		.irq = -1,
+ 		.mode = SPI_MODE_3,
+--- linux-4.1.8/drivers/net/ethernet/broadcom/bcm53134.c.org	2017-01-17 16:50:51.357127349 +0800
++++ linux-4.1.8/drivers/net/ethernet/broadcom/bcm53134.c	2017-01-17 16:53:03.688378204 +0800
+@@ -69,8 +69,7 @@
+ {
+ 	struct spi_transfer t[3];
+ 	struct spi_message m;
+-	u8 *value_tmp, *value_tmp2;
+-	u8 value_buf[2];
++	u8 value_buf[8];
+ 	u16 *read;
+ 	int ret;
+ 	u_char  *cmd_local_buf __attribute__((aligned(64)));
+@@ -95,8 +94,6 @@
+ 	t[1].len = 1;
+ 	memcpy(value_buf, &address, 1);
+ 	memcpy(rw_local_buf, value_buf, 1);
+-	value_tmp = (u8 *)(&address);
+-	value_tmp2 = (u8 *)value_buf;
+ 	spi_message_add_tail(&t[1], &m);
+ 
+ 	t[2].rx_buf = rd_local_buf;
+@@ -109,10 +106,6 @@
+ 
+ 	memcpy(value_buf, rd_local_buf, len);
+ 	memcpy(buf, value_buf, len);
+-	if(len == 2)
+-		printk("_robo_spi_read, value=0x%x\n", *(u16 *)buf);
+-	else
+-		printk("_robo_spi_read, value=0x%x\n", *(u8 *)buf);
+ }
+ 
+ static void _robo_spi_write(struct spi_device *spi, struct bcm53134 *bcm_info, u8 command, u16 address,
+@@ -121,8 +114,7 @@
+ 	struct spi_transfer t[3];
+ 	struct spi_message m;
+ 	u8 address_tmp;
+-	u8 *value_tmp, *value_tmp2; 
+-	u8 value_buf[1];
++	u8 value_buf[8];
+ 	u_char  *cmd_local_buf __attribute__((aligned(64)));
+ 	u_char  *rw1_local_buf __attribute__((aligned(64)));
+ 	u_char  *rw2_local_buf __attribute__((aligned(64)));
+@@ -145,16 +137,12 @@
+ 	t[1].len = 1;
+ 	memcpy(value_buf, &address, 1);
+ 	memcpy(rw1_local_buf, value_buf, 1);
+-	value_tmp = (u8 *)(&address);
+-	value_tmp2 = (u8 *)value_buf;
+ 	spi_message_add_tail(&t[1], &m);
+ 
+ 	t[2].tx_buf = rw2_local_buf;
+ 	t[2].len = len;
+ 	memcpy(value_buf, buf, len);
+ 	memcpy(rw2_local_buf, value_buf, len);
+-	value_tmp = (u8 *)buf;
+-	value_tmp2 = (u8 *)value_buf;
+ 	spi_message_add_tail(&t[2], &m);
+ 
+ 	ret = spi_sync(spi, &m);
+@@ -162,7 +150,7 @@
+ 		printk("spi transfer failed: ret = %d\n", ret);
+ }
+ 
+-int robo_spi_read(void *cookie, uint16_t reg, uint8_t *buf, int len)
++int robo_spi_read(void *cookie, uint16_t reg, uint64_t *buf, int len)
+ {
+ 	uint i, timeout;
+ 	u8 tmp_buf[1];
+@@ -192,7 +180,7 @@
+ 			_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xFE, buf, 1);
+ 			if ((buf[0] & (1 << 5)) == (1 << 5))
+ 			{
+-				_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xF0, buf, 2);
++				_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xF0, buf, len);
+ 				break;
+ 			}
+ 			else
+@@ -212,7 +200,7 @@
+ 	return 0;
+ }
+ 
+-int robo_spi_write(void *cookie, uint16_t reg, uint8_t *buf, int len)
++int robo_spi_write(void *cookie, uint16_t reg, uint64_t *buf, int len)
+ {
+ 	uint i, timeout;
+ 	u8 tmp_buf[1];
+@@ -235,7 +223,7 @@
+ 		tmp_buf[0] = reg >> 8;
+ 		_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
+ 
+-		_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, reg, buf, 2);
++		_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, reg, buf, len);
+ 	}
+ 
+ 	return 0;
+@@ -272,10 +260,12 @@
+                 size_t count, loff_t *ppos)
+ {
+ 	char *flags;
++	char *e = ' ';
+ 	char args[60];
+ 	unsigned char cmd;
+ 	unsigned short int addr;
+-	unsigned short int value;
++	unsigned long  long value;
++	unsigned int len;
+ 
+ 	memset(args, '\0', 60);
+ 
+@@ -285,26 +275,31 @@
+ 	} else if(!strncmp(args, "set_mode", 8)){
+ 		flags = strchr(args, '=');
+ 		if(flags != NULL){
+-			spi_mode = simple_strtoul(flags + 1, 0, 0);
++			spi_mode = simple_strtoull(flags + 1, &e, 0);
+ 			printk("Set spi_mode %d\n", spi_mode);
+ 		}
+ 	} else {
+ 		flags = strchr(args, '=');
+-		addr = (unsigned int) simple_strtoul(args, 0, 0);
+-
++		addr = (unsigned int) simple_strtoull(args, &e, 0);
+ 		if (flags == NULL){
+ 			printk(" read bcm53134 register address: 0x%x ", addr);
++			flags = strchr(args, ' ');
++			len = simple_strtoull(flags + 1, &e, 0);
++			printk("len: %d ", len);
+ 			if(spi_mode == 3){
+-				robo_spi_read(NULL, addr, &value, 2);
++				robo_spi_read(NULL, addr, &value, len);
+ 			}
+-			printk("value: 0x%x\n", value);
++			printk("value: 0x%llx\n", value);
+ 		} else {
+ 			printk(" write bcm53134 register address: 0x%x ", addr);
+-			value = simple_strtoul(flags + 1, 0, 0);
++			value = simple_strtoull(flags + 1, &e, 0);
++			printk("value: 0x%llx\n", value);
++			flags = strchr(args, ' ');
++			len = simple_strtoull(flags + 1, &e, 0);
++			printk("len: %d ", len);
+ 			if(spi_mode == 3){
+-				robo_spi_write(NULL, addr, &value, 2);
++				robo_spi_write(NULL, addr, &value, len);
+ 			}
+-			printk("value: 0x%x\n", value);
+ 		}
+ 	}
+ 

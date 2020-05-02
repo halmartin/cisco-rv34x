@@ -1,0 +1,28 @@
+# 2018-01-04: Subramanyam <reddi.m@nxp.com>
+# Changes for kernel image fallback mechanism when UBIFS errors occured.
+diff -rauN c/fs/super.c d/fs/super.c
+--- c/fs/super.c	2018-01-04 16:45:45.451430279 +0530
++++ d/fs/super.c	2018-01-04 17:46:44.806683479 +0530
+@@ -18,6 +18,7 @@
+  *    Torbjörn Lindh (torbjorn.lindh@gopta.se), April 14, 1996.
+  *  Added devfs support: Richard Gooch <rgooch@atnf.csiro.au>, 13-JAN-1998
+  *  Heavily rewritten for 'one fs - one tree' dcache architecture. AV, Mar 2000
++ *  Added changes by reddi.m@nxp.com on 4/1/2018 to handle UBIFS error 
+  */
+ 
+ #include <linux/export.h>
+@@ -737,6 +738,14 @@
+ 		}
+ 	}
+ 
++	/* 
++	 *Move sync_filesystem() after sb_prepare_remount_readonly(). If writers sneak in anywhere from 	  *sync_filesystem() to sb_prepare_remount_readonly() it can cause inodes to be dirtied and 
++         *writeback to occur well after sys_mount() has completely successfully. This was spotted by 
++	 *corrupted ubifs filesystems on reboot, but appears that it can cause issues with any filesystem 	  *using writeback. 
++	 */
++       
++        sync_filesystem(sb); //Added by NXP. sync ro remount after blocking writers.
++
+ 	if (sb->s_op->remount_fs) {
+ 		retval = sb->s_op->remount_fs(sb, &flags, data);
+ 		if (retval) {

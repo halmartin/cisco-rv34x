@@ -1,0 +1,28 @@
+From 331e3d8a4d08511e50776d748753bee4bd8ade3c Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Tue, 27 Feb 2018 15:39:42 +0530
+Subject: [PATCH] PPSBR-2111 Dead loop and crash of DUT is avoided by having
+ lower recursion limit
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ net/core/dev.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/net/core/dev.c b/net/core/dev.c
+index e0ed751..b931ce4 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -2882,7 +2882,8 @@ static void skb_update_prio(struct sk_buff *skb)
+ DEFINE_PER_CPU(int, xmit_recursion);
+ EXPORT_SYMBOL(xmit_recursion);
+ 
+-#define RECURSION_LIMIT 10
++//#define RECURSION_LIMIT 10
++#define RECURSION_LIMIT 5
+ 
+ /**
+  *	dev_loopback_xmit - loop back @skb
+-- 
+1.9.1
+

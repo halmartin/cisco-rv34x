@@ -1,0 +1,90 @@
+#!/bin/sh
+# 2017-03-13: li.zhang <li.zhang@deltaww.com>
+# Add usb hotplug files
+# Copyright (C) 2009 OpenWrt.org
+
+USBPORT1="usb3"
+USBPORT2="usb1"
+USBNUM=
+
+USB1MOUNT_NAME="USB1"
+USB2MOUNT_NAME="USB2"
+
+CURR_USB_STATUS="/var/usbCurrentName"
+USB_STATUS=/var/USBSTATUS
+
+usbDevice=`dirname $DEVPATH`
+basename=`basename $usbDevice`
+
+if [ "$_this_board" = "RV160" -o "$_this_board" = "RV160W" -o "$_this_board" = "RV260" -o "$_this_board" = "RV260W" -o "$_this_board" = "RV260P" ];then
+platform_led_script="rv16x_26x_led.sh"
+else
+platform_led_script="rv340_led.sh"
+fi
+
+if [ "$basename" != "$USBPORT1" ] && [ "$basename" != "$USBPORT2" ]; then
+	usbMountDir=`dirname $usbDevice`
+	usbMountPort=`basename $usbMountDir`
+	case "$ACTION" in
+		add)
+			if [ "$usbMountPort" = "$USBPORT1" ];then
+				USBNUM=1
+				# Update the USB Status
+				usbstatus=`cat $USB_STATUS | grep USB1`
+				if [ -n "$usbstatus" ];then
+					`sed -i "/^USB1:/c\USB1::::1" $USB_STATUS`
+				else
+					echo "USB1::::1" >> $USB_STATUS
+				fi
+				$platform_led_script usb1 amber
+			elif [ "$usbMountPort" = "$USBPORT2" ];then
+				USBNUM=2
+				# Update the USB Status
+				usbstatus=`cat $USB_STATUS | grep USB2`
+				if [ -n "$usbstatus" ];then
+					`sed -i "/^USB2:/c\USB2::::1" $USB_STATUS`
+				else
+					echo "USB2::::1" >> $USB_STATUS
+				fi	
+				$platform_led_script usb2 amber
+			fi
+			
+			# check and log for unrecognized devices
+			/usr/bin/check_usbdevices "USB${USBNUM}" &
+
+			;;
+		remove)
+			
+			if [ "$usbMountPort" = "$USBPORT1" ];then
+				# Update the USB Status
+				usbstatus=`cat $USB_STATUS | grep USB1`
+				if [ -n "$usbstatus" ];then
+					`sed -i "/^USB1:/d" $USB_STATUS`
+				#else
+				#	echo "USB1::::0" >> $USB_STATUS
+				fi
+				
+				# Check and run mwan3 if online
+				checkUsb=`mwan3 interfaces | grep usb1 | grep "online"`
+				if [ -n "$checkUsb" ];then
+					mwan3 ifdown usb1 &
+				fi
+				$platform_led_script usb1 off
+			elif [ "$usbMountPort" = "$USBPORT2" ];then
+				# Update the USB Status
+				usbstatus=`cat $USB_STATUS | grep USB2`
+				if [ -n "$usbstatus" ];then
+					`sed -i "/^USB2:/d" $USB_STATUS`
+				#else
+				#	echo "USB2::::0" >> $USB_STATUS
+				fi	
+				# Check and run mwan3 if online
+				checkUsb=`mwan3 interfaces | grep usb2 | grep "online"`
+				if [ -n "$checkUsb" ];then
+					mwan3 ifdown usb2 &
+				fi
+				$platform_led_script usb2 off
+			fi
+			;;
+	esac
+fi

@@ -1,0 +1,29 @@
+From 06ded8466687a82dbb6e20424e0b0aa076cdd885 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy <ganesh.reddy@nxp.com>
+Date: Thu, 8 Dec 2016 03:59:32 +0530
+Subject: [PATCH 54/60] SBR-887 Changing barebox version to 1.0.00.04
+
+-There was a fix done in barebox recently for 'SBR-1129 limit the physcial console port access Added Key Pattern input instead of Reset Button press'
+-incrementing the barebox version for tracking(Which was missed earlier).
+
+Signed-off-by: Ganesh Reddy <ganesh.reddy@nxp.com>
+---
+ commands/version_rv340.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/commands/version_rv340.c b/commands/version_rv340.c
+index 7ce0464..c4dc39f 100644
+--- a/commands/version_rv340.c
++++ b/commands/version_rv340.c
+@@ -24,7 +24,7 @@
+ #include <common.h>
+ #include <command.h>
+ 
+-const char version_string_rv340[] = "1.0.00.03";
++const char version_string_rv340[] = "1.0.00.04";
+ 
+ static int do_version_rv340(struct command *cmdtp, int argc, char *argv[])
+ {
+-- 
+2.7.4
+

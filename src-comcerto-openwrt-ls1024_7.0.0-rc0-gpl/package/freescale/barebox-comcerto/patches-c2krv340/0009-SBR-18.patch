@@ -1,0 +1,28 @@
+From 05ce01e3f6de551967d75c2572d8185b5976ee88 Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Tue, 21 Jul 2015 17:29:02 +0530
+Subject: [PATCH 09/60] SBR-18
+
+Addressed SBR-9 review comments and some enhancements
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ commands/boardinfo.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+index 2c6f513..2143086 100644
+--- a/commands/boardinfo.c
++++ b/commands/boardinfo.c
+@@ -196,7 +196,7 @@ static int command_boardinfo_show(int argc, char *argv[])
+   }
+   printf("\nOpened file %s for READING...", filename);
+   board_data = (c2krv340 *)xmalloc(sizeof(c2krv340));
+-  if ( board_data = NULL )
++  if ( board_data == NULL )
+   {
+     printf("Error %d! : %s\n", errno, errno_str());
+     close(fd);
+-- 
+2.7.4
+

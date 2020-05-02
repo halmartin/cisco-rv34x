@@ -1,0 +1,46 @@
+From 0e6be6d4f23df31551a2dfbf1de71483dc1fcef8 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Thu, 30 Aug 2018 10:26:29 +0530
+Subject: [PATCH 2/2] Added changes to parse option43 value from dhcpoffer
+ packet sent by dnsmasq which is different compared to
+ other dhcp servers like isc dhcp server Signed-off-by:
+ nageshkoneti <b47094@freescale.com>
+
+---
+ dhcpc.c |   13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/networking/udhcp/dhcpc.c b/networking/udhcp/dhcpc.c
+index 431a3e9..a520472 100644
+--- a/networking/udhcp/dhcpc.c
++++ b/networking/udhcp/dhcpc.c
+@@ -273,7 +273,7 @@ static int good_hostname(const char *name)
+ static NOINLINE char *xmalloc_optname_optval(uint8_t *option, const struct dhcp_optflag *optflag, const char *opt_name)
+ {
+ 	unsigned upper_length;
+-	int len, type, optlen;
++	int len, type, optlen,sub_type;
+ 	char *dest, *ret;
+ 
+ 	/* option points to OPT_DATA, need to go back to get OPT_LEN */
+@@ -281,6 +281,17 @@ static NOINLINE char *xmalloc_optname_optval(uint8_t *option, const struct dhcp_
+ 
+ 	type = optflag->flags & OPTION_TYPE_MASK;
+ 	optlen = dhcp_option_lengths[type];
++    /*this code parses option43 value from dhcpoffer packet sent by dnsmasq
++     dnsmasq is sending option43 format as 0x2b(type) len (0x2b)subtype len data*/
++    if((optflag->code) == DHCP_VENDOR_ENCAP)
++    {
++        sub_type=option[OPT_CODE];
++        if(sub_type == DHCP_VENDOR_ENCAP)
++        {
++            len = option[OPT_LEN];
++            option=option+OPT_DATA;
++        }
++    }
+ 	upper_length = len_of_option_as_string[type]
+ 		* ((unsigned)(len + optlen - 1) / (unsigned)optlen);
+ 
+-- 
+1.7.9.5
+

@@ -1,0 +1,25 @@
+# 2018-01-29: Rajeshkumar K <rajeshkumar.k@nxp.com>
+# Added NULL check for fbc->counters to avoid accessing the invalid memory 
+diff --git a/lib/percpu_counter.c b/lib/percpu_counter.c
+index f051d69..4e8c163 100644
+--- a/lib/percpu_counter.c
++++ b/lib/percpu_counter.c
+@@ -77,6 +77,10 @@ void __percpu_counter_add(struct percpu_counter *fbc, s64 amount, s32 batch)
+ 	s64 count;
+ 
+ 	preempt_disable();
++
++	if (unlikely(!fbc->counters))
++		goto out;
++
+ 	count = __this_cpu_read(*fbc->counters) + amount;
+ 	if (count >= batch || count <= -batch) {
+ 		unsigned long flags;
+@@ -87,6 +91,7 @@ void __percpu_counter_add(struct percpu_counter *fbc, s64 amount, s32 batch)
+ 	} else {
+ 		this_cpu_add(*fbc->counters, amount);
+ 	}
++out:
+ 	preempt_enable();
+ }
+ EXPORT_SYMBOL(__percpu_counter_add);

@@ -1,0 +1,2160 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+
+EXTRA_COMMANDS="handle_hotplug_WAN handle_hotplug_USB"
+EXTRA_HELP=<<EOF
+        handle_hotplug_WAN Handling of Hotplug call for a WAN interface
+        handle_hotplug_USB Handling of Hotplug call for a USB interface
+EOF
+
+. /lib/config/uci.sh
+. /lib/functions/network.sh
+
+TMP_QOSIFACESTATS="/tmp/qosifacestats.$$"
+#network_get_waniface wan1_int wan1
+#network_get_waniface wan2_int wan2
+network_wan1_ifname=`uci get network.wan1.ifname`
+network_wan1_ifname=${network_wan1_ifname%%.*}
+network_wan2_ifname=`uci get network.wan2.ifname` 2>&- >&-
+network_wan2_ifname=${network_wan2_ifname%%.*}
+network_lan_ifname=`uci get network.vlan1.ifname | awk -F '.' '{print $1}'`
+
+### Specification of wifi board ####
+#board=$(uci get systeminfo.sysinfo.pid | awk -F '-' '{print $1}')
+board=$__this_device
+
+if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+	__all_wan_iface="$network_wan1_ifname+ ppoe-wan1+ pptp-wan1+ l2tp-wan1+ $network_wan2_ifname+ ppoe-wan2+ pptp-wan2+ l2tp-wan2+ 3g-usb+ wwan+"
+	__all_wan6_iface="$network_wan1_ifname+ ppoe-wan1+ $network_wan2_ifname+ ppoe-wan2+"
+else #Assuming all PP platform
+	__all_wan_iface="$network_wan1_ifname+ ppoe-wan1+ pptp-wan1+ l2tp-wan1+ 3g-usb+ wwan+"
+	__all_wan6_iface="$network_wan1_ifname+ ppoe-wan1+"
+fi
+
+#echo "#DEBUG: __all_wan_iface:$__all_wan_iface, __all_wan6_iface:$__all_wan_iface"
+IPTABLES="iptables -w"
+IP6TABLES="ip6tables -w"
+
+handle_hotplug_WAN() {
+	config_load qos
+	if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+		update_app_rules
+	fi
+}
+
+handle_hotplug_USB() {
+	config_load qos
+	if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+		update_app_rules
+		update_ingress_usb
+	fi
+	update_egress_chain
+}
+
+start() {
+	config_load qos
+
+	logger -t QoS -p notice " Starting QoS Module "
+### modules .ko files need to be insmod while booting mainly used for linux tc ####
+    source uci_cache qos
+	
+	if ! lsmod | grep "xt_connmark" &> /dev/null; then
+		insmod xt_connmark 2>&- >&-	
+	fi
+	if ! lsmod | grep "cls_fw" &> /dev/null; then
+		insmod cls_fw 2>&- >&-
+	fi
+	if ! lsmod | grep "xt_dscp" &> /dev/null; then	
+		insmod xt_dscp	2>&- >&-
+	fi
+
+	#Set time to ensure statistics counters since boot-up also
+	for iface in WAN1 WAN2 USB1 USB2; do
+		touch /tmp/stats/qos_reset_$iface
+		echo 0 > /tmp/stats/qos_reset_$iface
+	done
+
+#### Enable QoS on WAN Interfaces by default #####
+
+        for i in wan1 wan2; do
+		ifname=$(uci get network.$i.ifname) 2>&- >&-
+		ifname=${ifname%%.*}
+		cmm -c set qm interface $ifname qos on 2>&- >&- 
+	done
+ 
+	cmm -c set qm interface $network_lan_ifname qos off 2>&- >&- 
+
+#### Ingress congestion control for less than 128 bytes packets ####
+	cmm -c icc threshold 128 128 2>&- >&-
+
+### Setting Default/Saved  configuration on Boot #####
+	id=0       
+	iid=0       
+        rule_chain
+	port_shaper_wan_upstream
+	if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+		flow
+	else #Assuming all PP platform
+		flow
+		update_ingress_chain_pp
+	fi
+	scheduler
+	ingress
+
+	USB1_INTERFACE=""
+	network_get_device_cached USB1_INTERFACE usb1
+	if [ "$USB1_INTERFACE" != "" ]; then
+		num=`$IP6TABLES -L egress_chain --line-numbers -t mangle -n | grep -E "usb1defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+		$IP6TABLES -D egress_chain $num -t mangle 2>&- >&-
+
+		num=`$IPTABLES -L egress_chain --line-numbers -t mangle -n | grep -E "usb1defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+		$IPTABLES -D egress_chain $num -t mangle 2>&- >&-
+		usb1_queue=0x80C0000000800000
+
+		$IPTABLES -I egress_chain -t mangle -o $USB1_INTERFACE -m comment --comment "usb1defaultrule" -j QOSCONNMARK --set-xmark $usb1_queue/0xf0f0000000ffffff 2>&- >&-
+		$IP6TABLES -I egress_chain -t mangle -o $USB1_INTERFACE -m comment --comment "usb1defaultrule" -j QOSCONNMARK --set-xmark $usb1_queue/0xf0f0000000ffffff 2>&- >&-
+	fi
+
+	USB2_INTERFACE=""
+	network_get_device_cached USB2_INTERFACE usb2
+	if [ "$USB2_INTERFACE" != "" ]; then
+		num=`$IP6TABLES -L egress_chain --line-numbers -t mangle -n | grep -E "usb2defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+		$IP6TABLES -D egress_chain $num -t mangle 2>&- >&-
+
+		num=`$IPTABLES -L egress_chain --line-numbers -t mangle -n | grep -E "usb2defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+		$IPTABLES -D egress_chain $num -t mangle 2>&- >&-
+		usb2_queue=0x80D0000000900000
+
+		$IPTABLES -I egress_chain -t mangle -o $USB2_INTERFACE -m comment --comment "usb2defaultrule" -j QOSCONNMARK --set-xmark $usb2_queue/0xf0f0000000ffffff 2>&- >&-
+		$IP6TABLES -I egress_chain -t mangle -o $USB2_INTERFACE -m comment --comment "usb2defaultrule" -j QOSCONNMARK --set-xmark $usb2_queue/0xf0f0000000ffffff 2>&- >&-
+	fi
+}
+
+stop() {
+
+#### Disable QoS on WAN Interfaces  #####
+
+	logger -t QoS -p notice " Stopping QoS Module "
+
+#### Reset software QoS  #####
+	cmm -c set swqos reset 2>&- >&- 
+	
+#### Flush rules ####
+	$IPTABLES -t mangle -F egress_chain 2>&- >&-
+	$IPTABLES -t mangle -F class_chain 2>&- >&-
+	$IPTABLES -t mangle -F ingress_chain 2>&- >&-
+	$IP6TABLES -t mangle -F egress_chain 2>&- >&-
+	$IP6TABLES -t mangle -F class_chain 2>&- >&-
+	$IP6TABLES -t mangle -F ingress_chain 2>&- >&-
+
+	network_get_device_cached USB1_INTERFACE usb1
+	network_get_device_cached USB2_INTERFACE usb2
+
+        for i in wan1 wan2; do
+		ifname=$(uci get network.$i.ifname) 2>&- >&-
+		ifname=${ifname%%.*}
+		cmm -c set qm interface $ifname qos off 2>&- >&-
+		cmm -c set swqos reset 2>&- >&-
+	done
+
+	if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+		for _iface in $__all_wan_iface; do
+			$IPTABLES -D FORWARD -t mangle -i $_iface -m comment --comment "ingress_chain" -j ingress_chain 2>&- >&-
+		done
+
+		for _iface6 in $__all_wan6_iface; do
+			$IP6TABLES -D FORWARD -t mangle -i $_iface6 -m comment --comment "ingress_chain" -j ingress_chain 2>&- >&-
+		done
+	else #Assuming all PP platform
+		$IPTABLES -t mangle -F ingress_chain_pp 2>&- >&-
+		$IP6TABLES -t mangle -F ingress_chain_pp 2>&- >&-
+		for _iface in $__all_wan_iface; do
+			$IPTABLES -D FORWARD -t mangle -i $_iface -m comment --comment "ingress_chain_pp" -j ingress_chain_pp 2>&- >&-
+		done
+
+		for _iface6 in $__all_wan6_iface; do
+			$IP6TABLES -D FORWARD -t mangle -i $_iface6 -m comment --comment "ingress_chain_pp" -j ingress_chain_pp 2>&- >&-
+		done
+
+		$IPTABLES -t mangle -X ingress_chain_pp 2>&- >&-
+		$IP6TABLES -t mangle -X ingress_chain_pp 2>&- >&-
+	fi
+	$IPTABLES -t mangle -X ingress_chain 2>&- >&-
+	$IP6TABLES -t mangle -X ingress_chain 2>&- >&-
+
+	$IPTABLES -D FORWARD -t mangle -m comment --comment "egress_chain" -j egress_chain 2>&- >&-
+	
+	$IPTABLES -t mangle -X class_chain 2>&- >&-
+	$IPTABLES -t mangle -X egress_chain 2>&- >&-
+
+	$IP6TABLES -D FORWARD -t mangle -m comment --comment "egress_chain" -j egress_chain 2>&- >&-
+
+	$IP6TABLES -t mangle -X class_chain 2>&- >&-
+	$IP6TABLES -t mangle -X egress_chain 2>&- >&-
+}
+
+reload() {
+	config_load qos
+	logger -t QoS -p notice " Reloading QoS Module "
+	#source uci_cache qos
+	update_qos
+}
+
+update_qos() {
+	
+        cp /tmp/.uci/qos /tmp/qosname
+	qos_diff=$(cat /tmp/qosname | sed s/"'"//g | grep -E "=qos|=bandwidth|=policing|=queueing|=classes|-qos.ingress_flow|-qos.egress_flow" | sed s/qos.// | sed -e s/=qos// -e s/=bandwidth// -e s/=policing// -e s/=queueing// -e s/=classes// | sort -u) 2>&- >&-	
+	config_get scheduler scheduler upstream
+	
+	config_get policy1 outbound_policy wan1
+	config_get policy2 outbound_policy wan2
+	config_get policy3 outbound_policy usb1
+	config_get policy4 outbound_policy usb2
+
+	config_get inpolicy1 inbound_policy wan1
+	config_get inpolicy3 inbound_policy usb1
+
+	qos_iface_stats.sh $$ iptablerules
+	
+	for section in $qos_diff
+	do
+        	case $section in
+        	
+        	scheduler)
+			scheduler
+			update_egress_chain	
+			if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+				update_app_rules
+			fi
+		;;
+	
+		wan1_llqqueue1)
+			if [ ! "$(echo $qos_diff | grep scheduler)" ]; then
+				shaper_cmm_wan1_upstream
+			fi
+		;;
+
+		wan2_llqqueue1)
+			if [ ! "$(echo $qos_diff | grep scheduler)" ]; then
+				shaper_cmm_wan2_upstream
+			fi
+		;;
+			
+		wan1_llqqueue*)
+			if [ ! "$(echo $qos_diff | grep scheduler)" ]; then
+				weights_cmm_wan1_upstream
+			fi
+		;;
+
+		wan2_llqqueue*)
+			if [ ! "$(echo $qos_diff | grep scheduler)" ]; then
+				weights_cmm_wan2_upstream
+			fi
+		;;
+
+		wan1_rcqueue*)
+			if [ ! "$(echo $qos_diff | grep scheduler)" ]; then
+				shaper_cmm_wan1_upstream
+				weights_cmm_wan1_upstream
+			fi
+		;;
+			
+		wan2_rcqueue*)
+			if [ ! "$(echo $qos_diff | grep scheduler)" ]; then
+				shaper_cmm_wan2_upstream
+				weights_cmm_wan2_upstream
+			fi
+		;;
+			
+		usb1_llqqueue* | usb1_rcqueue* | usb1_upstream)
+			if [ ! "$(echo $qos_diff | grep scheduler)" ]; then
+				usb1_upstream
+			fi
+		;;
+			
+		usb2_llqqueue* | usb2_rcqueue* | usb2_upstream)
+			if [ ! "$(echo $qos_diff | grep scheduler)" ]; then
+				usb2_upstream
+			fi
+		
+		;;
+			
+		wan1 | wan2 | usb1 | usb2 | outbound_policy | $policy1 | $policy2 | $policy3 | $policy4 )
+			if [ ! "$(echo $qos_diff | grep scheduler)" ]; then
+				update_egress_chain
+				if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+					update_app_rules
+				fi
+			fi
+		;;
+
+		$inpolicy1 | $inpolicy3 | inbound_policy )
+			update_ingress_chain_pp
+		;;
+
+		wan1_upstream | wan2_upstream )
+			if [ ! "$(echo $qos_diff | grep scheduler)" ]; then
+				port_shaper_wan_upstream
+				shaper_cmm_wan1_upstream				
+				weights_cmm_wan1_upstream
+				if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+					shaper_cmm_wan2_upstream
+					weights_cmm_wan2_upstream
+				fi
+			fi
+		;;
+
+		ingressqueue* | wan1_ingressqueue* | usb1_ingressqueue* | wan1_downstream | wan2_downstream | usb1_downstream | usb2_downstream )
+			ingress
+		;;
+		
+		ingress_flow* | egress_flow*)
+			config_get app $section application
+			if [ "$app" = "" ]; then
+				config_get classname $section classname
+				#add_rule_to_chain $classname $section
+				qos-iptables-uci -i -f $$ "$classname.$section"
+				qos-ip6tables-uci -f $$ "$classname.$section"
+				if [ "$(echo $section | grep "ingress_flow")" ]; then
+					if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+						echo " " 2>&- >&-
+					else #Assuming all PP platform
+						update_ingress_chain_pp
+					fi
+				fi
+			else
+				if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+					update_app_rules
+				fi
+			fi
+		;;
+					
+		-ingress_flow* | -egress_flow*)
+			section=$( echo $section | sed s/-// ) 2>&- >&-
+			app=$(uci get /tmp/etc/config/qos.$section.application)	2>&- >&-
+		
+			if [ "$app" = "" ]; then
+				classname=$(uci get /tmp/etc/config/qos.$section.classname) 2>&- >&-
+				delete_rule_from_chain $classname $section 
+				if [ "$(echo $section | grep "ingress_flow")" ]; then
+					if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+						echo " " 2>&- >&-
+					else #Assuming all PP platform
+						update_ingress_chain_pp
+					fi
+				fi
+			else
+				if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+					update_app_rules 
+				fi
+			fi
+		;;
+					
+		ingressqos)
+			config_get enable $section enable
+		
+			if [ "$enable" = "0" ]; then
+				cmm -c set swqos shaper 12 on rate 1000000 reset queue 32-39 2>&- >&-
+				cmm -c set swqos shaper 13 on rate 1000000 reset queue 48-55 2>&- >&-
+				cmm -c set swqos shaper 14 on rate 1000000 reset queue 64-71 2>&- >&-
+				cmm -c set swqos shaper 15 on rate 1000000 reset queue 80-87 2>&- >&-
+
+				if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+					for _iface in $__all_wan_iface; do
+						$IPTABLES -D FORWARD -t mangle -i $_iface -m comment --comment "ingress_chain" -j ingress_chain 2>&- >&-
+					done
+
+					for _iface6 in $__all_wan6_iface; do
+						$IP6TABLES -D FORWARD -t mangle -i $_iface6 -m comment --comment "ingress_chain" -j ingress_chain 2>&- >&-
+					done
+
+					update_app_rules disable
+				else #Assuming all PP platform
+					for _iface in $__all_wan_iface; do
+						$IPTABLES -D FORWARD -t mangle -i $_iface -m comment --comment "ingress_chain_pp" -j ingress_chain_pp 2>&- >&-
+					done
+
+					for _iface6 in $__all_wan6_iface; do
+						$IP6TABLES -D FORWARD -t mangle -i $_iface6 -m comment --comment "ingress_chain_pp" -j ingress_chain_pp 2>&- >&-
+					done
+
+				fi
+			else
+				config_get shp1 wan1_downstream shaper
+				config_get shp2 wan2_downstream shaper
+				config_get shp3 usb1_downstream shaper
+				config_get shp4 usb2_downstream shaper
+
+				cmm -c set swqos shaper 12 on rate $shp1 reset queue 32-39 2>&- >&-
+				cmm -c set swqos shaper 13 on rate $shp2 reset queue 48-55 2>&- >&-
+				cmm -c set swqos shaper 14 on rate $shp3 reset queue 64-71 2>&- >&-
+				cmm -c set swqos shaper 15 on rate $shp4 reset queue 80-87 2>&- >&-
+
+				if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+					for _iface in $__all_wan_iface; do
+						$IPTABLES -A FORWARD -t mangle -i $_iface -m comment --comment "ingress_chain" -j ingress_chain 2>&- >&-
+					done
+
+					for _iface6 in $__all_wan6_iface; do
+						$IP6TABLES -A FORWARD -t mangle -i $_iface6 -m comment --comment "ingress_chain" -j ingress_chain 2>&- >&-
+					done
+
+					update_app_rules
+				else #Assuming all PP platform
+					for _iface in $__all_wan_iface; do
+						$IPTABLES -A FORWARD -t mangle -i $_iface -m comment --comment "ingress_chain_pp" -j ingress_chain_pp 2>&- >&-
+					done
+
+					for _iface6 in $__all_wan6_iface; do
+						$IP6TABLES -A FORWARD -t mangle -i $_iface6 -m comment --comment "ingress_chain_pp" -j ingress_chain_pp 2>&- >&-
+					done
+
+				fi
+			fi
+		;;
+			
+		*)
+		;;
+		esac        	
+        done
+
+	rm $TMP_QOSIFACESTATS
+	uci commit qos
+}
+
+##### Sets Upstream port shaper #############
+port_shaper_wan_upstream() {
+
+	####CMM Queue manager#####
+	config_get shaper wan1_upstream shaper
+	ifname=$network_wan1_ifname
+	if [ "$(echo $ifname | grep "$network_lan_ifname")" ]; then
+		cmm -c set qm interface $ifname shaper port off 2>&- >&-
+		cmm -c set qm interface $ifname shaper port on rate 1000000 2>&- >&-
+		ifname=$(echo $ifname | sed s/'$network_lan_ifname.[0-9]* '//g | awk -F '.' '{print $1}') 2>&- >&-
+	fi
+	cmm -c set qm interface $ifname shaper port on rate $shaper 2>&- >&- 
+
+	if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then	
+		config_get shaper wan2_upstream shaper
+		ifname=$network_wan2_ifname
+		if [ "$(echo $ifname | grep "$network_lan_ifname")" ]; then
+			cmm -c set qm interface $ifname shaper port off 2>&- >&-
+			cmm -c set qm interface $ifname shaper port on rate 1000000 2>&- >&-
+			ifname=$(echo $ifname | sed s/'$network_lan_ifname.[0-9]* '//g | awk -F '.' '{print $1}') 2>&- >&-
+		fi
+		cmm -c set qm interface $ifname shaper port on rate $shaper 2>&- >&- 
+	fi
+}
+
+##### Sets a Upstream scheduler ##############
+scheduler() {
+	local _var_upstream
+	config_get sdlr scheduler upstream
+
+	if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+		_var_upstream="wan1_upstream wan2_upstream"
+	else #for PP
+		_var_upstream="wan1_upstream"
+	fi
+
+	for i in $_var_upstream; do                                                          
+        p=$(echo $i | awk -F '_' '{print $1}')
+
+		if [ "$p" = "wan1" ]
+		then
+			ifname=$network_wan1_ifname
+		elif [ "$p" = "wan2" ]
+		then
+			ifname=$network_wan2_ifname
+		fi
+	
+		cmm -c set qm interface $ifname scheduler 7 queue 15 2>&- >&-
+		cmm -c set qm interface $ifname scheduler 7 queue 9 2>&- >&-
+	
+		case $sdlr in
+	
+		priority)
+			cmm -c set qm interface $ifname scheduler 4 algorithm dwrr 2>&- >&- 
+			cmm -c set qm interface $ifname scheduler 4 queue 3 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 2 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 1 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 0 2>&- >&-
+
+			cmm -c set qm interface $ifname scheduler 0 queue 7 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 0 queue 6 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 0 queue 5 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 0 queue 4 2>&- >&-
+
+			cmm -c set qm interface $ifname shaper 0 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 6 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 5 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 4 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 1 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 2 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 3 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 7 off 2>&- >&- 
+
+			cmm -c set qm interface $ifname queue 0 qweight 100 2>&- >&- 
+			cmm -c set qm interface $ifname queue 1 qweight 200 2>&- >&- 
+			cmm -c set qm interface $ifname queue 2 qweight 300 2>&- >&- 
+			cmm -c set qm interface $ifname queue 3 qweight 400 2>&- >&- 
+		;;
+	
+		low-latency)
+			cmm -c set qm interface $ifname scheduler 5 algorithm sp 2>&- >&- 
+			cmm -c set qm interface $ifname scheduler 4 algorithm dwrr 2>&- >&- 
+			cmm -c set qm interface $ifname scheduler 5 queue 3 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 2 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 1 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 0 2>&- >&-
+		
+			cmm -c set qm interface $ifname scheduler 0 queue 7 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 0 queue 6 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 0 queue 5 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 0 queue 4 2>&- >&-
+
+			cmm -c set qm interface $ifname shaper 0 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 6 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 5 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 4 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 1 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 2 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 3 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 7 off 2>&- >&- 
+		
+			shaper_cmm_$i
+			weights_cmm_$i
+		;;
+
+		*)
+			cmm -c set qm interface $ifname scheduler 4 algorithm dwrr 2>&- >&- 
+			cmm -c set qm interface $ifname scheduler 4 queue 7 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 6 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 5 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 4 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 3 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 2 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 1 2>&- >&-
+			cmm -c set qm interface $ifname scheduler 4 queue 0 2>&- >&-
+
+			cmm -c set qm interface $ifname scheduler 0 queue 8 2>&- >&-
+	
+			shaper_cmm_$i
+			weights_cmm_$i
+		;;
+		esac
+	done
+
+	usb1_upstream
+	if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+		usb2_upstream
+	fi
+}
+
+### This Function set shaper values to queues assigned for WAN1 #####
+shaper_cmm_wan1_upstream() {
+	####CMM Queue manager#####
+	config_get sdlr scheduler upstream
+	config_get shp wan1_upstream shaper
+	config_get ifname wan1_upstream ifname
+
+	if [ "$sdlr" = "low-latency" ]; then
+		config_get mx wan1_llqqueue1 max
+		mx=$(expr $mx "*" $shp / 100)
+	
+		if [ "$mx" != 0 ]; then
+			cmm -c set qm interface $ifname shaper 1 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 1 on 2>&- >&- 
+			mx=$(($mx < 8 ? 8 : $mx))
+			cmm -c set qm interface $ifname shaper 1 rate $mx 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 1 queue 3 2>&- >&-
+		else
+			cmm -c set qm interface $ifname shaper 1 off 2>&- >&- 
+		fi
+	elif [ "$sdlr" = "rate-control" ]; then
+		config_get mx wan1_rcqueue8 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 0 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 0 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 0 queue 0 2>&- >&- 
+
+		config_get mx wan1_rcqueue2 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 1 off 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 1 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 1 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 1 queue 6 2>&- >&- 
+
+		config_get mx wan1_rcqueue3 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 2 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 2 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 2 queue 5 2>&- >&- 
+
+		config_get mx wan1_rcqueue4 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 3 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 3 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 3 queue 4 2>&- >&- 
+
+		config_get mx wan1_rcqueue5 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 4 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 4 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 4 queue 3 2>&- >&- 
+
+		config_get mx wan1_rcqueue6 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 5 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 5 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 5 queue 2 2>&- >&- 
+
+		config_get mx wan1_rcqueue7 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 6 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 6 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 6 queue 1 2>&- >&- 
+
+		config_get mx wan1_rcqueue1 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 7 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 7 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 7 queue 7 2>&- >&- 
+	else
+		echo ""	
+	fi
+}
+
+
+#### This Function set shaper values to queues assigned for WAN2 ####
+shaper_cmm_wan2_upstream() {
+	####CMM Queue manager#####
+	config_get sdlr scheduler upstream
+	config_get shp wan2_upstream shaper
+
+	ifname=$network_wan2_ifname
+	if [ "$sdlr" = "low-latency" ]; then
+		config_get mx wan2_llqqueue1 max
+		mx=$(expr $mx "*" $shp / 100)
+		if [ "$mx" != 0 ]; then
+			cmm -c set qm interface $ifname shaper 1 off 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 1 on 2>&- >&- 
+			mx=$(($mx < 8 ? 8 : $mx))
+			cmm -c set qm interface $ifname shaper 1 rate $mx 2>&- >&- 
+			cmm -c set qm interface $ifname shaper 1 queue 3 2>&- >&- 
+		else
+			cmm -c set qm interface $ifname shaper 1 off 2>&- >&- 
+		fi
+
+	elif [ "$sdlr" = "rate-control" ]; then
+		config_get mx wan2_rcqueue8 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 0 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 0 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 0 queue 0 2>&- >&- 
+
+		config_get mx wan2_rcqueue2 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 1 off 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 1 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 1 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 1 queue 6 2>&- >&- 
+
+		config_get mx wan2_rcqueue3 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 2 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 2 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 2 queue 5 2>&- >&- 
+
+		config_get mx wan2_rcqueue4 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 3 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 3 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 3 queue 4 2>&- >&- 
+
+		config_get mx wan2_rcqueue5 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 4 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 4 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 4 queue 3 2>&- >&- 
+
+		config_get mx wan2_rcqueue6 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 5 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 5 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 5 queue 2 2>&- >&- 
+
+		config_get mx wan2_rcqueue7 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 6 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 6 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 6 queue 1 2>&- >&- 
+
+		config_get mx wan2_rcqueue1 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		cmm -c set qm interface $ifname shaper 7 on 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 7 rate $mx 2>&- >&- 
+		cmm -c set qm interface $ifname shaper 7 queue 7 2>&- >&- 
+	else
+		echo ""	
+	fi
+}
+
+####This Function set weights values to queues assigned for WAN1 #####
+weights_cmm_wan1_upstream() {
+	####CMM Queue manager#####
+	config_get sdlr scheduler upstream
+	config_get shp wan1_upstream shaper
+
+	ifname=$network_wan1_ifname
+
+	if [ "$sdlr" = "rate-control" ]; then
+
+		if [ "$shp" -lt "30000" ]; then
+			qnt=1
+		else
+			qnt=100
+		fi
+
+		config_get mn wan1_rcqueue1 min
+		mn=$(expr $mn "*" "$qnt" )
+		cmm -c set qm interface $ifname queue 7 qweight $mn 2>&- >&- 
+
+		config_get mn wan1_rcqueue2 min
+		mn=$(expr $mn "*" "$qnt")
+		cmm -c set qm interface $ifname queue 6 qweight $mn 2>&- >&- 
+
+		config_get mn wan1_rcqueue3 min
+		mn=$(expr $mn "*" "$qnt" )
+		cmm -c set qm interface $ifname queue 5 qweight $mn 2>&- >&- 
+
+		config_get mn wan1_rcqueue4 min
+		mn=$(expr $mn "*" "$qnt" )
+		cmm -c set qm interface $ifname queue 4 qweight $mn 2>&- >&- 
+
+		config_get mn wan1_rcqueue5 min
+		mn=$(expr $mn "*" "$qnt" )
+		cmm -c set qm interface $ifname queue 3 qweight $mn 2>&- >&- 
+
+		config_get mn wan1_rcqueue6 min
+		mn=$(expr $mn "*" "$qnt" )
+		cmm -c set qm interface $ifname queue 2 qweight $mn 2>&- >&- 
+
+		config_get mn wan1_rcqueue7 min
+		mn=$(expr $mn "*" "$qnt" )
+		cmm -c set qm interface $ifname queue 1 qweight $mn 2>&- >&- 
+
+		config_get mn wan1_rcqueue8 min
+		mn=$(expr $mn "*" "$qnt" )
+		cmm -c set qm interface $ifname queue 0 qweight $mn 2>&- >&- 
+
+	elif [ "$sdlr" = "low-latency" ]; then
+	
+		config_get mn wan1_llqqueue2 min
+		mn=$(expr $mn "*" "100" )
+		cmm -c set qm interface $ifname queue 2 qweight $mn 2>&- >&- 
+
+		config_get mn wan1_llqqueue3 min
+		mn=$(expr $mn "*" "100" )
+		cmm -c set qm interface $ifname queue 1 qweight $mn 2>&- >&- 
+
+		config_get mn wan1_llqqueue4 min
+		mn=$(expr $mn "*" "100" )
+		cmm -c set qm interface $ifname queue 0 qweight $mn 2>&- >&- 
+	fi	
+}
+
+####This Function set shaper values for WAN2 #####
+weights_cmm_wan2_upstream() {
+	####CMM Queue manager#####
+	config_get sdlr scheduler upstream
+	config_get shp wan2_upstream shaper
+
+	ifname=$network_wan2_ifname
+
+	if [ "$sdlr" = "rate-control" ]; then
+		if [ "$shp" -lt "30000" ]; then
+			qnt=1
+		else
+			qnt=100
+		fi
+
+		config_get mn wan2_rcqueue1 min
+		mn=$(expr $mn "*" "$qnt")
+		cmm -c set qm interface $ifname queue 7 qweight $mn 2>&- >&- 
+
+		config_get mn wan2_rcqueue2 min
+		mn=$(expr $mn "*" "$qnt")
+		cmm -c set qm interface $ifname queue 6 qweight $mn 2>&- >&- 
+
+		config_get mn wan2_rcqueue3 min
+		mn=$(expr $mn "*" "$qnt")
+		cmm -c set qm interface $ifname queue 5 qweight $mn 2>&- >&- 
+
+		config_get mn wan2_rcqueue4 min
+		mn=$(expr $mn "*" "$qnt")
+		cmm -c set qm interface $ifname queue 4 qweight $mn 2>&- >&- 
+
+		config_get mn wan2_rcqueue5 min
+		mn=$(expr $mn "*" "$qnt")
+		cmm -c set qm interface $ifname queue 3 qweight $mn 2>&- >&- 
+
+		config_get mn wan2_rcqueue6 min
+		mn=$(expr $mn "*" "$qnt")
+		cmm -c set qm interface $ifname queue 2 qweight $mn 2>&- >&- 
+
+		config_get mn wan2_rcqueue7 min
+		mn=$(expr $mn "*" "$qnt")
+		cmm -c set qm interface $ifname queue 1 qweight $mn 2>&- >&- 
+
+		config_get mn wan2_rcqueue8 min
+		mn=$(expr $mn "*" "$qnt")
+		cmm -c set qm interface $ifname queue 0 qweight $mn 2>&- >&- 
+
+	elif [ "$sdlr" = "low-latency" ]; then
+	
+		config_get mn wan2_llqqueue2 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set qm interface $ifname queue 2 qweight $mn 2>&- >&- 
+
+		config_get mn wan2_llqqueue3 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set qm interface $ifname queue 1 qweight $mn 2>&- >&- 
+
+		config_get mn wan2_llqqueue4 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set qm interface $ifname queue 0 qweight $mn 2>&- >&- 
+	fi	
+}
+
+### This Function Configures upstream QoS for USB1 interface ####
+usb1_upstream() {
+	config_get sdlr scheduler upstream
+	config_get shp usb1_upstream shaper
+
+	case $sdlr in
+	low-latency)
+		cmm -c set swqos shaper 10 off 2>&- >&-
+		cmm -c set swqos shaper 10 on ifg 20 rate $shp reset  queue 1-3 queue 0 2>&- >&-
+
+		cmm -c set swqos scheduler 1 reset 2>&- >&-
+		cmm -c set swqos scheduler 1 algorithm pq queue 1 2>&- >&-
+		cmm -c set swqos scheduler 0 reset 2>&- >&-
+		cmm -c set swqos scheduler 0 algorithm dwrr queue 2-3 queue 0 2>&- >&-
+
+		config_get mx usb1_llqqueue1 max
+		mx=$(expr $mx "*" $shp / 100)
+		if [ "$mx" != 0 ]; then
+			mx=$(($mx < 8 ? 8 : $mx))
+			cmm -c set swqos shaper 1 on ifg 20 rate $mx reset queue 1 2>&- >&-
+		else
+			cmm -c set swqos shaper 1 off reset 2>&- >&-
+		fi
+
+		config_get mn usb1_llqqueue2 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos shaper 2 off reset 2>&- >&-
+		cmm -c set swqos queue 2 qweight $mn 2>&- >&- 
+	
+		config_get mn usb1_llqqueue3 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos shaper 3 off reset 2>&- >&-
+		cmm -c set swqos queue 3 qweight $mn 2>&- >&- 
+
+		config_get mn usb1_llqqueue4 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 0 qweight $mn 2>&- >&- 
+	;;
+	
+	priority)
+		cmm -c set swqos shaper 10 off 2>&- >&-
+		cmm -c set swqos shaper 10 on ifg 20 rate $shp reset  queue 1-3 queue 0 2>&- >&-
+
+		cmm -c set swqos scheduler 0 reset 2>&- >&-
+		cmm -c set swqos scheduler 0 algorithm dwrr queue 1-3 queue 0 2>&- >&-
+		cmm -c set swqos scheduler 1 reset 2>&- >&-
+	
+		cmm -c set swqos shaper 1 off reset 2>&- >&-
+		cmm -c set swqos queue 1 qweight 400 2>&- >&- 
+
+		cmm -c set swqos shaper 2 off reset 2>&- >&-
+		cmm -c set swqos queue 2 qweight 300 2>&- >&- 
+
+		cmm -c set swqos shaper 3 off reset 2>&- >&-
+		cmm -c set swqos queue 3 qweight 200 2>&- >&- 
+
+		cmm -c set swqos shaper 0 off reset 2>&- >&-
+		cmm -c set swqos queue 0 qweight 100 2>&- >&- 
+	;;
+
+	*)	
+		cmm -c set swqos scheduler 0 reset 2>&- >&-
+		cmm -c set swqos scheduler 0 algorithm dwrr queue 1-7 queue 0 2>&- >&-
+		cmm -c set swqos scheduler 1 reset 2>&- >&-
+	
+		config_get mx usb1_rcqueue1 max
+		config_get mn usb1_rcqueue1 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 1 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 1 off 2>&- >&-
+		cmm -c set swqos shaper 1 on ifg 20 rate $mx reset queue 1 2>&- >&-
+	
+		config_get mx usb1_rcqueue2 max
+		config_get mn usb1_rcqueue2 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 2 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 2 off 2>&- >&-
+		cmm -c set swqos shaper 2 on ifg 20 rate $mx reset queue 2 2>&- >&-
+	
+		config_get mx usb1_rcqueue3 max
+		config_get mn usb1_rcqueue3 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 3 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 3 off 2>&- >&-
+		cmm -c set swqos shaper 3 on ifg 20 rate $mx reset queue 3 2>&- >&-
+
+		config_get mx usb1_rcqueue4 max
+		config_get mn usb1_rcqueue4 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 4 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 4 off 2>&- >&-
+		cmm -c set swqos shaper 4 on ifg 20 rate $mx reset queue 4 2>&- >&-
+	
+		config_get mx usb1_rcqueue5 max
+		config_get mn usb1_rcqueue5 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 5 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 5 off 2>&- >&-
+		cmm -c set swqos shaper 5 on ifg 20 rate $mx reset queue 5 2>&- >&-
+
+		config_get mx usb1_rcqueue6 max
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		config_get mn usb1_rcqueue6 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 6 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 6 off 2>&- >&-
+		cmm -c set swqos shaper 6 on ifg 20 rate $mx reset queue 6 2>&- >&-
+
+		config_get mx usb1_rcqueue7 max
+		config_get mn usb1_rcqueue7 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 7 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 7 off 2>&- >&-
+		cmm -c set swqos shaper 7 on ifg 20 rate $mx reset queue 7 2>&- >&-
+
+		config_get mn usb1_rcqueue8 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 0 qweight $mn 2>&- >&- 
+	
+		cmm -c set swqos shaper 10 off 2>&- >&-
+		cmm -c set swqos shaper 10 on ifg 20 rate $shp reset  queue 1-7 queue 0 2>&- >&-
+	;;
+	esac
+}
+
+### This Function Configures upstream QoS for USB2 interface ####
+usb2_upstream() {
+	config_get sdlr scheduler upstream
+	config_get shp usb2_upstream shaper
+
+	case $sdlr in
+	low-latency)
+		cmm -c set swqos shaper 11 on ifg 20 rate $shp reset  queue 17-19 queue 16 2>&- >&-
+
+		cmm -c set swqos scheduler 3 reset 2>&- >&-
+		cmm -c set swqos scheduler 3 algorithm pq queue 17 2>&- >&-
+		cmm -c set swqos scheduler 2 reset 2>&- >&-
+		cmm -c set swqos scheduler 2 algorithm dwrr queue 18-19 queue 16 2>&- >&-
+
+		config_get mx usb2_llqqueue1 max
+		mx=$(expr $mx "*" $shp / 100)
+		if [ "$mx" != 0 ]; then
+			mx=$(($mx < 8 ? 8 : $mx))
+			cmm -c set swqos shaper 17 on rate $mx reset queue 17 2>&- >&-
+		else
+			cmm -c set swqos shaper 17 off reset 2>&- >&-
+		fi
+
+		config_get mn usb2_llqqueue2 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos shaper 18 off reset 2>&- >&-
+		cmm -c set swqos queue 18 qweight $mn 2>&- >&- 
+	
+		config_get mn usb2_llqqueue3 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos shaper 19 off reset 2>&- >&-
+		cmm -c set swqos queue 19 qweight $mn 2>&- >&- 
+
+		config_get mn usb2_llqqueue4 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 16 qweight $mn 2>&- >&- 
+	;;
+
+	priority)
+		cmm -c set swqos shaper 11 on ifg 20 rate $shp reset  queue 17-19 queue 16 2>&- >&-
+
+		cmm -c set swqos scheduler 2 reset 2>&- >&-
+		cmm -c set swqos scheduler 2 algorithm dwrr queue 17-19 queue 16 2>&- >&-
+		cmm -c set swqos scheduler 3 reset 2>&- >&-
+	
+		cmm -c set swqos shaper 17 off reset 2>&- >&-
+		cmm -c set swqos queue 17 qweight 400 2>&- >&- 
+
+		cmm -c set swqos shaper 18 off reset 2>&- >&-
+		cmm -c set swqos queue 18 qweight 300 2>&- >&- 
+
+		cmm -c set swqos shaper 19 off reset 2>&- >&-
+		cmm -c set swqos queue 19 qweight 200 2>&- >&- 
+
+		cmm -c set swqos shaper 16 off reset 2>&- >&-
+		cmm -c set swqos queue 16 qweight 100 2>&- >&- 
+	;;
+
+	*)	
+		cmm -c set swqos scheduler 2 reset 2>&- >&-
+		cmm -c set swqos scheduler 2 algorithm dwrr queue 17-23 queue 16 2>&- >&-
+		cmm -c set swqos scheduler 3 reset 2>&- >&-
+	
+		config_get mx usb2_rcqueue1 max
+		config_get mn usb2_rcqueue1 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 17 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 17 off 2>&- >&-
+		cmm -c set swqos shaper 17 on ifg 20 rate $mx reset queue 17 2>&- >&-
+	
+		config_get mx usb2_rcqueue2 max
+		config_get mn usb2_rcqueue2 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 18 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 18 off 2>&- >&-
+		cmm -c set swqos shaper 18 on ifg 20 rate $mx reset queue 18 2>&- >&-
+	
+		config_get mx usb2_rcqueue3 max
+		config_get mn usb2_rcqueue3 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 19 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 19 off 2>&- >&-
+		cmm -c set swqos shaper 19 on ifg 20 rate $mx reset queue 19 2>&- >&-
+
+		config_get mx usb2_rcqueue4 max
+		config_get mn usb2_rcqueue4 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 20 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 20 off 2>&- >&-
+		cmm -c set swqos shaper 20 on ifg 20 rate $mx reset queue 20 2>&- >&-
+	
+		config_get mx usb2_rcqueue5 max
+		config_get mn usb2_rcqueue5 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 21 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 21 off 2>&- >&-
+		cmm -c set swqos shaper 21 on ifg 20 rate $mx reset queue 21 2>&- >&-
+
+		config_get mx usb2_rcqueue6 max
+		config_get mn usb2_rcqueue6 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 22 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 22 off 2>&- >&-
+		cmm -c set swqos shaper 22 on ifg 20 rate $mx reset queue 22 2>&- >&-
+
+		config_get mx usb2_rcqueue7 max
+		config_get mn usb2_rcqueue7 min
+		mx=$(expr $mx "*" $shp / 100)
+		mx=$(($mx < 8 ? 8 : $mx))
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 23 qweight $mn 2>&- >&- 
+		cmm -c set swqos shaper 23 off 2>&- >&-
+		cmm -c set swqos shaper 23 on ifg 20 rate $mx reset queue 23 2>&- >&-
+
+		config_get mn usb2_rcqueue8 min
+		mn=$(expr $mn "*" 100)
+		cmm -c set swqos queue 16 qweight $mn 2>&- >&- 
+		
+		cmm -c set swqos shaper 11 off 2>&- >&-
+		cmm -c set swqos shaper 11 on ifg 20 rate $shp reset  queue 17-23 queue 16 2>&- >&-
+	;;
+	esac
+}
+
+### This Function Configures downstream QoS  ####
+ingress() {
+#### Ingress assigning dwrr scheduler to queues  #####
+	cmm -c set swqos scheduler 4 algorithm dwrr reset queue 32-39 2>&- >&-
+	cmm -c set swqos scheduler 6 algorithm dwrr reset queue 64-71 2>&- >&-
+	
+#### Ingress Port shaper #####
+	config_get shp1 wan1_downstream shaper
+	config_get shp2 wan2_downstream shaper
+	config_get shp3 usb1_downstream shaper
+	config_get shp4 usb2_downstream shaper
+
+	cmm -c set swqos shaper 12 on ifg 20 rate $shp1 reset queue 32-39 2>&- >&-
+	cmm -c set swqos shaper 14 on ifg 20 rate $shp3 reset queue 64-71 2>&- >&-
+#### Ingress assigning shaper to queue #####
+	if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+
+		#Below CMM rules are applicable only for BB2.
+		cmm -c set swqos scheduler 5 algorithm dwrr reset queue 48-55 2>&- >&-
+		cmm -c set swqos scheduler 7 algorithm dwrr reset queue 80-87 2>&- >&-
+		cmm -c set swqos shaper 13 on ifg 20 rate $shp2 reset queue 48-55 2>&- >&-
+		cmm -c set swqos shaper 15 on ifg 20 rate $shp4 reset queue 80-87 2>&- >&-
+
+		config_get mx1 ingressqueue1 max
+
+		mx11=$(expr $mx1 "*" $shp1 / 100) 2>&- >&-
+		mx12=$(expr $mx1 "*" $shp2 / 100) 2>&- >&-
+		mx13=$(expr $mx1 "*" $shp3 / 100) 2>&- >&-
+		mx14=$(expr $mx1 "*" $shp4 / 100) 2>&- >&-
+
+		mx11=$(($mx11 < 8 ? 8 : $mx11))
+		mx12=$(($mx12 < 8 ? 8 : $mx12))
+		mx13=$(($mx13 < 8 ? 8 : $mx13))
+		mx14=$(($mx14 < 8 ? 8 : $mx14))
+
+		cmm -c set swqos shaper 33 on ifg 20 rate $mx11 reset queue 33 2>&- >&-
+		cmm -c set swqos shaper 49 on ifg 20 rate $mx12 reset queue 49 2>&- >&-
+		cmm -c set swqos shaper 65 on ifg 20 rate $mx13 reset queue 65 2>&- >&-
+		cmm -c set swqos shaper 81 on ifg 20 rate $mx14 reset queue 81 2>&- >&-
+
+		config_get mx2 ingressqueue2 max
+
+		mx21=$(expr $mx2 "*" $shp1 / 100) 2>&- >&-
+		mx22=$(expr $mx2 "*" $shp2 / 100) 2>&- >&-
+		mx23=$(expr $mx2 "*" $shp3 / 100) 2>&- >&-
+		mx24=$(expr $mx2 "*" $shp4 / 100) 2>&- >&-
+
+		mx21=$(($mx21 < 8 ? 8 : $mx21))
+		mx22=$(($mx22 < 8 ? 8 : $mx22))
+		mx23=$(($mx23 < 8 ? 8 : $mx23))
+		mx24=$(($mx24 < 8 ? 8 : $mx24))
+
+		cmm -c set swqos shaper 34 on ifg 20 rate $mx21 reset queue 34 2>&- >&-
+		cmm -c set swqos shaper 50 on ifg 20 rate $mx22 reset queue 50 2>&- >&-
+		cmm -c set swqos shaper 66 on ifg 20 rate $mx23 reset queue 66 2>&- >&-
+		cmm -c set swqos shaper 82 on ifg 20 rate $mx24 reset queue 82 2>&- >&-
+
+		config_get mx3 ingressqueue3 max
+
+		mx31=$(expr $mx3 "*" $shp1 / 100) 2>&- >&-
+		mx32=$(expr $mx3 "*" $shp2 / 100) 2>&- >&-
+		mx33=$(expr $mx3 "*" $shp3 / 100) 2>&- >&-
+		mx34=$(expr $mx3 "*" $shp4 / 100) 2>&- >&-
+
+		mx31=$(($mx31 < 8 ? 8 : $mx31))
+		mx32=$(($mx32 < 8 ? 8 : $mx32))
+		mx33=$(($mx33 < 8 ? 8 : $mx33))
+		mx34=$(($mx34 < 8 ? 8 : $mx34))
+
+		cmm -c set swqos shaper 35 on ifg 20 rate $mx31 reset queue 35 2>&- >&-
+		cmm -c set swqos shaper 51 on ifg 20 rate $mx32 reset queue 51 2>&- >&-
+		cmm -c set swqos shaper 67 on ifg 20 rate $mx33 reset queue 67 2>&- >&-
+		cmm -c set swqos shaper 83 on ifg 20 rate $mx34 reset queue 83 2>&- >&-
+
+		config_get mx4 ingressqueue4 max
+
+		mx41=$(expr $mx4 "*" $shp1 / 100) 2>&- >&-
+		mx42=$(expr $mx4 "*" $shp2 / 100) 2>&- >&-
+		mx43=$(expr $mx4 "*" $shp3 / 100) 2>&- >&-
+		mx44=$(expr $mx4 "*" $shp4 / 100) 2>&- >&-
+
+		mx41=$(($mx41 < 8 ? 8 : $mx41))
+		mx42=$(($mx42 < 8 ? 8 : $mx42))
+		mx43=$(($mx43 < 8 ? 8 : $mx43))
+		mx44=$(($mx44 < 8 ? 8 : $mx44))
+
+		cmm -c set swqos shaper 36 on ifg 20 rate $mx41 reset queue 36 2>&- >&-
+		cmm -c set swqos shaper 52 on ifg 20 rate $mx42 reset queue 52 2>&- >&-
+		cmm -c set swqos shaper 68 on ifg 20 rate $mx43 reset queue 68 2>&- >&-
+		cmm -c set swqos shaper 84 on ifg 20 rate $mx44 reset queue 84 2>&- >&-
+	
+		config_get mx5 ingressqueue5 max
+
+		mx51=$(expr $mx5 "*" $shp1 / 100) 2>&- >&-
+		mx52=$(expr $mx5 "*" $shp2 / 100) 2>&- >&-
+		mx53=$(expr $mx5 "*" $shp3 / 100) 2>&- >&-
+		mx54=$(expr $mx5 "*" $shp4 / 100) 2>&- >&-
+
+		mx51=$(($mx51 < 8 ? 8 : $mx51))
+		mx52=$(($mx52 < 8 ? 8 : $mx52))
+		mx53=$(($mx53 < 8 ? 8 : $mx53))
+		mx54=$(($mx54 < 8 ? 8 : $mx54))
+
+		cmm -c set swqos shaper 37 on ifg 20 rate $mx51 reset queue 37 2>&- >&-
+		cmm -c set swqos shaper 53 on ifg 20 rate $mx52 reset queue 53 2>&- >&-
+		cmm -c set swqos shaper 69 on ifg 20 rate $mx53 reset queue 69 2>&- >&-
+		cmm -c set swqos shaper 85 on ifg 20 rate $mx54 reset queue 85 2>&- >&-
+	
+		config_get mx6 ingressqueue6 max
+
+		mx61=$(expr $mx6 "*" $shp1 / 100) 2>&- >&-
+		mx62=$(expr $mx6 "*" $shp2 / 100) 2>&- >&-
+		mx63=$(expr $mx6 "*" $shp3 / 100) 2>&- >&-
+		mx64=$(expr $mx6 "*" $shp4 / 100) 2>&- >&-
+
+		mx61=$(($mx61 < 8 ? 8 : $mx61))
+		mx62=$(($mx62 < 8 ? 8 : $mx62))
+		mx63=$(($mx63 < 8 ? 8 : $mx63))
+		mx64=$(($mx64 < 8 ? 8 : $mx64))
+
+		cmm -c set swqos shaper 38 on ifg 20 rate $mx61 reset queue 38 2>&- >&-
+		cmm -c set swqos shaper 54 on ifg 20 rate $mx62 reset queue 54 2>&- >&-
+		cmm -c set swqos shaper 70 on ifg 20 rate $mx63 reset queue 70 2>&- >&-
+		cmm -c set swqos shaper 86 on ifg 20 rate $mx64 reset queue 86 2>&- >&-
+
+		config_get mx7 ingressqueue7 max
+
+		mx71=$(expr $mx7 "*" $shp1 / 100) 2>&- >&-
+		mx72=$(expr $mx7 "*" $shp2 / 100) 2>&- >&-
+		mx73=$(expr $mx7 "*" $shp3 / 100) 2>&- >&-
+		mx74=$(expr $mx7 "*" $shp4 / 100) 2>&- >&-
+
+		mx71=$(($mx71 < 8 ? 8 : $mx71))
+		mx72=$(($mx72 < 8 ? 8 : $mx72))
+		mx73=$(($mx73 < 8 ? 8 : $mx73))
+		mx74=$(($mx74 < 8 ? 8 : $mx74))
+
+		cmm -c set swqos shaper 39 on ifg 20 rate $mx71 reset queue 39 2>&- >&-
+		cmm -c set swqos shaper 55 on ifg 20 rate $mx72 reset queue 55 2>&- >&-
+		cmm -c set swqos shaper 71 on ifg 20 rate $mx73 reset queue 71 2>&- >&-
+		cmm -c set swqos shaper 87 on ifg 20 rate $mx74 reset queue 87 2>&- >&-
+
+	else #Assuming all PP platform
+		config_get mx1 wan1_ingressqueue1 max
+		config_get umx1 usb1_ingressqueue1 max
+
+		mx11=$(expr $mx1 "*" $shp1 / 100) 2>&- >&-
+		mx13=$(expr $umx1 "*" $shp3 / 100) 2>&- >&-
+
+		[ "$mx11" != "" ] && {
+			mx11=$(($mx11 < 8 ? 8 : $mx11))
+			cmm -c set swqos shaper 33 on ifg 20 rate $mx11 reset queue 33 2>&- >&-
+		}
+		[ "$mx13" != "" ] && {
+			mx13=$(($mx13 < 8 ? 8 : $mx13))
+			cmm -c set swqos shaper 65 on ifg 20 rate $mx13 reset queue 65 2>&- >&-
+		}
+
+		config_get mx2 wan1_ingressqueue2 max
+		config_get umx2 usb1_ingressqueue2 max
+
+		mx21=$(expr $mx2 "*" $shp1 / 100) 2>&- >&-
+		mx23=$(expr $umx2 "*" $shp3 / 100) 2>&- >&-
+
+		[ "$mx21" != "" ] && {
+			mx21=$(($mx21 < 8 ? 8 : $mx21))
+			cmm -c set swqos shaper 34 on ifg 20 rate $mx21 reset queue 34 2>&- >&-
+		}
+		[ "$mx23" != "" ] && {
+			mx23=$(($mx23 < 8 ? 8 : $mx23))
+			cmm -c set swqos shaper 66 on ifg 20 rate $mx23 reset queue 66 2>&- >&-
+		}
+
+		config_get mx3 wan1_ingressqueue3 max
+		config_get umx3 usb1_ingressqueue3 max
+
+		mx31=$(expr $mx3 "*" $shp1 / 100) 2>&- >&-
+		mx33=$(expr $umx3 "*" $shp3 / 100) 2>&- >&-
+
+		[ "$mx31" != "" ] && {
+			mx31=$(($mx31 < 8 ? 8 : $mx31))
+			cmm -c set swqos shaper 35 on ifg 20 rate $mx31 reset queue 35 2>&- >&-
+		}
+		[ "$mx33" != "" ] && {
+			mx33=$(($mx33 < 8 ? 8 : $mx33))
+			cmm -c set swqos shaper 67 on ifg 20 rate $mx33 reset queue 67 2>&- >&-
+		}
+
+		config_get mx4 wan1_ingressqueue4 max
+		config_get umx4 usb1_ingressqueue4 max
+
+		mx41=$(expr $mx4 "*" $shp1 / 100) 2>&- >&-
+		mx43=$(expr $umx4 "*" $shp3 / 100) 2>&- >&-
+
+		[ "$mx41" != "" ] && {
+			mx41=$(($mx41 < 8 ? 8 : $mx41))
+			cmm -c set swqos shaper 36 on ifg 20 rate $mx41 reset queue 36 2>&- >&-
+		}
+		[ "$mx43" != "" ] && {
+			mx43=$(($mx43 < 8 ? 8 : $mx43))
+			cmm -c set swqos shaper 68 on ifg 20 rate $mx43 reset queue 68 2>&- >&-
+		}
+
+		config_get mx5 wan1_ingressqueue5 max
+		config_get umx5 usb1_ingressqueue5 max
+
+		mx51=$(expr $mx5 "*" $shp1 / 100) 2>&- >&-
+		mx53=$(expr $umx5 "*" $shp3 / 100) 2>&- >&-
+
+		[ "$mx51" != "" ] && {
+			mx51=$(($mx51 < 8 ? 8 : $mx51))
+			cmm -c set swqos shaper 37 on ifg 20 rate $mx51 reset queue 37 2>&- >&-
+		}
+		[ "$mx53" != "" ] && {
+			mx53=$(($mx53 < 8 ? 8 : $mx53))
+			cmm -c set swqos shaper 69 on ifg 20 rate $mx53 reset queue 69 2>&- >&-
+		}
+
+		config_get mx6 wan1_ingressqueue6 max
+		config_get umx6 usb1_ingressqueue6 max
+
+		mx61=$(expr $mx6 "*" $shp1 / 100) 2>&- >&-
+		mx63=$(expr $umx6 "*" $shp3 / 100) 2>&- >&-
+
+		[ "$mx61" != "" ] && {
+			mx61=$(($mx61 < 8 ? 8 : $mx61))
+			cmm -c set swqos shaper 38 on ifg 20 rate $mx61 reset queue 38 2>&- >&-
+		}
+		[ "$mx63" != "" ] && {
+			mx63=$(($mx63 < 8 ? 8 : $mx63))
+			cmm -c set swqos shaper 70 on ifg 20 rate $mx63 reset queue 70 2>&- >&-
+		}
+
+		config_get mx7 wan1_ingressqueue7 max
+		config_get umx7 usb1_ingressqueue7 max
+
+		mx71=$(expr $mx7 "*" $shp1 / 100) 2>&- >&-
+		mx73=$(expr $umx7 "*" $shp3 / 100) 2>&- >&-
+
+		[ "$mx71" != "" ] && {
+			mx71=$(($mx71 < 8 ? 8 : $mx71))
+			cmm -c set swqos shaper 39 on ifg 20 rate $mx71 reset queue 39 2>&- >&-
+		}
+		[ "$mx73" != "" ] && {
+			mx73=$(($mx73 < 8 ? 8 : $mx73))
+			cmm -c set swqos shaper 71 on ifg 20 rate $mx73 reset queue 71 2>&- >&-
+		}
+
+	fi
+
+}
+
+rule_chain() {
+	$IPTABLES -t mangle -N ingress_chain 2>&- >&-
+	$IP6TABLES -t mangle -N ingress_chain 2>&- >&-
+
+	config_get ingenable ingressqos enable
+
+	if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+		$IPTABLES -A ingress_chain -t mangle -i eth2+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+		$IPTABLES -A ingress_chain -t mangle -i ppoe-wan1+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+		$IPTABLES -A ingress_chain -t mangle -i l2tp-wan1+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+		$IPTABLES -A ingress_chain -t mangle -i pptp-wan1+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+		$IPTABLES -A ingress_chain -t mangle -i eth0+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80B0000000000000/0xffffffff00000000 2>&- >&-
+		$IPTABLES -A ingress_chain -t mangle -i ppoe-wan2+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80B0000000000000/0xffffffff00000000 2>&- >&-
+		$IPTABLES -A ingress_chain -t mangle -i l2tp-wan2+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80B0000000000000/0xffffffff00000000 2>&- >&-
+		$IPTABLES -A ingress_chain -t mangle -i pptp-wan2+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80B0000000000000/0xffffffff00000000 2>&- >&-
+
+
+		$IP6TABLES -A ingress_chain -t mangle -i eth2+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+		$IP6TABLES -A ingress_chain -t mangle -i ppoe-wan16+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+		$IP6TABLES -A ingress_chain -t mangle -i eth0+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80B0000000000000/0xffffffff00000000 2>&- >&-
+		$IP6TABLES -A ingress_chain -t mangle -i ppoe-wan26+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80B0000000000000/0xffffffff00000000 2>&- >&-
+	else #Assuming all PP platform
+		$IPTABLES -A ingress_chain -t mangle -i eth0+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+		$IPTABLES -A ingress_chain -t mangle -i ppoe-wan1+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+		$IPTABLES -A ingress_chain -t mangle -i l2tp-wan1+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+		$IPTABLES -A ingress_chain -t mangle -i pptp-wan1+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+
+		$IP6TABLES -A ingress_chain -t mangle -i eth0+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+		$IP6TABLES -A ingress_chain -t mangle -i ppoe-wan16+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+
+		$IPTABLES -t mangle -N ingress_chain_pp 2>&- >&-
+		$IP6TABLES -t mangle -N ingress_chain_pp 2>&- >&-
+	fi
+
+	if [ "$ingenable" = "1" ]; then
+		if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+			for _iface in $__all_wan_iface; do
+				$IPTABLES -A FORWARD -t mangle -i $_iface -m comment --comment "ingress_chain" -j ingress_chain 2>&- >&-
+			done
+
+			for _iface6 in $__all_wan6_iface; do
+				$IP6TABLES -A FORWARD -t mangle -i $_iface6 -m comment --comment "ingress_chain" -j ingress_chain 2>&- >&-
+			done
+		else #Assuming all PP platform
+			for _iface in $__all_wan_iface; do
+				$IPTABLES -A FORWARD -t mangle -i $_iface -m comment --comment "ingress_chain_pp" -j ingress_chain_pp 2>&- >&-
+			done
+
+			for _iface6 in $__all_wan6_iface; do
+				$IP6TABLES -A FORWARD -t mangle -i $_iface6 -m comment --comment "ingress_chain_pp" -j ingress_chain_pp 2>&- >&-
+			done
+		fi
+	fi
+
+	$IPTABLES -t mangle -N class_chain 2>&- >&-
+	$IPTABLES -t mangle -N egress_chain 2>&- >&-
+	$IPTABLES -A FORWARD -t mangle -m comment --comment "egress_chain" -j egress_chain 2>&- >&-
+
+	$IP6TABLES -t mangle -N class_chain 2>&- >&-
+	$IP6TABLES -t mangle -N egress_chain 2>&- >&-
+	$IP6TABLES -A FORWARD -t mangle -m comment --comment "egress_chain" -j egress_chain 2>&- >&-
+
+	# For l2tp DUT generated packets
+	$IPTABLES -A OUTPUT -t mangle -p udp --sport 1701 --dport 1701 -j QOSCONNMARK --set-mark 9
+	# For pptp DUT generated packets
+	$IPTABLES -A OUTPUT -t mangle -p tcp --dport 1723 -j QOSCONNMARK --set-mark 9
+	$IPTABLES -A OUTPUT -t mangle -p 47 -j QOSCONNMARK --set-mark 9
+}
+
+flow() {
+	class=$(uci show qos | grep classname | awk -F '=' '{print $2}' | uniq) 2>&- >&-
+	vartemp=""
+
+	for c in $class
+	do
+		flow=$(uci show qos | grep -E "egress_flow|ingress_flow" | grep -w "classname=$c" | awk -F '.' '{print $2}' | awk -F '=' '{print $1}' ) 2>&- >&-
+		for f in $flow
+		do
+			config_get app $f application
+			if [ "$app" = "" ]; then
+				#add_rule_to_chain $c $f
+				vartemp="$c.$f $vartemp"
+			fi
+		done
+	done
+
+	if [ "$vartemp" != "" ] 
+	then
+		qos_iface_stats.sh $$ iptablerules
+
+		#echo "all args are: $vartemp"
+		qos-iptables-uci -i -f $$ $vartemp
+		qos-ip6tables-uci -f $$ $vartemp
+
+		rm $TMP_QOSIFACESTATS
+	fi
+
+	if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+		update_app_rules
+	fi
+}
+
+
+## This function which classname and flowname as input argument then add rule to a particular chain
+#add_rule_to_chain() 
+
+## This function which classname and flowname as input argument then deletes rule to a particular chain
+
+delete_rule_from_chain() {
+	logger -t QoS " deleting qos rule for class $1  flow $2"
+
+	if [ -n "$(echo $2 | grep ingress_flow)" ]; then
+		#Deleting ingress_flow in ingress_chain 
+		num=`$IPTABLES -L ingress_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}'`
+		for d in $num
+		do
+			p=`$IPTABLES -L ingress_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}' | head -n 1`
+			$IPTABLES -D ingress_chain $p -t mangle
+		done
+
+		#for ipv6
+		num=`$IP6TABLES -L ingress_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}'`
+		for d in $num
+		do
+			p=`$IP6TABLES -L ingress_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}'| head -n 1`
+			$IP6TABLES -D ingress_chain $p -t mangle
+		done
+	else
+		#Deleting egress_flow in class_chain
+		num=`$IPTABLES -L class_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}'`
+		for d in $num
+		do
+			p=`$IPTABLES -L class_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}' | head -n 1`
+			$IPTABLES -D class_chain $p -t mangle
+		done
+
+		#Deleting egress_flow in egress_chain
+		num=`$IPTABLES -L egress_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}'`
+		for d in $num
+		do
+			p=`$IPTABLES -L egress_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}'| head -n 1`
+			$IPTABLES -D egress_chain $p -t mangle
+		done
+
+		#for ipv6
+		num=`$IP6TABLES -L class_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}'`
+		for d in $num
+		do
+			p=`$IP6TABLES -L class_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}' | head -n 1`
+			$IP6TABLES -D class_chain $p -t mangle
+		done
+
+		num=`$IP6TABLES -L egress_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}'`
+		for d in $num
+		do
+			p=`$IP6TABLES -L egress_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}' | head -n 1`
+			$IP6TABLES -D egress_chain $p -t mangle
+		done
+
+		if [ "$board" = "RV340W" ] || [ "$board" = "RV160W" ] || [ "$board" = "RV260W" ] ;then
+			num=`$IPTABLES -L class_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}' | head -n 1`
+			$IPTABLES -D class_chain $num -t mangle
+
+			num=`$IP6TABLES -L class_chain --line-numbers -t mangle -n | grep -wE "$1$2" | awk -F ' ' '{print $1}' | head -n 1`
+			$IP6TABLES -D class_chain $num -t mangle
+		fi
+	fi	
+}
+
+## This function add Application QoS rule which takes input argument flow  ###
+add_app_rule() {
+	flow=$1
+        config_get sip $flow sip
+
+        if [ ! "$sip" ]; then 
+	        sip=""
+        else
+		sip=$(echo $sip | awk -F '/' '{print $1}')
+        fi
+
+        config_get dip $flow dip
+        if [ ! "$dip" ]; then 
+	        dip=""
+        else
+		dip=$(echo $dip | awk -F '/' '{print $1}')
+        fi
+	
+	config_get dscp $flow dscp
+        if [ ! "$dscp" ]; then 
+	        dscp="-1"
+	fi
+	config_get rcvint $flow rcvinterface
+
+	config_get device_type $flow device_type
+	config_get os_type $flow os_type
+	device=""$device_type":"$os_type""
+	
+        config_get grp_id $flow app_catg
+	config_get app $flow application
+	config_get beh_id $flow app_bhv
+        
+
+	config_get md $flow mark_dscp
+        if [ -n "$md" ]; then
+		mark=$(expr 2 "*" $md)
+		mark=$(expr 1 "+" $mark)
+		HEX_DIGITS="0123456789ABCDEF"
+
+		dec_value=$mark
+		hex_value=""
+
+		until [ $dec_value == 0 ]; do
+
+		    rem_value=$((dec_value % 16))
+		    dec_value=$((dec_value / 16))
+
+		    hex_digit=${HEX_DIGITS:$rem_value:1}
+
+		    hex_value="${hex_digit}${hex_value}"
+
+		done
+
+		mark=$hex_value
+		
+		if [ "$md" -lt "8" ]; then
+			md=0$mark
+		else
+			md=$mark
+		fi
+	else
+		md=00
+        fi
+
+	network_active_wan_interfaces_cached allWANiface
+	allWANiface=$(echo $allWANiface | sed "s/wan[1-9]6_*//g")
+	if [[ -n "$(echo $flow | grep ingress_flow)" && $(uci get qos.ingressqos.enable) == "1" ]]; then
+		ifname=$(uci get network.$rcvint.ifname ) 2>&- >&-
+		config_get queue $flow queue
+		iid=$(expr 1 "+" "$iid")
+        	iid=$(expr 500000000 "+" "$iid")
+		case $rcvint in
+
+		wan1*) 
+			queue=0x80A"$queue""$md"0000000000
+			allWAN1iface=$(echo "$allWANiface" | sed s/" "/"\n"/g | grep wan1 | uniq)
+        	        for iface in $allWAN1iface
+                	do
+        			iid=$(expr 1 "+" "$iid")
+	                        network_get_device_cached ifname $iface
+				lcsh flow addqos $iid 2 "$device" "$ifname" "" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "0xffffffff00000000" "$queue"
+			done
+		;;
+
+		wan2*)
+			queue=0x80B"$queue""$md"0000000000
+			allWAN1iface=$(echo "$allWANiface" | sed s/" "/"\n"/g | grep wan2 | uniq)
+	                for iface in $allWAN1iface
+        	        do
+                	        network_get_device_cached ifname $iface
+        			iid=$(expr 1 "+" "$iid")
+				lcsh flow addqos $iid 2 "$device" "$ifname" "" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "0xffffffff00000000" "$queue"
+			done
+		;;
+		usb1)
+			ifname=""
+			network_get_device_cached ifname usb1
+			if [ "$ifname" != "" ]; then
+				queue=0x80C"$queue""$md"0000000000
+				lcsh flow addqos $iid 2 "$device" "$ifname" "" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "0xffffffff00000000" "$queue"
+			fi
+		;;
+
+		usb2)
+			ifname=""
+			network_get_device_cached ifname usb2
+			if [ "$ifname" != "" ]; then
+				queue=0x80D"$queue""$md"0000000000
+				lcsh flow addqos $iid 2 "$device" "$ifname" "" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "0xffffffff00000000" "$queue"
+			fi
+		;;
+		esac
+	else
+		#Adding egress_flow
+		config_get scheduler scheduler upstream
+		if [ "$scheduler" = "rate-control" ]; then
+			n=8
+		else
+			n=4
+		fi
+
+		config_get policy1 outbound_policy wan1
+		config_get policy2 outbound_policy wan2
+		config_get policy3 outbound_policy usb1
+		config_get policy4 outbound_policy usb2
+
+		config_get class $flow classname
+		if [[ "$policy1" != Rate_Control_Default && "$policy1" != Low_Latency_Default && "$policy1" != Priority_Default ]]; then
+			wan1c=$(uci show qos.$policy1 | awk -F '.' '{print $3}' | grep -w $class | awk -F '=' '{print $1}' | sed s/queue// ) 2>&- >&-
+			#add rule with 'out interface wan1' in egress_chain, if classname found in wan1c
+		
+			lanint=$(uci get network.$rcvint.ifname ) 2>&- >&-	
+		        if [ -n "$lanint" ]; then
+		        	lanint="$lanint"
+				if [ "$board" = "RV340W" ];then
+					lanwifi="br-$rcvint"
+				fi
+		        else
+			        lanint=""
+			        lanwifi=""
+			fi
+
+			ifname=$network_wan1_ifname
+		
+			for q in $wan1c
+			do
+				queue=$(expr $n "-" $q) 
+				queue=0x80A000000000"$md"0"$queue"
+				mask_eg=0xf0f0000000ffffff	
+				allWAN1iface=$(echo "$allWANiface" | sed s/" "/"\n"/g | grep wan1 | uniq)
+                		for iface in $allWAN1iface
+                		do
+					network_get_device_cached ifname $iface
+        				id=$(expr 1 "+" "$id")
+					lcsh flow addqos $id 1 "$device" "$ifname" "$lanint" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "$mask_eg" "$queue"
+					if [[ "$board" = "RV340W" && "$lanwifi" != "" ]];then
+        					id=$(expr 1 "+" "$id")
+						lcsh flow addqos $id 1 "$device" "$ifname" "$lanwifi" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "$mask_eg" "$queue"
+					fi
+				done
+			done
+		fi
+	
+		if [[ "$policy2" != Rate_Control_Default && "$policy2" != Low_Latency_Default && "$policy2" != Priority_Default ]]; then
+			wan2c=$(uci show qos.$policy2 | awk -F '.' '{print $3}'| grep -w $class | awk -F '=' '{print $1}' | sed s/queue// ) 2>&- >&-
+			#add rule with 'out interface wan1' in egress_chain, if classname found in wan2c
+		
+			lanint=$(uci get network.$rcvint.ifname ) 2>&- >&-	
+		        if [ -n "$lanint" ]; then
+		        	lanint="$lanint"
+				if [ "$board" = "RV340W" ];then
+					lanwifi="br-$rcvint"
+				fi
+		        else
+			        lanint=""
+			        lanwifi=""
+			fi
+
+			ifname=$network_wan2_ifname
+		
+			for q in $wan2c
+			do
+				queue=$(expr $n "-" $q)
+				queue=0x80B000000000"$md"0"$queue"
+				mask_eg=0xf0f0000000ffffff	
+		
+				allWAN1iface=$(echo "$allWANiface" | sed s/" "/"\n"/g | grep wan2 | uniq)
+                		for iface in $allWAN1iface
+                		do
+					network_get_device_cached ifname $iface
+        				id=$(expr 1 "+" "$id")
+					lcsh flow addqos $id 1 "$device" "$ifname" "$lanint" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "$mask_eg" "$queue"
+					if [[ "$board" = "RV340W" && "$lanwifi" != "" ]];then
+        				id=$(expr 1 "+" "$id")
+					lcsh flow addqos $id 1 "$device" "$ifname" "$lanwifi" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "$mask_eg" "$queue"
+					fi
+				done
+			done
+		fi
+	
+		if [[ "$policy3" != Rate_Control_Default && "$policy3" != Low_Latency_Default && "$policy3" != Priority_Default ]]; then
+			usb1c=$(uci show qos.$policy3 | awk -F '.' '{print $3}' | grep -w $class | awk -F '=' '{print $1}' | sed s/queue// ) 2>&- >&-
+			#add rule with 'out interface usb1' in egress_chain, if classname found in usb1c
+		
+			lanint=$(uci get network.$rcvint.ifname ) 2>&- >&-	
+		        if [ -n "$lanint" ]; then
+		        	lanint="$lanint"
+				if [ "$board" = "RV340W" ];then
+					lanwifi="br-$rcvint"
+				fi
+		        else
+			        lanint=""
+			        lanwifi=""
+			fi
+
+			ifname=""
+			network_get_device_cached ifname usb1
+		
+			if [ "$ifname" != "" ]; then
+			#{
+			for q in $usb1c
+			do
+				queue=0x80C00000008"$q""$md"00
+				mask_eg=0xf0f0000000ffffff	
+				id=$(expr 1 "+" "$id")
+			
+				lcsh flow addqos $id 1 "$device" "$ifname" "$lanint" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "$mask_eg" "$queue"
+				if [[ "$board" = "RV340W" && "$lanwifi" != "" ]];then
+        				id=$(expr 1 "+" "$id")
+					lcsh flow addqos $id 1 "$device" "$ifname" "$lanwifi" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "$mask_eg" "$queue"
+				fi
+			done
+			#}
+			fi
+		fi
+	
+		if [[ "$policy4" != Rate_Control_Default && "$policy4" != Low_Latency_Default && "$policy4" != Priority_Default ]]; then
+			usb2c=$(uci show qos.$policy4 | awk -F '.' '{print $3}' | grep -w $class | awk -F '=' '{print $1}' | sed s/queue// ) 2>&- >&-
+			#add rule with 'out interface usb2' in egress_chain, if classname found in usb2c
+		
+			lanint=$(uci get network.$rcvint.ifname ) 2>&- >&-	
+		        if [ -n "$lanint" ]; then
+		        	lanint="$lanint"
+				if [ "$board" = "RV340W" ];then
+					lanwifi="br-$rcvint"
+				fi
+		        else
+			        lanint=""
+			        lanwifi=""
+			fi
+
+			ifname=""
+			network_get_device_cached ifname usb2
+		
+			if [ "$ifname" != "" ]; then
+			#{
+			for q in $usb2c
+			do
+				queue=0x80D00000009"$q""$md"00
+				mask_eg=0xf0f0000000ffffff	
+				id=$(expr 1 "+" "$id")
+			
+				lcsh flow addqos $id 1 "$device" "$ifname" "$lanint" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "$mask_eg" "$queue"
+				if [[ "$board" = "RV340W" && "$lanwifi" != "" ]];then
+        				id=$(expr 1 "+" "$id")
+					lcsh flow addqos $id 1 "$device" "$ifname" "$lanwifi" "$sip" "$dip" "" "" -1 -1 $dscp $grp_id $app $beh_id "$mask_eg" "$queue"
+				fi
+			done
+			#}
+			fi
+		fi
+	fi
+}
+
+## This function updates all Application QoS rules ###
+update_app_rules() {
+	# flush all application rules
+	lcsh flow flushqos
+	id=0
+	iid=0
+	if [ "$1" = "disable" ]; then
+		flows=$(uci show qos | grep application | awk -F '.' '{print $2}' | grep -v "ingress") 2>&- >&-
+	else
+		flows=$(uci show qos | grep application | awk -F '.' '{print $2}' ) 2>&- >&-
+	fi
+
+	for flow in $flows
+	do
+		add_app_rule $flow
+	done
+}
+
+## This function updates ingress chain rules from class chain for usb interfaces ###
+update_ingress_usb() {
+	vartemp1=""
+
+	#USB1 Handling
+	num=`$IP6TABLES -L ingress_chain --line-numbers -t mangle -n | grep -E "usb1defaultrule" | awk -F ' ' '{print $1}'| head -n 1`
+	$IP6TABLES -D ingress_chain $num -t mangle 2>&- >&-
+
+	num=`$IPTABLES -L ingress_chain --line-numbers -t mangle -n | grep -E "usb1defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+	$IPTABLES -D ingress_chain $num -t mangle 2>&- >&-
+	USB1_INTERFACE=""
+	network_get_device_cached USB1_INTERFACE usb1
+	if [ "$USB1_INTERFACE" != "" ]; then
+		$IPTABLES -A ingress_chain -t mangle -i $USB1_INTERFACE -m comment --comment "usb1defaultrule" -j QOSCONNMARK --set-mark 0x80C0000000000000 2>&- >&-
+		$IP6TABLES -A ingress_chain -t mangle -i $USB1_INTERFACE -m comment --comment "usb1defaultrule" -j QOSCONNMARK --set-mark 0x80C0000000000000 2>&- >&-
+	fi
+
+	#USB2 Handling
+	num=`$IP6TABLES -L ingress_chain --line-numbers -t mangle -n | grep -E "usb2defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+	$IP6TABLES -D ingress_chain $num -t mangle 2>&- >&-
+
+	num=`$IPTABLES -L ingress_chain --line-numbers -t mangle -n | grep -E "usb2defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+	$IPTABLES -D ingress_chain $num -t mangle 2>&- >&-
+	USB2_INTERFACE=""
+	network_get_device_cached USB2_INTERFACE usb2
+	if [ "$USB2_INTERFACE" != "" ]; then
+		$IPTABLES -A ingress_chain -t mangle -i $USB2_INTERFACE -m comment --comment "usb2defaultrule" -j QOSCONNMARK --set-mark 0x80D0000000000000 2>&- >&-
+		$IP6TABLES -A ingress_chain -t mangle -i $USB2_INTERFACE -m comment --comment "usb2defaultrule" -j QOSCONNMARK --set-mark 0x80D0000000000000 2>&- >&-
+	fi
+
+	appflows=$(uci show qos | grep application | awk -F '.' '{print $2}') 2>&- >&-
+	flows=$(uci show qos | grep -E "rcvinterface=usb1|rcvinterface=usb2" | awk -F '.' '{print $2}' | grep -v $appflows) 2>&- >&-
+
+	for flow in $flows
+	do
+		config_get classname $flow classname
+		delete_rule_from_chain $classname $flow
+		#add_rule_to_chain $classname $flow
+		vartemp1="$c.$f $vartemp1"
+	done
+
+	if [ "$vartemp1" != "" ] 
+	then
+		qos_iface_stats.sh $$ iptablerules
+		#echo "HOTplug: all args are: $vartemp1"
+		qos-iptables-uci -i -f $$ $vartemp1
+		qos-ip6tables-uci -f $$ $vartemp1
+		rm $TMP_QOSIFACESTATS
+	fi
+}
+
+## This function updates egress chain rules from class chain ###
+update_egress_chain() {
+	#Flush rules in  egress_chain:
+
+	$IPTABLES -t mangle -F egress_chain
+	$IP6TABLES -t mangle -F egress_chain
+
+	$IPTABLES -t mangle -S | grep -e "^-A class_chain" | sed s/--set/" --set"/> iptables.dump
+	$IP6TABLES -t mangle -S | grep -e "^-A class_chain" | sed s/--set/" --set"/ > ip6tables.dump
+	
+	config_get scheduler scheduler upstream
+
+	if [ "$scheduler" = "rate-control" ]; then
+		n=8
+	else
+		n=4
+	fi
+
+	USB1_INTERFACE=""
+	network_get_device_cached USB1_INTERFACE usb1
+	if [ "$USB1_INTERFACE" != "" ]; then
+		num=`$IP6TABLES -L egress_chain --line-numbers -t mangle -n | grep -E "usb1defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+		$IP6TABLES -D egress_chain $num -t mangle 2>&- >&-
+
+		num=`$IPTABLES -L egress_chain --line-numbers -t mangle -n | grep -E "usb1defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+		$IPTABLES -D egress_chain $num -t mangle 2>&- >&-
+		usb1_queue=0x80C0000000800000
+		$IPTABLES -A egress_chain -t mangle -o $USB1_INTERFACE -m comment --comment "usb1defaultrule" -j QOSCONNMARK --set-xmark $usb1_queue/0xf0f0000000ffffff 2>&- >&-
+		$IP6TABLES -A egress_chain -t mangle -o $USB1_INTERFACE -m comment --comment "usb1defaultrule" -j QOSCONNMARK --set-xmark $usb1_queue/0xf0f0000000ffffff 2>&- >&-
+	fi
+	
+	USB2_INTERFACE=""
+	network_get_device_cached USB2_INTERFACE usb2
+	if [ "$USB2_INTERFACE" != "" ]; then
+		num=`$IP6TABLES -L egress_chain --line-numbers -t mangle -n | grep -E "usb2defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+		$IP6TABLES -D egress_chain $num -t mangle 2>&- >&-
+
+		num=`$IPTABLES -L egress_chain --line-numbers -t mangle -n | grep -E "usb2defaultrule" | awk -F ' ' '{print $1}' | head -n 1`
+		$IPTABLES -D egress_chain $num -t mangle 2>&- >&-
+		usb2_queue=0x80D0000000900000
+
+		$IPTABLES -A egress_chain -t mangle -o $USB2_INTERFACE -m comment --comment "usb2defaultrule" -j QOSCONNMARK --set-xmark $usb2_queue/0xf0f0000000ffffff 2>&- >&-
+		$IP6TABLES -A egress_chain -t mangle -o $USB2_INTERFACE -m comment --comment "usb2defaultrule" -j QOSCONNMARK --set-xmark $usb2_queue/0xf0f0000000ffffff 2>&- >&-
+	fi
+
+
+	#updates egress chain from class chain.
+	config_get policy1 outbound_policy wan1
+	config_get policy2 outbound_policy wan2
+	config_get policy3 outbound_policy usb1
+	config_get policy4 outbound_policy usb2
+
+	if [[ "$policy1" != Rate_Control_Default && "$policy1" != Low_Latency_Default && "$policy1" != Priority_Default ]]; then
+		#add rule with 'out interface wan1' in egress_chain, if classname found in wan1c
+		class=$(uci show qos.$policy1 | awk -F '.' '{print $3}'| grep -v unspecified | sed 1d  ) 2>&- >&-
+		ifname="$network_wan1_ifname+ "
+		ifname2="pptp-wan1+ "
+		ifname3="l2tp-wan1+ "
+		ifname4="ppoe-wan1+ "
+		ifname5="ppoe-wan16+ "
+		
+		for q in $class
+		do
+			classname=$(echo $q | awk -F '=' '{print $2}') 2>&- >&-
+			queue=$(echo $q | awk -F '=' '{print $1}'| sed s/queue//) 2>&- >&-
+			queue=$(expr $n "-" $queue)
+
+			cat iptables.dump | grep "$classname"e | sed s/'\-A class_chain'/"$IPTABLES -A egress_chain -t mangle"/ > iptab.dump
+			cat iptab.dump | sed s/"-o outint"/"-o $ifname"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80A000000000"/ >iptab
+			
+			sh iptab	
+			cat iptab.dump | sed s/"-o outint"/"-o $ifname2"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80A000000000"/ >iptab
+			sh iptab	
+			cat iptab.dump | sed s/"-o outint"/"-o $ifname3"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80A000000000"/ >iptab
+			sh iptab	
+			cat iptab.dump | sed s/"-o outint"/"-o $ifname4"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80A000000000"/ >iptab
+			sh iptab	
+			cat ip6tables.dump | grep "$classname"e | sed s/'\-A class_chain'/"$IP6TABLES -A egress_chain -t mangle"/> ip6tab.dump
+			cat ip6tab.dump | sed s/"-o outint"/"-o $ifname"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80A000000000"/ >ip6tab
+			sh ip6tab
+			cat ip6tab.dump | sed s/"-o outint"/"-o $ifname5"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80A000000000"/ >ip6tab
+			sh ip6tab
+		done
+	fi
+	
+	if [[ "$policy2" != "" && "$policy2" != Rate_Control_Default && "$policy2" != Low_Latency_Default && "$policy2" != Priority_Default ]]; then
+		#add rule with 'out interface wan2' in egress_chain, if classname found in wan1c
+		class=$(uci show qos.$policy2 | awk -F '.' '{print $3}' | grep -v unspecified | sed 1d  ) 2>&- >&-
+		
+		ifname="$network_wan2_ifname+ "
+		ifname2="pptp-wan2+ "
+		ifname3="l2tp-wan2+ "
+		ifname4="ppoe-wan2+ "
+		ifname5="ppoe-wan26+ "
+		
+		for q in $class
+		do
+			classname=$(echo $q | awk -F '=' '{print $2}') 2>&- >&-
+			queue=$(echo $q | awk -F '=' '{print $1}'| sed s/queue//) 2>&- >&-
+			queue=$(expr $n "-" $queue)
+
+			cat iptables.dump | grep "$classname"e | sed s/'\-A class_chain'/"$IPTABLES -A egress_chain -t mangle"/ > iptab.dump
+			cat iptab.dump | sed s/"-o outint"/"-o $ifname"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80B000000000"/ >iptab
+			
+			sh iptab	
+			cat iptab.dump | sed s/"-o outint"/"-o $ifname2"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80B000000000"/ >iptab
+			sh iptab	
+			cat iptab.dump | sed s/"-o outint"/"-o $ifname3"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80B000000000"/ >iptab
+			sh iptab	
+			cat iptab.dump | sed s/"-o outint"/"-o $ifname4"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80B000000000"/ >iptab
+			sh iptab	
+			cat ip6tables.dump | grep "$classname"e | sed s/'\-A class_chain'/"$IP6TABLES -A egress_chain -t mangle"/ > ip6tab.dump
+			cat ip6tab.dump | sed s/"-o outint"/"-o $ifname"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80B000000000"/ >ip6tab
+			sh ip6tab
+			cat ip6tab.dump | sed s/"-o outint"/"-o $ifname5"/ | sed s/"00\/0xffffffffffffffff"/"0$queue\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x80B000000000"/ >ip6tab
+			sh ip6tab
+		done
+	fi
+
+	if [[ "$policy3" != Rate_Control_Default && "$policy3" != Low_Latency_Default && "$policy3" != Priority_Default ]]; then
+		#add rule with 'out interface usb1' in egress_chain
+		class=$(uci show qos.$policy3 | awk -F '.' '{print $3}'| grep -v unspecified | sed 1d  ) 2>&- >&-
+		ifname=""
+		network_get_device_cached ifname usb1
+		if [ "$ifname" != "" ]; then
+		#{
+		for q in $class
+		do
+			classname=$(echo $q | awk -F '=' '{print $2}') 2>&- >&-
+			queue=$(echo $q | awk -F '=' '{print $1}'| sed s/queue//) 2>&- >&-
+
+			cat iptables.dump | grep "$classname"e > iptab.dump
+			cat iptab.dump | sed s/'\-A class_chain'/"$IPTABLES -A egress_chain -t mangle"/ | sed s/"-o outint"/"-o $ifname"/ | sed s/"00\/0xffffffffffffffff"/"00\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x8$queue"/ | sed s/"0x8"/"0x80C00000008"/ >iptab
+			
+			sh iptab	
+
+			cat ip6tables.dump | grep "$classname"e > ip6tab.dump
+			cat ip6tab.dump | sed s/'\-A class_chain'/"$IP6TABLES -A egress_chain -t mangle"/ | sed s/"-o outint"/"-o $ifname"/ | sed s/"00\/0xffffffffffffffff"/"00\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x8$queue"/ | sed s/"0x8"/"0x80C00000008"/ >ip6tab
+
+			sh ip6tab
+			
+		done
+		#}
+		fi
+	fi
+
+	if [[ "$policy4" != "" && "$policy4" != Rate_Control_Default && "$policy4" != Low_Latency_Default && "$policy4" != Priority_Default ]]; then
+		#add rule with 'out interface usb2' in egress_chain
+		class=$(uci show qos.$policy4 | awk -F '.' '{print $3}' | grep -v unspecified | sed 1d  ) 2>&- >&-
+		ifname=""
+		network_get_device_cached ifname usb2
+		if [ "$ifname" != "" ]; then
+		#{
+		for q in $class
+		do
+			classname=$(echo $q | awk -F '=' '{print $2}') 2>&- >&-
+			queue=$(echo $q | awk -F '=' '{print $1}' | sed s/queue//) 2>&- >&-
+
+			cat iptables.dump | grep "$classname"e > iptab.dump
+			cat iptab.dump | sed s/'\-A class_chain'/"$IPTABLES -A egress_chain -t mangle"/ | sed s/"-o outint"/"-o $ifname"/ | sed s/"00\/0xffffffffffffffff"/"00\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x8$queue"/ | sed s/"0x8"/"0x80D00000009"/  >iptab
+			sh iptab	
+			cat ip6tables.dump | grep "$classname"e > ip6tab.dump
+			cat ip6tab.dump | sed s/'\-A class_chain'/"$IP6TABLES -A egress_chain -t mangle"/ | sed s/"-o outint"/"-o $ifname"/ | sed s/"00\/0xffffffffffffffff"/"00\/0xf0f0000000ffffff"/ | sed s/"0x80"/"0x8$queue"/ | sed s/"0x8"/"0x80D00000009"/  >ip6tab
+			sh ip6tab
+		done
+		#}
+		fi
+	fi
+	rm iptab
+	rm ip6tab
+	rm iptab.dump
+	rm ip6tab.dump
+	rm iptables.dump
+	rm ip6tables.dump
+}
+
+## This function updates ingress_chain_pp chain rules from ingress_chain chain ###
+update_ingress_chain_pp() {
+	#Flush rules in  ingress_chain_pp:
+
+	$IPTABLES -t mangle -F ingress_chain_pp
+	$IP6TABLES -t mangle -F ingress_chain_pp
+
+	$IPTABLES -t mangle -S | grep -e "^-A ingress_chain" | sed s/--set/" --set"/ > iptables.dump
+	$IP6TABLES -t mangle -S | grep -e "^-A ingress_chain" | sed s/--set/" --set"/ > ip6tables.dump
+
+	config_get scheduler scheduler downstream
+
+	#Adding Default Rules
+	$IPTABLES -A ingress_chain_pp -t mangle -i eth0+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+	$IPTABLES -A ingress_chain_pp -t mangle -i ppoe-wan1+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+	$IPTABLES -A ingress_chain_pp -t mangle -i l2tp-wan1+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+	$IPTABLES -A ingress_chain_pp -t mangle -i pptp-wan1+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+
+	$IP6TABLES -A ingress_chain_pp -t mangle -i eth0+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+	$IP6TABLES -A ingress_chain_pp -t mangle -i ppoe-wan16+ -m comment --comment "ingress_chain" -j QOSCONNMARK --set-xmark 0x80A0000000000000/0xffffffff00000000 2>&- >&-
+
+	$IPTABLES -A ingress_chain_pp -t mangle -i 3g-usb+ -m comment --comment "usb1defaultrule" -j QOSCONNMARK --set-mark 0x80C0000000000000/0xffffffff00000000 2>&- >&-
+	$IP6TABLES -A ingress_chain_pp -t mangle -i 3g-usb+  -m comment --comment "usb1defaultrule" -j QOSCONNMARK --set-mark 0x80C0000000000000/0xffffffff00000000 2>&- >&-
+
+	$IPTABLES -A ingress_chain_pp -t mangle -i wwan+ -m comment --comment "usb1defaultrule" -j QOSCONNMARK --set-mark 0x80C0000000000000/0xffffffff00000000 2>&- >&-
+	$IP6TABLES -A ingress_chain_pp -t mangle -i wwan+  -m comment --comment "usb1defaultrule" -j QOSCONNMARK --set-mark 0x80C0000000000000/0xffffffff00000000 2>&- >&-
+
+
+	#updates ingress_chain_pp chain from ingress_chain chain.
+	config_get policy1 inbound_policy wan1
+	config_get policy3 inbound_policy usb1
+
+	if [[ "$policy1" != Default && "$policy1" != "" ]]; then
+		#add rule with 'out interface wan1' in egress_chain, if classname found in wan1c
+
+		class=$(uci show qos.$policy1 | awk -F '.' '{print $3}' | grep -v unspecified | sed 1d  ) 2>&- >&-
+		ifname="$network_wan1_ifname+ "
+		ifname2="pptp-wan1+ "
+		ifname3="l2tp-wan1+ "
+		ifname4="ppoe-wan1+ "
+		ifname5="ppoe-wan16+ "
+
+		for q in $class
+		do
+			classname=$(echo $q | awk -F '=' '{print $2}') 2>&- >&-
+			queue=$(echo $q | awk -F '=' '{print $1}'| sed s/queue//) 2>&- >&-
+			cat iptables.dump | grep "$classname"i | sed s/'\-A ingress_chain'/"$IPTABLES -A ingress_chain_pp -t mangle"/ > iptab.dump
+			cat iptab.dump | sed s/"-i .*+"/"-i $ifname"/ | sed s/"0x80a0"/"0x80a$queue"/ | uniq >iptab
+			sh iptab
+			cat iptab.dump | sed s/"-i .*+"/"-i $ifname2"/ | sed s/"0x80a0"/"0x80a$queue"/ | uniq >iptab
+			sh iptab
+			cat iptab.dump | sed s/"-i .*+"/"-i $ifname3"/ | sed s/"0x80a0"/"0x80a$queue"/ | uniq >iptab
+			sh iptab
+			cat iptab.dump | sed s/"-i .*+"/"-i $ifname4"/ | sed s/"0x80a0"/"0x80a$queue"/ | uniq >iptab
+			sh iptab
+
+			cat ip6tables.dump | grep "$classname"i | sed s/'\-A ingress_chain'/"$IP6TABLES -A ingress_chain_pp -t mangle"/> ip6tab.dump
+			cat ip6tab.dump | sed s/"-i .*+"/"-i $ifname"/ | sed s/"0x80a0"/"0x80a$queue"/ | uniq >ip6tab
+			sh ip6tab
+			cat ip6tab.dump | sed s/"-i .*+"/"-i $ifname5"/ | sed s/"0x80a0"/"0x80a$queue"/ | uniq >ip6tab
+			sh ip6tab
+		done
+	fi
+
+
+	if [[ "$policy3" != Default && "$policy3" != "" ]]; then
+		#add rule with 'out interface usb1' in egress_chain
+		class=$(uci show qos.$policy3 | awk -F '.' '{print $3}'| grep -v unspecified | sed 1d  ) 2>&- >&-
+		ifname=""
+		network_get_device_cached ifname usb1
+		if [ "$ifname" != "" ]; then
+		#{
+		for q in $class
+		do
+			classname=$(echo $q | awk -F '=' '{print $2}') 2>&- >&-
+			queue=$(echo $q | awk -F '=' '{print $1}'| sed s/queue//) 2>&- >&-
+
+			cat iptables.dump | grep "$classname"i > iptab.dump
+			cat iptab.dump | sed s/'\-A ingress_chain'/"$IPTABLES -A ingress_chain_pp -t mangle"/ | sed s/"-i .*+"/"-i $ifname"/ | sed s/"0x80c0"/"0x80c$queue"/ | uniq >iptab
+
+			sh iptab
+
+			cat ip6tables.dump | grep "$classname"i > ip6tab.dump
+			cat ip6tab.dump | sed s/'\-A ingress_chain'/"$IP6TABLES -A ingress_chain_pp -t mangle"/ | sed s/"-i .*+"/"-i $ifname"/ | sed s/"0x80c0"/"0x80c$queue"/ | uniq >ip6tab
+			sh ip6tab
+
+		done
+		#}
+		fi
+	fi
+
+	rm iptab 2>&- >&-
+	rm ip6tab 2>&- >&-
+	rm iptab.dump 2>&- >&-
+	rm ip6tab.dump 2>&- >&-
+	rm iptables.dump 2>&- >&-
+	rm ip6tables.dump 2>&- >&-
+}

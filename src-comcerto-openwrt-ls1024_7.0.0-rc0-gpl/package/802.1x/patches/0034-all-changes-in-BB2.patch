@@ -1,0 +1,694 @@
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/header/ap.h 802.1x-1/src/header/ap.h
+--- 802.1x-1-so-far-orig/src/header/ap.h	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/header/ap.h	2017-10-30 11:46:53.533369138 +0530
+@@ -60,6 +60,7 @@ struct sta_info {
+ 
+ 	// From which raw socket
+ 	int						SockNum;
++	u16                     vlan_id;
+ };
+ 
+ #define MAX_STA_COUNT           1024
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/header/config.h 802.1x-1/src/header/config.h
+--- 802.1x-1-so-far-orig/src/header/config.h	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/header/config.h	2017-10-27 17:56:33.788014598 +0530
+@@ -72,6 +72,7 @@ struct rtapd_config {
+ 
+ 	u8		nasId[MAX_MBSSID_NUM][32];
+ 	int		nasId_len[MAX_MBSSID_NUM];
++	char		own_if_mac[32];
+ };
+ 
+ 
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/header/eloop.h 802.1x-1/src/header/eloop.h
+--- 802.1x-1-so-far-orig/src/header/eloop.h	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/header/eloop.h	2017-10-27 17:04:00.759943368 +0530
+@@ -15,6 +15,8 @@ int eloop_register_read_sock(int sock,
+ 					     void *sock_ctx),
+ 			     void *eloop_data, void *user_data);
+ 
++int eloop_update_read_sock_fd(int old_sock, int new_sock);
++
+ /* Register timeout */
+ int eloop_register_timeout(unsigned int secs, unsigned int usecs,
+ 			   void (*handler)(void *eloop_ctx, void *timeout_ctx),
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/header/ieee802_1x.h 802.1x-1/src/header/ieee802_1x.h
+--- 802.1x-1-so-far-orig/src/header/ieee802_1x.h	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/header/ieee802_1x.h	2017-10-27 16:53:20.511928904 +0530
+@@ -15,6 +15,7 @@ struct ieee802_1x_hdr {
+ 
+ #define EAPOL_VERSION		1
+ #define EAPOL_VERSION_2		2    //for WPA2(pre-auth)
++#define EAPOL_VERSION_3		3
+ 
+ #define LENGTH_802_1_H			8
+ 
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/header/radius_client.h 802.1x-1/src/header/radius_client.h
+--- 802.1x-1-so-far-orig/src/header/radius_client.h	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/header/radius_client.h	2017-10-27 17:04:36.847944183 +0530
+@@ -62,5 +62,5 @@ u8 Radius_client_get_id(rtapd *rtapd);
+ void Radius_client_flush(rtapd *rtapd);
+ int Radius_client_init(rtapd *rtapd);
+ void Radius_client_deinit(rtapd *rtapd);
+-int Radius_client_retry_init(rtapd *rtapd);
++int Radius_client_retry_init(rtapd *rtapd, int close_sock);
+ #endif /* RADIUS_CLIENT_H */
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/header/rtdot1x.h 802.1x-1/src/header/rtdot1x.h
+--- 802.1x-1-so-far-orig/src/header/rtdot1x.h	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/header/rtdot1x.h	2017-10-30 11:48:15.233370984 +0530
+@@ -219,7 +219,7 @@ typedef struct recv_from_ra {
+     u8 xframe[1];    
+ } __attribute__ ((packed)) priv_rec;
+ 
+-void ieee802_1x_receive(rtapd *apd, u8 *sa, u8 *apidx, u8 *buf, size_t len, u16 ethertype, int	SockNum);
++void ieee802_1x_receive(rtapd *apd, u8 *sa, u8 *apidx, u8 *buf, size_t len, u16 ethertype, int	SockNum, u16 vlan_id);
+ u16	RTMPCompareMemory(void *pSrc1,void *pSrc2, u16 Length);
+ void Handle_term(int sig, void *eloop_ctx, void *signal_ctx);
+ int RT_ioctl(int sid, int param, char  *data, int data_len, char *prefix_name, unsigned char apidx, int flags);
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/Makefile 802.1x-1/src/Makefile
+--- 802.1x-1-so-far-orig/src/Makefile	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/Makefile	2017-10-27 15:52:09.295845967 +0530
+@@ -11,7 +11,7 @@ CFLAGS += -02 -Wall -g
+ #If you want to support multiple radius server for multiple bssid, add following line
+ #CFLAGS +=  -DMULTIPLE_RADIUS
+ 
+-LDADD += -lconfd
++#LDADD += -lconfd
+ LDADD += -lpthread
+ 
+ all: rtdot1xd 
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/source/eloop.c 802.1x-1/src/source/eloop.c
+--- 802.1x-1-so-far-orig/src/source/eloop.c	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/source/eloop.c	2017-10-27 17:09:14.631950458 +0530
+@@ -48,6 +48,7 @@ struct eloop_data {
+ };
+ 
+ static struct eloop_data eloop;
++int close_fd = 0;
+ 
+ 
+ void eloop_init(void *user_data)
+@@ -79,6 +80,24 @@ int eloop_register_read_sock(int sock, v
+ 	return 0;
+ }
+ 
++int eloop_update_read_sock_fd(int old_sock, int new_sock)
++{
++	int i;
++
++	for (i = 0; i < eloop.reader_count; i++)
++	{
++		if (eloop.readers[i].sock == old_sock)
++		{
++			eloop.readers[i].sock = new_sock;
++			if (new_sock > eloop.max_sock)
++				eloop.max_sock = new_sock;
++			close_fd = old_sock;
++			return 0;
++		}
++	}
++	return -1;
++}
++
+ int eloop_register_timeout(unsigned int secs, unsigned int usecs,
+ 			   void (*handler)(void *eloop_ctx, void *timeout_ctx),
+ 			   void *eloop_data, void *user_data)
+@@ -213,6 +232,12 @@ void eloop_run(void)
+ 		FD_ZERO(&rfds);
+ 		for (i = 0; i < eloop.reader_count; i++)
+ 			FD_SET(eloop.readers[i].sock, &rfds);
++		if (close_fd)
++		{
++			FD_CLR(close_fd, &rfds);
++			close(close_fd);
++			close_fd = 0;
++		}
+ 		res = select(eloop.max_sock + 1, &rfds, NULL, NULL,
+ 			     eloop.timeout ? &tv : NULL);
+ 		if (res < 0 && errno != EINTR)
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/source/ieee802_1x.c 802.1x-1/src/source/ieee802_1x.c
+--- 802.1x-1-so-far-orig/src/source/ieee802_1x.c	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/source/ieee802_1x.c	2017-10-30 12:20:58.089415327 +0530
+@@ -26,19 +26,17 @@
+ #include "eloop.h"
+ #include "sta_info.h"
+ 
+-
+-#include <confd.h>
+-#include <confd_maapi.h>
+-#include <confd_lib.h>
+-#include <confd_cdb.h>
+-
+-
+ #include <sys/types.h>
+ #include <arpa/inet.h>
+ 
+ #define SIZE 256
+ extern u8 rv_prod_type_g;
+ 
++struct dot1x_vlan_hdr {
++	u16 vlan_id;
++	u16 eth_type;
++};
++
+ int get_physical_portno(uint16_t nas_port)
+ {
+ 	if (rv_prod_type_g  == PROD_TYPE_RV_340) 
+@@ -110,7 +108,7 @@ int get_physical_portno(uint16_t nas_por
+ 	}
+ }
+ 
+-int get_NAS_ip_address(struct in_addr *server, unsigned int *nasIP, char *dev, char *mac)
++int get_NAS_ip_address(struct in_addr *server, struct in_addr *nasIP, char *dev, char *mac)
+ {
+   FILE *fp=NULL;
+   char cmd[SIZE];
+@@ -162,7 +160,7 @@ int get_NAS_ip_address(struct in_addr *s
+   else
+     DBGPRINT(RT_DEBUG_ERROR, "Failed to get nasIP Address\n");
+ 
+-  DBGPRINT(RT_DEBUG_INFO,"RADIUS NAS IP Address = %04x\n", ntohl(*nasIP));
++  DBGPRINT(RT_DEBUG_INFO,"RADIUS NAS IP Address = %04x\n", ntohl(nasIP->s_addr));
+ 
+ /** Get the interface name and RADIUS called-station-id **/
+ /* Handling of RADIUS server wan side (type : PPPoE) called-station-id case */
+@@ -176,6 +174,7 @@ int get_NAS_ip_address(struct in_addr *s
+     memset(cmd,0,SIZE);
+     fgets(cmd,SIZE,fp);
+     strcpy(mac,cmd);
++    DBGPRINT(RT_DEBUG_INFO,"RADIUS NAS IF MAC Addr = %s\n", mac);
+   }
+   else
+   {
+@@ -211,7 +210,7 @@ static void ieee802_1x_insertCPUTag(u8 *
+ 	pkt[0] = ((cpuTagId >> 8) & 0xFF); 
+ 	pkt[1] = (cpuTagId & 0xFF);
+ 	pkt[2] = 0x04; /* Protocol */
+-	pkt[3] = 0x10; /* BP_FLTR2 */
++	pkt[3] = 0x18; /* BP_FLTR2 */
+ 	pkt[4] = 0x02; /* AS_DPM */
+ 	pkt[5] = 0x0;
+ 	pkt[6] = 0x0;
+@@ -299,9 +298,13 @@ static void ieee802_1x_send_with_cputag(
+ 	struct ieee8023_hdr_with_cputag *hdr3;
+ 	struct ieee802_1x_hdr *xhdr;
+ 	size_t len;
+-	u8 *pos;
+-   
+-	len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen;
++	u8 *pos,ii;
++	struct dot1x_vlan_hdr *vlan_hdr;
++ 
++	if (sta->vlan_id) 
++		len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen + 4;
++	else
++		len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen;
+ 	buf = (char *) malloc(len);
+ 	if (buf == NULL)
+ 	{
+@@ -317,12 +320,31 @@ static void ieee802_1x_send_with_cputag(
+ 	ieee802_1x_insertCPUTag(hdr3->tx_cpu_tag, sta->aid);
+ 
+ //	memcpy(hdr3->sAddr, rtapd->own_addr[sta->ApIdx], ETH_ALEN);
+-	if (sta->ethertype == ETH_P_PRE_AUTH)
+-		(hdr3->eth_type) = htons(ETH_P_PRE_AUTH);
++	/* Insert VLAN Header */
++	if (sta->vlan_id)
++	{
++		hdr3->eth_type = htons(ETH_P_VLAN);
++		pos = (u8 *) (hdr3 + 1);
++
++		vlan_hdr = (struct dot1x_vlan_hdr *)pos;
++		vlan_hdr->vlan_id = htons(sta->vlan_id);
++
++		if (sta->ethertype == ETH_P_PRE_AUTH)
++			vlan_hdr->eth_type = htons(ETH_P_PRE_AUTH);
++		else
++			vlan_hdr->eth_type = htons(ETH_P_PAE);
++
++		pos = (u8 *) (pos + 4);
++	}
+ 	else
+-		(hdr3->eth_type) = htons(ETH_P_PAE);
++	{
++		if (sta->ethertype == ETH_P_PRE_AUTH)
++			(hdr3->eth_type) = htons(ETH_P_PRE_AUTH);
++		else
++			(hdr3->eth_type) = htons(ETH_P_PAE);
++		pos = (u8 *) (hdr3 + 1);
++	}
+ 
+-	pos = (u8 *) (hdr3 + 1);
+ 	xhdr = (struct ieee802_1x_hdr *) pos;
+ 	if (sta->ethertype == ETH_P_PRE_AUTH)
+ 		xhdr->version = EAPOL_VERSION_2;
+@@ -357,8 +379,12 @@ static void ieee802_1x_send(rtapd *rtapd
+ 	struct ieee802_1x_hdr *xhdr;
+ 	size_t len;
+ 	u8 *pos;
++	struct dot1x_vlan_hdr *vlan_hdr;
+ 		   
+-	len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen;
++	if (sta->vlan_id) 
++		len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen + 4;
++	else
++		len = sizeof(*hdr3) + 2+ sizeof(*xhdr) +datalen;
+ 	buf = (char *) malloc(len);
+ 	if (buf == NULL)
+ 	{
+@@ -374,12 +400,30 @@ static void ieee802_1x_send(rtapd *rtapd
+ 
+ 	ieee802_1x_rv340_insertCPUTag(hdr3->tx_cpu_tag, sta->aid);
+ 
+-	if (sta->ethertype == ETH_P_PRE_AUTH)
+-		(hdr3->eth_type) = htons(ETH_P_PRE_AUTH);
++	if (sta->vlan_id)
++	{
++		hdr3->eth_type = htons(ETH_P_VLAN);
++		pos = (u8 *) (hdr3 + 1);
++	
++		vlan_hdr = (struct dot1x_vlan_hdr *)pos;
++		vlan_hdr->vlan_id = htons(sta->vlan_id);
++
++		if (sta->ethertype == ETH_P_PRE_AUTH)
++			vlan_hdr->eth_type = htons(ETH_P_PRE_AUTH);
++		else
++			vlan_hdr->eth_type = htons(ETH_P_PAE);
++
++		pos = (u8 *) (pos + 4);
++	}
+ 	else
+-		(hdr3->eth_type) = htons(ETH_P_PAE);
++	{
++		if (sta->ethertype == ETH_P_PRE_AUTH)
++			(hdr3->eth_type) = htons(ETH_P_PRE_AUTH);
++		else
++			(hdr3->eth_type) = htons(ETH_P_PAE);
+ 
+-	pos = (u8 *) (hdr3 + 1);
++		pos = (u8 *) (hdr3 + 1);
++	}
+ 	xhdr = (struct ieee802_1x_hdr *) pos;
+ 	if (sta->ethertype == ETH_P_PRE_AUTH)
+ 		xhdr->version = EAPOL_VERSION_2;
+@@ -814,12 +858,12 @@ static void ieee802_1x_encapsulate_radiu
+ 	unsigned int own_ip;
+ 	char device[SIZE];
+ 	char mac[SIZE];
+-	int	res;
++	int	res, close_sock;
+ 
+ 	if (rtapd->radius->auth_serv_sock < 0)
+ 	{
+ 		DBGPRINT(RT_DEBUG_INFO, "ieee802_1x_encapsulate_radius: Calling Radius Client Retry Init\n");
+-		if (Radius_client_retry_init(rtapd) < 0)
++		if (Radius_client_retry_init(rtapd, 0) < 0)
+ 		{
+ 			DBGPRINT(RT_DEBUG_ERROR, "Redius Client Re-initialization Failed\n");
+ 			return;
+@@ -840,7 +884,7 @@ static void ieee802_1x_encapsulate_radiu
+ 		DBGPRINT(RT_DEBUG_ERROR,"Could not add User-Name\n");
+ 		goto fail;
+ 	}
+-
++#if 0
+ /** Extracting sending interface info using route get **/
+               
+         if (get_NAS_ip_address(&rtapd->conf->auth_servers->addr,&own_ip, &device, &mac) != 0)
+@@ -849,8 +893,9 @@ static void ieee802_1x_encapsulate_radiu
+ 		goto fail;
+ 
+         }
++#endif
+ 	//if (!Radius_msg_add_attr(msg, RADIUS_ATTR_NAS_IP_ADDRESS, (u8 *) &rtapd->conf->own_ip_addr, 4))
+-	if (!Radius_msg_add_attr(msg, RADIUS_ATTR_NAS_IP_ADDRESS, (u8 *)&own_ip, 4))
++	if (!Radius_msg_add_attr(msg, RADIUS_ATTR_NAS_IP_ADDRESS, (u8 *)&(rtapd->conf->own_ip_addr.s_addr), 4))
+ 
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Could not add NAS-IP-Address\n");
+@@ -877,7 +922,7 @@ static void ieee802_1x_encapsulate_radiu
+ //	snprintf((char *)&buf, sizeof(buf), RADIUS_802_1X_ADDR_FORMAT, MAC2STR(rtapd->own_addr[sta->ApIdx]));
+ //	if (!Radius_msg_add_attr(msg, RADIUS_ATTR_CALLED_STATION_ID, buf, strlen((char *)&buf)))
+ 
+-	if (!Radius_msg_add_attr(msg, RADIUS_ATTR_CALLED_STATION_ID, (u8 *)mac, (strlen(mac) - 1)))
++	if (!Radius_msg_add_attr(msg, RADIUS_ATTR_CALLED_STATION_ID, (u8 *)rtapd->conf->own_if_mac, (strlen(rtapd->conf->own_if_mac) - 1)))
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Could not add Called-Station-Id\n");
+ 		goto fail;
+@@ -937,8 +982,18 @@ static void ieee802_1x_encapsulate_radiu
+ 	}
+ 
+ 	res = Radius_client_send(rtapd, msg, RADIUS_AUTH, sta->ApIdx);
+-	DBGPRINT(RT_DEBUG_TRACE, "Finish Radius_client_send..(%d)\n", res);
+-
++	if (res < 0)
++	{
++		DBGPRINT(RT_DEBUG_TRACE, "Radius_client_send failed, res = (%d)\n", res);
++		close_sock = rtapd->radius->auth_serv_sock;
++		rtapd->radius->auth_serv_sock = -1;
++		if (Radius_client_retry_init(rtapd, close_sock) < 0)
++		{
++			DBGPRINT(RT_DEBUG_ERROR, "Redius Client Re-initialization Failed\n");
++			return;
++		}
++		send(rtapd->radius->auth_serv_sock, msg->buf, msg->buf_used, 0);
++	}
+ 	return;
+ 
+ fail:
+@@ -1093,7 +1148,8 @@ void ieee802_1x_receive(
+ 		u8 *buf, 
+ 		size_t len, 
+ 		u16 ethertype,
+-		int	SockNum)
++		int	SockNum,
++		u16 vlan_id)
+ {
+ 	struct sta_info *sta;
+ 	struct ieee802_1x_hdr *hdr;
+@@ -1138,7 +1194,7 @@ void ieee802_1x_receive(
+ 	}
+ 
+ 	/* Check EAPoL Protocol Version */
+-	if ((hdr->version != EAPOL_VERSION) && (hdr->version != EAPOL_VERSION_2))
++	if ((hdr->version != EAPOL_VERSION) && (hdr->version != EAPOL_VERSION_2) && (hdr->version != EAPOL_VERSION_3))
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR, "Unsupported EAPoL Protocol Version (%d)\n", hdr->version);
+ 		return;
+@@ -1154,6 +1210,7 @@ void ieee802_1x_receive(
+ 		case IEEE802_1X_TYPE_EAPOL_START:
+ 			DBGPRINT(RT_DEBUG_TRACE,"Handle EAPOL_START from %s%d\n", rtapd->prefix_wlan_name, sta->ApIdx);
+ 			sta->eapol_sm->auth_pae.eapStart = TRUE;
++			sta->vlan_id = vlan_id;
+ 			eapol_sm_step(sta->eapol_sm);
+ 			break;
+ 
+@@ -1362,55 +1419,6 @@ static void ieee802_1x_get_keys(rtapd *r
+ 	}
+ }
+ 
+-int authorize (char *group)
+-{
+-	int retval;
+-	struct sockaddr_in addr;
+-	int rsock;
+-	int action;
+-  
+-       	confd_init_vsn(NULL,NULL,4,0x06040000);
+-       	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+-       	addr.sin_family = AF_INET;
+-       	addr.sin_port = htons(4565);
+-        
+-       	if ((rsock = socket(PF_INET, SOCK_STREAM, 0)) < 0 )
+-        {
+-		DBGPRINT(RT_DEBUG_ERROR,"ConfD socket creation failed\n");
+-              	return 0;
+-        }
+-       	if (cdb_connect(rsock, CDB_READ_SOCKET, (struct sockaddr *)&addr, sizeof (struct sockaddr_in)) < 0)
+-        {
+-		DBGPRINT(RT_DEBUG_ERROR,"cdb_connect failed\n");
+-              	return 0;
+-        }
+-       	if (cdb_start_session(rsock, CDB_RUNNING) != CONFD_OK)
+-        {
+-		DBGPRINT(RT_DEBUG_ERROR,"CDB start session failed\n");
+-              	return 0;
+-        }
+-       	retval = cdb_get_enum_value(rsock, &action,
+-                                    "/nacm:nacm/nacm:groups/group{%s}/feature-rule{%s}/action",group,"dot1x");
+-        if(retval != CONFD_OK)
+-        {
+-		DBGPRINT(RT_DEBUG_ERROR,"ConfD group authorization failed\n");
+-             	cdb_close(rsock);
+-             	return 0;
+-        }
+-        
+-        if(action == 0)
+-        {
+-		DBGPRINT(RT_DEBUG_INFO,"ConfD authorization action successful\n");
+-              	cdb_close(rsock);
+-              	return 1;
+-	}
+-        else
+-        {
+-		DBGPRINT(RT_DEBUG_ERROR,"ConfD authorization action failed\n");
+-              	cdb_close(rsock);
+-              	return 0;
+-	}
+-}
+ /* Process the RADIUS frames from Authentication Server */
+ static RadiusRxResult
+ ieee802_1x_receive_auth(rtapd *rtapd, struct radius_msg *msg, struct radius_msg *req,
+@@ -1420,8 +1428,12 @@ ieee802_1x_receive_auth(rtapd *rtapd, st
+ 	u32 session_timeout = 0, idle_timeout = 0, termination_action;
+ 	int session_timeout_set, idle_timeout_set; 
+ 	int	free_flag = 0;
+-    char groupname[64] = {'\0'};
+-    int group_authorize;
++        char groupname[64] = {'\0'};
++        int group_authorize = 0;
++        FILE *fp = NULL;
++        char buffer[256]={'\0'};
++        char cmd[256]={'\0'};
++
+ 
+ 	DBGPRINT(RT_DEBUG_TRACE,"Receive IEEE802_1X Response Packet From Radius Server. \n");
+ 
+@@ -1438,7 +1450,33 @@ ieee802_1x_receive_auth(rtapd *rtapd, st
+     		group_authorize = 1;
+ 	}
+    	else 
+-    		group_authorize = authorize(groupname);
++        {
++    		//group_authorize = authorize(groupname);
++                sprintf(cmd, "/usr/bin/userauth authorize %s %s", "dot1x", groupname);
++                fp = popen(cmd,"r");
++        	if (fp == NULL)
++        	{
++       		   syslog(LOG_ERR, "Localdb:popen Failed.");
++       		   return RADIUS_RX_UNKNOWN;
++       		 }
++
++       		 while(fgets(buffer, sizeof(buffer), fp) != NULL)
++       		 {
++       		   if (strcmp(buffer, "PAM_AUTH_ERR") ==0 )
++       		   {
++       		      pclose(fp);
++       		      return RADIUS_RX_UNKNOWN;
++       		   }
++       		   else if(strcmp(buffer, "PAM_SUCCESS") ==0 )
++       		   {
++                     group_authorize = 1;
++                     syslog(LOG_ERR, "Localdb:authorization sucess group:%s",
++                                        groupname);
++       		     pclose(fp);
++                     break;
++       		   }
++                 }
++        }
+ 
+     	if(group_authorize == 0)
+ 	{
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/source/radius_client.c 802.1x-1/src/source/radius_client.c
+--- 802.1x-1-so-far-orig/src/source/radius_client.c	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/source/radius_client.c	2017-10-27 18:26:14.096054817 +0530
+@@ -24,6 +24,7 @@
+ #define RADIUS_CLIENT_NUM_FAILOVER 4 /* try to change RADIUS server after this
+ 					  * many failed retry attempts */
+ #define SIZE 256
++#define MAC_STR_SIZE 32
+ 
+ static int
+ Radius_change_server(rtapd *rtapd, struct hostapd_radius_server *nserv,
+@@ -98,6 +99,10 @@ static void Radius_client_timer(void *el
+ #else
+ 	int auth_failover = 0;
+ #endif
++        struct in_addr own_ip;
++	char device[SIZE];
++        char mac[MAC_STR_SIZE];
++	int close_sock = -1;
+ 
+ #if MULTIPLE_RADIUS
+ 	for (i = 0; i < MAX_MBSSID_NUM; i++)
+@@ -137,7 +142,26 @@ static void Radius_client_timer(void *el
+ #else
+ 				auth_failover++;
+ #endif
+-				DBGPRINT(RT_DEBUG_WARN, "Radius_client_timer : Failed retry attempts(%d) \n", RADIUS_CLIENT_NUM_FAILOVER);
++				DBGPRINT(RT_DEBUG_WARN, "Radius_client_timer: Failed retry attempts(%d) \n", RADIUS_CLIENT_NUM_FAILOVER);
++  
++#ifdef CONFIG_RV34X_8021X
++        			if (get_NAS_ip_address(&rtapd->conf->auth_servers->addr, &own_ip, &device, &mac) == 0)
++        			{
++					if (own_ip.s_addr != rtapd->conf->own_ip_addr.s_addr)
++					{
++				                DBGPRINT(RT_DEBUG_TRACE, "Radius_client_timer: own_ip, old(0x%x), new(0x%x)\n",rtapd->conf->own_ip_addr.s_addr,own_ip.s_addr);
++				                close_sock = rtapd->radius->auth_serv_sock;
++				                rtapd->radius->auth_serv_sock = -1;
++				                if (Radius_client_retry_init(rtapd, close_sock) < 0)
++				                {
++				                        DBGPRINT(RT_DEBUG_ERROR, "Radius_client_timer: Radius Client Re-initialization Failed\n");
++				                }
++
++					}
++    
++        			}
++#endif /* CONFIG_RV34X_8021X */
++
+ 			}	
+ 		}
+ 
+@@ -428,9 +452,9 @@ Radius_change_server(rtapd *rtapd, struc
+ 			 struct hostapd_radius_server *oserv, int sock, int auth)
+ {
+ 	struct sockaddr_in serv;
+-	unsigned int own_ip;
++	struct in_addr own_ip;
+ 	char device[SIZE];
+-	char mac[SIZE];
++	char mac[MAC_STR_SIZE];
+ 
+ 	if (!oserv || nserv->shared_secret_len != oserv->shared_secret_len ||
+ 		memcmp(nserv->shared_secret, oserv->shared_secret, nserv->shared_secret_len) != 0)
+@@ -475,7 +499,9 @@ Radius_change_server(rtapd *rtapd, struc
+ 
+         }
+ 
+-	serv.sin_addr.s_addr = own_ip;
++	serv.sin_addr.s_addr = own_ip.s_addr;
++	rtapd->conf->own_ip_addr = own_ip;
++	strncpy(rtapd->conf->own_if_mac, mac, (MAC_STR_SIZE - 1));
+ 	//serv.sin_addr.s_addr = rtapd->conf->own_ip_addr.s_addr;
+ 	//serv.sin_port = htons(rtapd->conf->auth_server->port);
+ 	if (bind(sock, (struct sockaddr *) &serv, sizeof(serv)) < 0)
+@@ -663,12 +689,12 @@ void Radius_client_deinit(rtapd *rtapd)
+ 	rtapd->radius = NULL;
+ }
+ 
+-int Radius_client_retry_init(rtapd *rtapd)
++int Radius_client_retry_init(rtapd *rtapd, int close_sock)
+ {
+ 	struct sockaddr_in serv;
+-	unsigned long own_ip;
++	struct in_addr own_ip;
+ 	char device[SIZE];
+-	char mac[SIZE];
++	char mac[MAC_STR_SIZE];
+ 
+         // bind before connect to assign local port
+ #ifdef CONFIG_RV34X_8021X
+@@ -693,7 +719,9 @@ int Radius_client_retry_init(rtapd *rtap
+                 return -1;
+         }
+ 
+-        serv.sin_addr.s_addr = own_ip;
++        serv.sin_addr.s_addr = own_ip.s_addr;
++	rtapd->conf->own_ip_addr = own_ip;
++	strncpy(rtapd->conf->own_if_mac, mac, (MAC_STR_SIZE - 1));
+         //serv.sin_addr.s_addr = rtapd->conf->own_ip_addr.s_addr;
+         //serv.sin_port = htons(rtapd->conf->auth_server->port);
+         if (bind(rtapd->radius->auth_serv_sock, (struct sockaddr *) &serv, sizeof(serv)) < 0)
+@@ -719,13 +747,22 @@ int Radius_client_retry_init(rtapd *rtap
+                 return -1;
+         }
+ 
+-        if (eloop_register_read_sock(rtapd->radius->auth_serv_sock, Radius_client_receive, rtapd, (void *) RADIUS_AUTH))
+-        {
+-                DBGPRINT(RT_DEBUG_ERROR,"Radius_client_retry_init: Could not register read socket for authentication server\n");
++	if (close_sock)
++	{
++		if (eloop_update_read_sock_fd(close_sock, rtapd->radius->auth_serv_sock) == 0)
++       		{
++			DBGPRINT(RT_DEBUG_TRACE, "Radius_client_retry_init: New Connection to Radius Server(%s)\n", inet_ntoa(rtapd->conf->auth_server->addr));
++			return 0;
++		}
++	}
++     
++  	if (eloop_register_read_sock(rtapd->radius->auth_serv_sock, Radius_client_receive, rtapd, (void *) RADIUS_AUTH))
++	{
++       		DBGPRINT(RT_DEBUG_ERROR,"Radius_client_retry_init: Could not register authentication server read socket\n");
+ 		close(rtapd->radius->auth_serv_sock);
+ 		rtapd->radius->auth_serv_sock = -1;
+-                return -1;
+-        }
++       		return -1;
++	}
+ 
+         DBGPRINT(RT_DEBUG_TRACE, "Radius_client_retry_init :: Connected to Radius Server(%s)\n", inet_ntoa(rtapd->conf->auth_server->addr));
+ 
+diff -aurpN '--exclude-from=./exclude-files.txt' 802.1x-1-so-far-orig/src/source/rtdot1x.c 802.1x-1/src/source/rtdot1x.c
+--- 802.1x-1-so-far-orig/src/source/rtdot1x.c	2017-10-25 10:39:48.856343805 +0530
++++ 802.1x-1/src/source/rtdot1x.c	2017-10-30 12:13:19.837404975 +0530
+@@ -225,8 +225,8 @@ static void Handle_read(int sock, void *
+ 	int len;
+ 	unsigned char buf[IEEE_8021X_MAX_PKT_SIZE], *pBuf = NULL;
+ 	unsigned short *eth_type_cpu=NULL;
+-	u8 *sa, *da, *pos, *pos_vlan, apidx=0,pVal=0, isVlanTag=0,portnum;
+-	u16 ethertype,i;
++	u8 *sa, *da, *pos, *pos_vlan, apidx=0,pVal=0, isVlanTag=0,portnum, ii;
++	u16 ethertype,i, vlan_id = 0;
+     	priv_rec *rec;
+     size_t left;
+ 
+@@ -259,7 +259,7 @@ static void Handle_read(int sock, void *
+                 {
+                         /* Retrieve port number first */
+                         apidx = portnum = *(pBuf + RTK8367_CPUTAG_OFFSET);
+-                        DBGPRINT(RT_DEBUG_TRACE, "\r\n[RV340] Packet received on switch port = %d", apidx);
++                        DBGPRINT(RT_DEBUG_TRACE, "[RV340] Packet received on switch port = %d\n", apidx);
+                         memmove(pBuf + RTK8367_CPUTAG_HDR_SIZE, pBuf,RTK8367_CPUTAG_START_OFFSET);
+                         pBuf = pBuf + RTK8367_CPUTAG_HDR_SIZE;
+                         len -= RTK8367_CPUTAG_HDR_SIZE;
+@@ -276,7 +276,7 @@ static void Handle_read(int sock, void *
+                 {
+                         /* Retrieve port number first */
+                         apidx = portnum = (*((pBuf + RV345_RTL8382_CPUTAG_OFFSET)) & 0x000F);
+-                        DBGPRINT(RT_DEBUG_TRACE, "\r\n[RV345] Packet received on switch port = %d", apidx);
++                        DBGPRINT(RT_DEBUG_TRACE, "[RV345] Packet received on switch port = %d\n", apidx);
+                         memmove(pBuf + RV345_RTL8382_CPUTAG_HDR_SIZE, pBuf,RV345_RTL8382_CPUTAG_START_OFFSET);
+                         pBuf = pBuf + RV345_RTL8382_CPUTAG_HDR_SIZE;
+                         len -= RV345_RTL8382_CPUTAG_HDR_SIZE;
+@@ -383,10 +383,13 @@ static void Handle_read(int sock, void *
+     pos = rec->xframe;
+     
+     //strip 4 bytes for valn tag
+-    if(isVlanTag)
+-    {
+-    	pos += 4;
+-    	left -= 4;
++	if(isVlanTag)
++	{
++		vlan_id = (*pos) << 8;
++		vlan_id |= *(pos+1);
++		vlan_id = 0x0FFF & vlan_id; 
++    		pos += 4;
++    		left -= 4;
+ 	}
+ #ifndef CONFIG_RV34X_8021X
+ 	/* Check if this is a internal command or not */
+@@ -431,7 +434,7 @@ static void Handle_read(int sock, void *
+ #endif
+ 	{
+ 		/* Process the general EAP packet */
+-    	ieee802_1x_receive(rtapd, sa, &apidx, pos, left, ethertype, sock);
++    	ieee802_1x_receive(rtapd, sa, &apidx, pos, left, ethertype, sock, vlan_id);
+ 	}
+ }
+ 
+@@ -915,13 +918,13 @@ static void Handle_usr1(int sig, void *e
+ 					eapol_sm_step(sta->eapol_sm);
+ 					DBGPRINT(RT_DEBUG_TRACE,"Set Port(%d) to LOGOFF, State (%d)\n", sta->aid, sta->eapol_sm->auth_pae.state);
+ 				}
+-				else
++/*				else
+ 				{
+ 					sta->eapol_sm->auth_pae.reAuthCount = 0;
+ 					sta->eapol_sm->reAuthenticate = TRUE;
+ 					eapol_sm_step(sta->eapol_sm);
+ 					DBGPRINT(RT_DEBUG_TRACE,"Set Port(%d) to RE-AUTHENTICATION, State (%d)\n", sta->aid, sta->eapol_sm->auth_pae.state);
+-				}
++				}*/
+ 			}
+ 			sta = sta->next;
+ 		}

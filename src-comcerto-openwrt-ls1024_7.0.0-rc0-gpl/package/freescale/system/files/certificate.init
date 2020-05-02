@@ -1,0 +1,1446 @@
+#!/bin/sh /etc/rc.common
+
+#/usr/lib/webif/functions.sh
+. /lib/config/uci.sh
+
+# For imported CA certificates, we are appending the certificate name with cacert because in case of pkcs#12, user will give only one name but pkcs#12 may have multiple certificates. So to avoid overriding the certificate and to have unique name in uci file we change the name of ca certificate.
+
+# signed_by=0 (ca-cert)
+# signed_by=1 (local, self-signed)
+# signed_by=2 (local, signed-by-others)
+# signed_by=3 (CSR)
+
+START=46
+EXTRA_COMMANDS="import_certificate export_certificate delete_certificate"
+
+TMP_CERTS_IN=/tmp/in_certs
+TMP_CERTS_OUT=/tmp/out_certs
+TMP_CERT_DIR="/tmp/tmpCerts"
+CRL_DIR="/etc/ssl/crl"
+TMP_UCI_FILE="/tmp/.uci/certificate"
+CERT_SCRIPT_OPSDB="/usr/bin/certscript"
+INDEX_FILE="/etc/ssl/index.txt"
+SERIAL_FILE="/etc/ssl/serial"
+CRL_FILE="/etc/ssl/crlnumber"
+CA_CERT_EXT=_CA
+LOCAL_CERT=0
+CA_CERT=1
+CSR=2
+PKCS12=2
+
+EXPORT_PEM=0
+EXPORT_PKCS12=1
+
+SUB_ALT_EMAIL=0
+SUB_ALT_DNS=1
+SUB_ALT_IP=2
+
+REPLACE_CSR="_REPLACE_CSR"
+KEY_DIR="/etc/ssl/private"
+CA_CERT_DIR="/etc/ssl/certs"
+CERT_DIR="/etc/ssl/certs"
+PEM_EXT="pem"
+CRT_EXT="crt"
+
+
+start () {
+	mkdir -p $TMP_CERTS_IN
+	mkdir -p $TMP_CERTS_OUT
+	mkdir -p $TMP_CERT_DIR
+
+	if [ ! -d "$CRL_DIR" ];then	
+		mkdir $CRL_DIR
+	fi
+
+	if [ ! -f "$INDEX_FILE" ];then	
+		touch $INDEX_FILE
+	fi
+	
+	if [ ! -f "$SERIAL_FILE" ];then	
+		echo "01" > $SERIAL_FILE
+	fi
+	
+	if [ ! -f "$CRL_FILE" ];then	
+		echo "01" > $CRL_FILE
+	fi
+
+	[ -e "/usr/bin/certsInfraMigration.sh" ] && {
+		/bin/sh /usr/bin/certsInfraMigration.sh
+	}
+}
+
+
+# Import Certificate
+
+import_certificate ()
+{
+
+# Importing a certificate require below arguments.
+# 1 - Download certificate file name.
+# 2 - Certificate name
+# 3 - certificate format (0- Local Certificate, 1-CA 2- PKCS#12)
+# 4 - Password (If Download format is PKCS12)
+cert_name=`cat $TMP_UCI_FILE | grep ".cert_name=" | cut -d = -f2 | cut -f 2 -d"'"`
+cert_file_name=$(uci get certificate.$cert_name.filename)
+cert_file_format=$(uci get certificate.$cert_name.format)
+
+
+if [ ! -e "$TMP_CERTS_IN/$cert_file_name" ];then
+	# Error " File does not exists"
+	echo "" > $TMP_UCI_FILE
+	rm -rf $TMP_CERTS_IN/*
+	exit 1
+fi
+
+if [ "$cert_file_format" = $PKCS12 ];then #PKCS12
+	import_password=$(uci get certificate.$cert_name.password)
+fi
+
+if [ -n "$cert_name" ];then
+#{
+	# Check for CA status of the certificate as we get both Local Certificates and CA Certificates in the same
+	#.pem or .der format.
+
+	# Validation to check Ca Certificate
+	#`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -text > /tmp/certOutput 2>&1`
+
+	[ "$cert_file_format" != "$PKCS12" ] && {
+		`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -text > /tmp/certOutput 2>&1`
+		if [ "$?" != "0" ];then
+			# As the command failed check if it is a der encrypted file?
+			`openssl x509 -inform der -in $TMP_CERTS_IN/$cert_file_name -noout -text > /tmp/certOutput 2>&1`
+			if [ "$?" != "0" ];then
+				#As the certificate is neither der nor pem exit with error
+				echo "" > $TMP_UCI_FILE
+				rm -rf $TMP_CERTS_IN/*
+				rm -rf /tmp/certOutput
+				logger -t system -p local0.error "Certificate import failed for $cert_name. certificate is neither in pem format nor in der format."
+				exit 1
+			else
+				# Convert der file in pem format
+				`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -inform der -outform pem -out $TMP_CERTS_IN/$cert_file_name`
+			fi
+			#After converting to .pem format, check if the CA Status is True/False. If it is True then the certificate
+			# is a CA cert else it is a Local Certificate.
+			`sed -i "s/  */ /g" /tmp/certOutput`
+			true_ca=`cat /tmp/certOutput | grep CA:TRUE`
+			if [ -n "$true_ca" ];then
+				cert_file_format=$CA_CERT
+			fi
+		else
+			#Success case.
+			`sed -i "s/  */ /g" /tmp/certOutput`
+			true_ca=`cat /tmp/certOutput | grep CA:TRUE`
+			if [ -n "$true_ca" ];then
+				cert_file_format=$CA_CERT
+			fi
+		fi
+	}
+
+	if [ "$cert_file_format" = $CA_CERT ];then # CA Certificate
+	#{
+		copyCaCert=
+
+		# Some Sanity Checking
+		check_dup=`ls $CA_CERT_DIR | grep $cert_name$CA_CERT_EXT.$PEM_EXT`
+		if [ -n "$check_dup" ];then
+			# Error: "Ca-Certificate exists with same name. Please give another name."
+			echo "" > $TMP_UCI_FILE
+			rm -rf $TMP_CERTS_IN/*
+			rm -rf /tmp/certOutput
+			logger -t system -p local0.error "Certificate import failed for $cert_name. certificate with the same name already exists."
+			exit 1
+		fi
+		
+		# Update the uci to modify the certificate name
+		`uci rename certificate.$cert_name="${cert_name}${CA_CERT_EXT}"`
+		cert_name=$cert_name$CA_CERT_EXT
+		`uci set certificate.$cert_name.cert_name=$cert_name`
+
+		# Copy the CA certificate to /etc/ssl/cacerts
+		copyCaCert="cp -f $TMP_CERTS_IN/$cert_file_name $CA_CERT_DIR/$cert_name.$PEM_EXT"
+		#Create soft link
+		HASH=`openssl x509 -hash -noout -in $TMP_CERTS_IN/$cert_file_name`
+		ln -s $CA_CERT_DIR/$cert_name.$PEM_EXT $CA_CERT_DIR/$HASH.0
+
+		# Add all the information to display in GUI.
+		# Fill duration
+		`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -startdate| cut -d= -f2 > /tmp/tmpCertStartTime`
+		`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -enddate| cut -d= -f2 > /tmp/tmpCertEndTime`
+		`sed -i "s/  */ /g" /tmp/tmpCertStartTime`
+		`sed -i "s/  */ /g" /tmp/tmpCertEndTime`
+		while read mon day time year
+		do
+			year=`echo $year | cut -d ' ' -f 1`
+			case "$mon" in
+				Jan) mon=01 ;;
+				Feb) mon=02 ;;
+				Mar) mon=03 ;;
+				Apr) mon=04 ;;
+				May) mon=05 ;;
+				Jun) mon=06 ;;
+				Jul) mon=07 ;;
+				Aug) mon=08 ;;
+				Sep) mon=09 ;;
+				Oct) mon=10 ;;
+				Nov) mon=11 ;;
+				Dec) mon=12 ;;
+			esac
+			day_len=`echo $day| wc -c`
+			if [ "$day_len" = 2 ];then
+				day=0$day
+			fi
+			start_time="$year-$mon-$day"
+		done < /tmp/tmpCertStartTime
+	
+		while read mon day time year
+		do
+			year=`echo $year | cut -d ' ' -f 1`
+			case "$mon" in
+				Jan) mon=01 ;;
+				Feb) mon=02 ;;
+				Mar) mon=03 ;;
+				Apr) mon=04 ;;
+				May) mon=05 ;;
+				Jun) mon=06 ;;
+				Jul) mon=07 ;;
+				Aug) mon=08 ;;
+				Sep) mon=09 ;;
+				Oct) mon=10 ;;
+				Nov) mon=11 ;;
+				Dec) mon=12 ;;
+			esac
+			day_len=`echo $day| wc -c`
+			if [ "$day_len" = 2 ];then
+				day=0$day
+			fi
+			end_time="$year-$mon-$day"
+		done < /tmp/tmpCertEndTime
+		`uci set certificate.$cert_name.duration="From $start_time To $end_time"`
+		rm -rf /tmp/tmpCertStartTime
+		rm -rf /tmp/tmpCertEndTime
+
+		# Get all the info from certificate
+		SUBJECT=`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -subject`
+		SUBJECT="${SUBJECT#*/}"
+		SUBJECT="/$SUBJECT"
+		COMMA_SUBJECT=`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -subject -nameopt -sep_comma_plus | cut -d " " -f 2-`
+		
+		ISSUER=`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -issuer`
+		ISSUER="${ISSUER#*/}"
+		ISSUER="/$ISSUER"
+		country=`echo $SUBJECT | awk -F 'C=' '{print $2}' | cut -d / -f 1`
+		state_name=`echo $SUBJECT | awk -F 'ST=' '{print $2}' | cut -d / -f 1`
+		localityname=`echo $SUBJECT | awk -F 'L=' '{print $2}' | cut -d / -f 1`
+		organization_name=`echo $SUBJECT | awk -F 'O=' '{print $2}' | cut -d / -f 1`
+		organization_unit_name=`echo $SUBJECT | awk -F 'OU=' '{print $2}' | cut -d / -f 1`
+		common_name=`echo $SUBJECT | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+		emailAddress=`echo $SUBJECT | awk -F 'emailAddress=' '{print $2}' | cut -d / -f 1`
+
+		issuer_country=`echo $ISSUER | awk -F 'C=' '{print $2}' | cut -d / -f 1`
+		issuer_state_name=`echo $ISSUER | awk -F 'ST=' '{print $2}' | cut -d / -f 1`
+		issuer_localityname=`echo $ISSUER | awk -F 'L=' '{print $2}' | cut -d / -f 1`
+		issuer_organization_name=`echo $ISSUER | awk -F 'O=' '{print $2}' | cut -d / -f 1`
+		issuer_organization_unit_name=`echo $ISSUER | awk -F 'OU=' '{print $2}' | cut -d / -f 1`
+		issuer_common_name=`echo $ISSUER | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+		issuer_emailAddress=`echo $ISSUER | awk -F 'emailAddress=' '{print $2}' | cut -d / -f 1`
+
+		`uci set certificate.$cert_name.type=$CA_CERT`
+		`uci set certificate.$cert_name.CertType=$CA_CERT`
+		`uci set certificate.$cert_name.signed_by=0`
+		`uci set certificate.$cert_name.source=2`              #Certificate Imported
+		`uci set certificate.$cert_name.allow_export=1`
+
+		sub_hash=`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -subject_hash`
+		`uci set certificate.$cert_name.sub_hash=$sub_hash`
+
+		if [ -n "$COMMA_SUBJECT" ];then
+			`uci set certificate.$cert_name.subject="$COMMA_SUBJECT"`
+		else
+			`uci set certificate.$cert_name.subject=-`
+		fi
+		
+		if [ "$SUBJECT" = "$ISSUER" ];then
+			`uci set certificate.$cert_name.signed_by_str="Self Signed"`
+		else
+			# Get issue's organization name as signed_by
+			sign_by=`echo $ISSUER | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+			if [ -n "$sign_by" ];then
+				`uci set certificate.$cert_name.signed_by_str="$sign_by"`
+			else
+				`uci set certificate.$cert_name.signed_by_str="-"`
+			fi
+		fi
+
+		if [ -n "$country" ];then
+			`uci set certificate.$cert_name.sub_country_name="$country"`
+			`uci set certificate.$cert_name.issuer_country_name="$issuer_country"`
+		else
+			`uci set certificate.$cert_name.sub_country_name=-`
+			`uci set certificate.$cert_name.issuer_country_name="-"`
+		fi
+		if [ -n "$state_name" ];then
+			`uci set certificate.$cert_name.sub_state="$state_name"`
+			`uci set certificate.$cert_name.issuer_state="$issuer_state_name"`
+		else
+			`uci set certificate.$cert_name.sub_state="-"`
+			`uci set certificate.$cert_name.issuer_state="-"`
+		fi
+		if [ -n "$localityname" ];then
+			`uci set certificate.$cert_name.sub_locality_name="$localityname"`
+			`uci set certificate.$cert_name.issuer_locality_name="$issuer_localityname"`
+		else
+			`uci set certificate.$cert_name.sub_locality_name="-"`
+			`uci set certificate.$cert_name.issuer_locality_name="-"`
+		fi
+		if [ -n "$organization_name" ];then
+			`uci set certificate.$cert_name.sub_organization_name="$organization_name"`
+			`uci set certificate.$cert_name.issuer_organization_name="$issuer_organization_name"`
+		else
+			`uci set certificate.$cert_name.sub_organization_name="-"`
+			`uci set certificate.$cert_name.issuer_organization_name="-"`
+		fi
+		if [ -n "$organization_unit_name" ];then
+			`uci set certificate.$cert_name.sub_organization_unit_name="$organization_unit_name"`
+			`uci set certificate.$cert_name.issuer_organization_unit_name="$issuer_organization_unit_name"`
+		else
+			`uci set certificate.$cert_name.sub_organization_unit_name="-"`
+			`uci set certificate.$cert_name.issuer_organization_unit_name="-"`
+		fi
+		if [ -n "$common_name" ];then
+			`uci set certificate.$cert_name.sub_common_name="$common_name"`
+			`uci set certificate.$cert_name.issuer_common_name="$issuer_common_name"`
+		else
+			`uci set certificate.$cert_name.sub_common_name="-"`
+			`uci set certificate.$cert_name.issuer_common_name="-"`
+		fi
+		if [ -n "$emailAddress" ];then
+			`uci set certificate.$cert_name.sub_email_address="$emailAddress"`
+			`uci set certificate.$cert_name.issuer_email_address="$issuer_emailAddress"`
+		else
+			`uci set certificate.$cert_name.sub_email_address="-"`
+			`uci set certificate.$cert_name.issuer_email_address="-"`
+		fi
+
+		 # add used by field
+		`uci set certificate.$cert_name.useby="-"`
+
+		# Get subject Alt name and type
+		subjectAltnum=`cat /tmp/certOutput | grep -n "Subject Alternative Name"`
+		if [ -n "$subjectAltnum" ];then
+			subjectAltnum=`echo $subjectAltnum | cut -d : -f1`
+			req_line=`expr $subjectAltnum + 1`
+			sed_ext=p
+			subNameType=`sed -n $req_line$sed_ext /tmp/certOutput | cut -d : -f 1 | cut -d " " -f 2`
+			subNameValue=`sed -n $req_line$sed_ext /tmp/certOutput | cut -d : -f 2`
+			if [ "$subNameType" = "IP" ];then
+				`uci set certificate.$cert_name.sub_alt_name_type=$SUB_ALT_IP`
+			elif [ "$subNameType" = "DNS" ];then
+				`uci set certificate.$cert_name.sub_alt_name_type=$SUB_ALT_DNS`
+			elif [ "$subNameType" = "email" ];then
+				`uci set certificate.$cert_name.sub_alt_name_type=$SUB_ALT_EMAIL`
+			fi
+			`uci set certificate.$cert_name.sub_alt_name="$subNameValue"`
+		else
+			`uci set certificate.$cert_name.sub_alt_name="-"`
+			`uci set certificate.$cert_name.sub_alt_name_type="-"`
+		fi
+			
+
+		key_enc_length=`cat /tmp/certOutput | grep Public-Key: | cut -d : -f 2 | cut -d "(" -f 2 | cut -d " " -f 1`
+
+		if [ -n "$key_enc_length" ];then
+			`uci set certificate.$cert_name.key_encryption="$key_enc_length"`
+		else
+			`uci set certificate.$cert_name.key_encryption="-"`
+		fi
+		`uci set certificate.$cert_name.is_ca_enabled=1`
+		rm -rf /tmp/certOutput
+
+		if [ "$copyCaCert" ];then
+			$copyCaCert
+		fi
+
+		# Remove addtional fields.
+		`uci del certificate.$cert_name.format`
+		`uci del certificate.$cert_name.filename`
+		if [ "$cert_file_format" = $PKCS12 ];then
+			`uci del certificate.$cert_name.password`
+		fi
+	#}
+	elif [ "$cert_file_format" = $LOCAL_CERT ];then # Local Certificate
+	#{
+		deleteCertCmd=
+		deleteUciCmd=
+		moveKeyCmd=
+		copyCertCmd=
+		# Validate certificate
+		`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -text > /tmp/certOutput 2>&1`
+		if [ "$?" -ne 0 ];then
+			# Check for the der encryption type
+			`openssl x509 -inform der -in $TMP_CERTS_IN/$cert_file_name -noout -text > /tmp/certOutput 2>&1`
+			if [ "$?" -ne 0 ];then
+				# Error: "Certificate validation Failed."
+				echo "" > $TMP_UCI_FILE
+				rm -rf $TMP_CERTS_IN/*
+				rm -rf /tmp/certOutput
+				logger -t system -p local0.error "Certificate import failed for $cert_name. certificate is neither in pem format nor in der format."
+				exit 1
+			else
+				# Convert der file in pem format
+				`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -inform der -outform pem -out $TMP_CERTS_IN/$cert_file_name`
+			fi
+		fi
+
+		`sed -i "s/  */ /g" /tmp/certOutput`
+		# Check that it is not a CA Certificate.
+		true_ca=`cat /tmp/certOutput | grep CA:TRUE`
+		if [ -n "$true_ca" ];then
+			# Error: "Selected Certificate is Ca-Certificate."
+			echo "" > $TMP_UCI_FILE
+			rm -rf $TMP_CERTS_IN/*
+			rm -rf /tmp/certOutput
+			logger -t system -p local0.error "Certificate import failed for $cert_name. importing a CA certificate inplace of local certificate."
+			exit 1
+		fi
+
+		# We are expecting only device certificates (who's key is present on DUT).
+		# Find the matching key and remove the CSR for "Self Signed Certificates". Return error is key is not matched.
+		FoundKey=0
+		MatchedCert=
+		find /etc/ssl/private/ -type f | cut -d / -f 5 > /tmp/tmpCertsKeys
+		while read keyfile
+		do
+		# Check the modulus of key and imported certificate, if it is matching, delete the 
+		# CSR and rename the key same as imported certificate.
+		test `openssl rsa -noout -modulus -in $KEY_DIR/$keyfile` = `openssl x509 -noout -modulus -in $TMP_CERTS_IN/$cert_file_name`
+		if [ $? = 0 ];then
+			# Add check to replace CSR and not the local cert itself
+			checkCSR=`openssl req -in $CERT_DIR/$keyfile  -noout -text | grep "Certificate Request" >/dev/null 2>&1`
+			if [ "$?" -eq 0 ];then
+				FoundKey=1
+				MatchedCert=$keyfile
+				# If a key is matched, delete the CSR (if any).
+				deleteCertCmd="rm -rf $CERT_DIR/$keyfile"
+				# Delete the CSR section from uci
+				CERT_NAME=${keyfile%.pem}
+
+				# As we are prepending for import cert case of CSR with same name.
+				`uci get certificate.$cert_name$REPLACE_CSR >/dev/null 2>&1`
+				if [ "$?" -eq 0 ];then
+					CERT_NAME=$CERT_NAME$REPLACE_CSR
+				fi
+				deleteUciCmd="uci del certificate.$CERT_NAME"
+
+				# Rename the Key
+				moveKeyCmd="mv $KEY_DIR/$keyfile $KEY_DIR/$cert_name.$PEM_EXT"
+				break
+			fi
+
+		fi
+		done </tmp/tmpCertsKeys
+		rm -rf /tmp/tmpCertsKeys
+
+		# Check for certificate with same name
+		if [ "$FoundKey" = 0 ];then
+			# Error: "Could not find key for device certificate."
+			echo "" > $TMP_UCI_FILE
+			rm -rf $TMP_CERTS_IN/*
+			rm -rf /tmp/certOutput
+			logger -t system -p local0.error "Certificate import failed for $cert_name, csr and private key not found."
+			exit 1
+		else
+			`uci set certificate.$cert_name.has_private_key=1`
+		fi
+
+		# Copy the local certificate to /etc/ssl/certs
+		copyCertCmd="cp -f $TMP_CERTS_IN/$cert_file_name $CERT_DIR/$cert_name.$PEM_EXT"
+		
+		# Add all the information to display in GUI.
+		# Fill duration
+		`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -startdate| cut -d= -f2 > /tmp/tmpCertStartTime`
+		`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -enddate| cut -d= -f2 > /tmp/tmpCertEndTime`
+		`sed -i "s/  */ /g" /tmp/tmpCertStartTime`
+		`sed -i "s/  */ /g" /tmp/tmpCertEndTime`
+		while read mon day time year
+		do
+			year=`echo $year | cut -d ' ' -f 1`
+			case "$mon" in
+				Jan) mon=01 ;;
+				Feb) mon=02 ;;
+				Mar) mon=03 ;;
+				Apr) mon=04 ;;
+				May) mon=05 ;;
+				Jun) mon=06 ;;
+				Jul) mon=07 ;;
+				Aug) mon=08 ;;
+				Sep) mon=09 ;;
+				Oct) mon=10 ;;
+				Nov) mon=11 ;;
+				Dec) mon=12 ;;
+			esac
+			day_len=`echo $day| wc -c`
+			if [ "$day_len" = 2 ];then
+				day=0$day
+			fi
+			start_time="$year-$mon-$day"
+		done < /tmp/tmpCertStartTime
+	
+		while read mon day time year
+		do
+			year=`echo $year | cut -d ' ' -f 1`
+			case "$mon" in
+				Jan) mon=01 ;;
+				Feb) mon=02 ;;
+				Mar) mon=03 ;;
+				Apr) mon=04 ;;
+				May) mon=05 ;;
+				Jun) mon=06 ;;
+				Jul) mon=07 ;;
+				Aug) mon=08 ;;
+				Sep) mon=09 ;;
+				Oct) mon=10 ;;
+				Nov) mon=11 ;;
+				Dec) mon=12 ;;
+			esac
+			day_len=`echo $day| wc -c`
+			if [ "$day_len" = 2 ];then
+				day=0$day
+			fi
+			end_time="$year-$mon-$day"
+		done < /tmp/tmpCertEndTime
+		`uci set certificate.$cert_name.duration="From $start_time To $end_time"`
+		rm -rf /tmp/tmpCertStartTime
+		rm -rf /tmp/tmpCertEndTime
+
+		# Get all the info from certificate
+		SUBJECT=`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -subject`
+		SUBJECT="${SUBJECT#*/}"
+		SUBJECT="/$SUBJECT"
+		COMMA_SUBJECT=`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -subject -nameopt -sep_comma_plus | cut -d " " -f 2-`
+		ISSUER=`openssl x509 -in $TMP_CERTS_IN/$cert_file_name -noout -issuer`
+		ISSUER="${ISSUER#*/}"
+		ISSUER="/$ISSUER"
+		country=`echo $SUBJECT | awk -F 'C=' '{print $2}' | cut -d / -f 1`
+		state_name=`echo $SUBJECT | awk -F 'ST=' '{print $2}' | cut -d / -f 1`
+		localityname=`echo $SUBJECT | awk -F 'L=' '{print $2}' | cut -d / -f 1`
+		organization_name=`echo $SUBJECT | awk -F 'O=' '{print $2}' | cut -d / -f 1`
+		organization_unit_name=`echo $SUBJECT | awk -F 'OU=' '{print $2}' | cut -d / -f 1`
+		common_name=`echo $SUBJECT | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+		emailAddress=`echo $SUBJECT | awk -F 'emailAddress=' '{print $2}' | cut -d / -f 1`
+
+		issuer_country=`echo $ISSUER | awk -F 'C=' '{print $2}' | cut -d / -f 1`
+		issuer_state_name=`echo $ISSUER | awk -F 'ST=' '{print $2}' | cut -d / -f 1`
+		issuer_localityname=`echo $ISSUER | awk -F 'L=' '{print $2}' | cut -d / -f 1`
+		issuer_organization_name=`echo $ISSUER | awk -F 'O=' '{print $2}' | cut -d / -f 1`
+		issuer_organization_unit_name=`echo $ISSUER | awk -F 'OU=' '{print $2}' | cut -d / -f 1`
+		issuer_common_name=`echo $ISSUER | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+		issuer_emailAddress=`echo $ISSUER | awk -F 'emailAddress=' '{print $2}' | cut -d / -f 1`
+		
+		`uci set certificate.$cert_name.type=$LOCAL_CERT`
+		`uci set certificate.$cert_name.CertType=$LOCAL_CERT`
+		`uci set certificate.$cert_name.source=2`              #Certificate Imported
+		`uci set certificate.$cert_name.allow_export=1`
+
+		if [ -n "$COMMA_SUBJECT" ];then
+			`uci set certificate.$cert_name.subject="$COMMA_SUBJECT"`
+		else
+			`uci set certificate.$cert_name.subject=-`
+		fi
+
+		if [ "$SUBJECT" = "$ISSUER" ];then
+			`uci set certificate.$cert_name.signed_by_str="Self Signed"`
+			`uci set certificate.$cert_name.signed_by=1`
+		else
+			# Get issue's organization name as signed_by
+			sign_by=`echo $ISSUER | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+			`uci set certificate.$cert_name.signed_by=2`
+
+			if [ -n "$sign_by" ];then
+				`uci set certificate.$cert_name.signed_by_str="$sign_by"`
+			else
+				`uci set certificate.$cert_name.signed_by_str="-"`
+			fi
+		fi
+
+		if [ -n "$country" ];then
+			`uci set certificate.$cert_name.sub_country_name="$country"`
+			`uci set certificate.$cert_name.issuer_country_name="$issuer_country"`
+		else
+			`uci set certificate.$cert_name.sub_country_name="-"`
+			`uci set certificate.$cert_name.issuer_country_name="-"`
+		fi
+		if [ -n "$state_name" ];then
+			`uci set certificate.$cert_name.sub_state="$state_name"`
+			`uci set certificate.$cert_name.issuer_state="$issuer_state_name"`
+		else
+			`uci set certificate.$cert_name.sub_state="-"`
+			`uci set certificate.$cert_name.issuer_state="-"`
+		fi
+		if [ -n "$localityname" ];then
+			`uci set certificate.$cert_name.sub_locality_name="$localityname"`
+			`uci set certificate.$cert_name.issuer_locality_name="$issuer_localityname"`
+		else
+			`uci set certificate.$cert_name.sub_locality_name="-"`
+			`uci set certificate.$cert_name.issuer_locality_name="-"`
+		fi
+		if [ -n "$organization_name" ];then
+			`uci set certificate.$cert_name.sub_organization_name="$organization_name"`
+			`uci set certificate.$cert_name.issuer_organization_name="$issuer_organization_name"`
+		else
+			`uci set certificate.$cert_name.sub_organization_name="-"`
+			`uci set certificate.$cert_name.issuer_organization_name="-"`
+		fi
+		if [ -n "$organization_unit_name" ];then
+			`uci set certificate.$cert_name.sub_organization_unit_name="$organization_unit_name"`
+			`uci set certificate.$cert_name.issuer_organization_unit_name="$issuer_organization_unit_name"`
+		else
+			`uci set certificate.$cert_name.sub_organization_unit_name="-"`
+			`uci set certificate.$cert_name.issuer_organization_unit_name="-"`
+		fi
+		if [ -n "$common_name" ];then
+			`uci set certificate.$cert_name.sub_common_name="$common_name"`
+			`uci set certificate.$cert_name.issuer_common_name="$issuer_common_name"`
+		else
+			`uci set certificate.$cert_name.sub_common_name="-"`
+			`uci set certificate.$cert_name.issuer_common_name="-"`
+		fi
+		if [ -n "$emailAddress" ];then
+			`uci set certificate.$cert_name.sub_email_address="$emailAddress"`
+			`uci set certificate.$cert_name.issuer_email_address="$issuer_emailAddress"`
+		else
+			`uci set certificate.$cert_name.sub_email_address="-"`
+			`uci set certificate.$cert_name.issuer_email_address="-"`
+		fi
+
+		 # add used by field
+		`uci set certificate.$cert_name.useby="-"`
+		
+		# Get subject Alt name and type
+		subjectAltnum=`cat /tmp/certOutput | grep -n "Subject Alternative Name"`
+		if [ -n "$subjectAltnum" ];then
+			subjectAltnum=`echo $subjectAltnum | cut -d : -f1`
+			req_line=`expr $subjectAltnum + 1`
+			sed_ext=p
+			subNameType=`sed -n $req_line$sed_ext /tmp/certOutput | cut -d : -f 1 | cut -d " " -f 2`
+			subNameValue=`sed -n $req_line$sed_ext /tmp/certOutput | cut -d : -f 2`
+			if [ "$subNameType" = "IP" ];then
+				`uci set certificate.$cert_name.sub_alt_name_type=$SUB_ALT_IP`
+			elif [ "$subNameType" = "DNS" ];then
+				`uci set certificate.$cert_name.sub_alt_name_type=$SUB_ALT_DNS`
+			elif [ "$subNameType" = "email" ];then
+				`uci set certificate.$cert_name.sub_alt_name_type=$SUB_ALT_EMAIL`
+			fi
+			`uci set certificate.$cert_name.sub_alt_name="$subNameValue"`
+		else
+			`uci set certificate.$cert_name.sub_alt_name="-"`
+			`uci set certificate.$cert_name.sub_alt_name_type="-"`
+		fi
+	
+		key_enc_length=`cat /tmp/certOutput | grep Public-Key: | cut -d : -f 2 | cut -d "(" -f 2 | cut -d " " -f 1`
+
+		if [ -n "$key_enc_length" ];then
+			`uci set certificate.$cert_name.key_encryption="$key_enc_length"`
+		else
+			`uci set certificate.$cert_name.key_encryption="-"`
+		fi
+		rm -rf /tmp/certOutput
+
+		# Run commands
+		if [ -n "$deleteCertCmd" ];then
+			$deleteCertCmd
+		fi
+		if [ -n "$deleteUciCmd" ];then
+			$deleteUciCmd
+		fi
+		if [ -n "$moveKeyCmd" ];then
+			$moveKeyCmd
+		fi
+		if [ -n "$copyCertCmd" ];then
+			$copyCertCmd
+		fi
+
+		# Remove addtional fields.
+		`uci del certificate.$cert_name.format`
+		`uci del certificate.$cert_name.filename`
+		if [ "$cert_file_format" = 3 ];then
+			`uci del certificate.$cert_name.password`
+		fi
+		
+	#}
+	elif [ "$cert_file_format" = $PKCS12 ];then #PKCS12 Format
+	#{
+		# PKCS#12 format will have only pem format files so no need to check for der format.
+		cert=0
+		cacert=0
+		key=0
+		
+		# Import Ca Cert
+		`openssl pkcs12 -in $TMP_CERTS_IN/$cert_file_name -passin pass:$import_password -nokeys -cacerts -out $TMP_CERTS_IN/$cert_name.$PEM_EXT.CA >/dev/null 2>&1`
+		if [ "$?" -ne 0 ];then
+		        # Error: "Failed to import CA Certificate"
+			echo "" > $TMP_UCI_FILE
+			rm -rf $TMP_CERTS_IN/*
+			logger -t system -p local0.error "Certificate import failed for $cert_name, extracting CA from the pkcs12 file has failed with the given password."
+			exit 1
+		fi
+
+		if [ -s "$TMP_CERTS_IN/$cert_name.$PEM_EXT.CA" ];then
+			cacert=1
+		else
+			rm -rf "$TMP_CERTS_IN/$cert_name.$PEM_EXT.CA"
+		fi
+
+		# Import Cert
+		`openssl pkcs12 -in $TMP_CERTS_IN/$cert_file_name -passin pass:$import_password -nokeys -clcerts -out $TMP_CERTS_IN/$cert_name.$PEM_EXT >/dev/null 2>&1`
+		if [ "$?" -ne 0 ];then
+		        # Error: "Failed to import Certificate"
+			echo "" > $TMP_UCI_FILE
+			rm -rf $TMP_CERTS_IN/*
+			logger -t system -p local0.error "Certificate import failed for $cert_name, extracting local certificate from the pkcs12 file has failed with the given password."
+			exit 1
+		fi
+
+		if [ -s "$TMP_CERTS_IN/$cert_name.$PEM_EXT" ];then
+			cert=1
+		else
+			rm -rf $TMP_CERTS_IN/$cert_name.$PEM_EXT
+		fi
+
+		# Import key
+		`openssl pkcs12 -in $TMP_CERTS_IN/$cert_file_name -passin pass:$import_password -nocerts -nodes -out $TMP_CERTS_IN/$cert_name.$PEM_EXT.key >/dev/null 2>&1`
+		if [ "$?" -ne 0 ];then
+		        # Error: "Failed in importing key"
+			echo "" > $TMP_UCI_FILE
+			rm -rf $TMP_CERTS_IN/*
+			logger -t system -p local0.error "Certificate import failed for $cert_name, extracting key for the local certificate from the pkcs12 file has failed with the given password."
+			exit 1
+		fi
+		
+		if [ -s "$TMP_CERTS_IN/$cert_name.$PEM_EXT.key" ];then
+			key=1
+		else
+			rm -rf $TMP_CERTS_IN/$cert_name.$PEM_EXT.key
+		fi
+
+
+		# Case -1 (Import the certificate)
+		copyCertCmd=
+		copyKeyCmd=
+		copyCaCert=
+
+		if [ "$cert" = 1 ];then
+		#{
+			# PKCS#12 can not have only device cert. Key must be included.
+			if [ "$cert" = 1 ];then
+				if [ "$key" = 0 ];then
+					# Error: "Failed in importing key"
+					echo "" > $TMP_UCI_FILE
+					rm -rf $TMP_CERTS_IN/*
+					logger -t system -p local0.error "Certificate import failed for $cert_name, local certificate without its key is of no use."
+					exit 1
+				fi
+			fi	
+
+			# Validate that it is local certificate
+			`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT -noout -text > /tmp/certOutput 2>&1`
+			if [ "$?" -ne 0 ];then
+				# Error: "Certificate validation Failed."
+				echo "" > $TMP_UCI_FILE
+				rm -rf $TMP_CERTS_IN/*
+				rm -rf /tmp/certOutput
+				logger -t system -p local0.error "Certificate import failed for $cert_name, local certificate seems to be invalid."
+				exit 1
+			fi
+
+			`sed -i "s/  */ /g" /tmp/certOutput`
+			true_ca=`cat /tmp/certOutput | grep CA:TRUE`
+			if [ -n "$true_ca" ];then
+				# Error: "Selected Certificate is Ca-Certificate."
+				echo "" > $TMP_UCI_FILE
+				rm -rf $TMP_CERTS_IN/*
+				rm -rf /tmp/certOutput
+				logger -t system -p local0.error "Certificate import failed for $cert_name, local certificate seems to have CA enabled."
+				exit 1
+			fi
+			
+			# Check for duplication
+			check_dup=`ls $KEY_DIR | grep $cert_name.$PEM_EXT`
+		        if [ -n "$check_dup" ];then
+			       	# Error: "Certificate already exist with same name."
+			       	echo "" > $TMP_UCI_FILE
+			       	rm -rf $TMP_CERTS_IN/*
+				logger -t system -p local0.error "Certificate import failed for $cert_name, local certificate with the same name already exists."
+			   	exit 1
+		       	fi
+
+			# Run openssl command to convert key in pcks1 format.
+			`openssl rsa -in $TMP_CERTS_IN/$cert_name.$PEM_EXT.key -out $TMP_CERTS_IN/$cert_name.$PEM_EXT.key >/dev/null 2>&1`
+
+			# Copy the key and certificate directly
+			copyCertCmd="cp -f $TMP_CERTS_IN/$cert_name.$PEM_EXT $CERT_DIR/$cert_name.$PEM_EXT"
+			copyKeyCmd="cp -f $TMP_CERTS_IN/$cert_name.$PEM_EXT.key $KEY_DIR/$cert_name.$PEM_EXT" 
+
+			# Add all the information to display in GUI.
+			# Fill duration
+			`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT -noout -startdate| cut -d= -f2 > /tmp/tmpCertStartTime`
+			`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT -noout -enddate| cut -d= -f2 > /tmp/tmpCertEndTime`
+			`sed -i "s/  */ /g" /tmp/tmpCertStartTime`
+			`sed -i "s/  */ /g" /tmp/tmpCertEndTime`
+			while read mon day time year
+			do
+				year=`echo $year | cut -d ' ' -f 1`
+				case "$mon" in
+					Jan) mon=01 ;;
+					Feb) mon=02 ;;
+					Mar) mon=03 ;;
+					Apr) mon=04 ;;
+					May) mon=05 ;;
+					Jun) mon=06 ;;
+					Jul) mon=07 ;;
+					Aug) mon=08 ;;
+					Sep) mon=09 ;;
+					Oct) mon=10 ;;
+					Nov) mon=11 ;;
+					Dec) mon=12 ;;
+				esac
+				day_len=`echo $day| wc -c`
+				if [ "$day_len" = 2 ];then
+					day=0$day
+				fi
+				start_time="$year-$mon-$day"
+			done < /tmp/tmpCertStartTime
+	
+			while read mon day time year
+			do
+				year=`echo $year | cut -d ' ' -f 1`
+				case "$mon" in
+					Jan) mon=01 ;;
+					Feb) mon=02 ;;
+					Mar) mon=03 ;;
+					Apr) mon=04 ;;
+					May) mon=05 ;;
+					Jun) mon=06 ;;
+					Jul) mon=07 ;;
+					Aug) mon=08 ;;
+					Sep) mon=09 ;;
+					Oct) mon=10 ;;
+					Nov) mon=11 ;;
+					Dec) mon=12 ;;
+				esac
+				day_len=`echo $day| wc -c`
+				if [ "$day_len" = 2 ];then
+					day=0$day
+				fi
+				end_time="$year-$mon-$day"
+			done < /tmp/tmpCertEndTime
+			`uci set certificate.$cert_name.duration="From $start_time To $end_time"`
+			rm -rf /tmp/tmpCertStartTime
+			rm -rf /tmp/tmpCertEndTime
+
+			# Get all the info from certificate
+			SUBJECT=`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT -noout -subject`
+			SUBJECT="${SUBJECT#*/}"
+			SUBJECT="/$SUBJECT"
+			COMMA_SUBJECT=`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT -noout -subject -nameopt -sep_comma_plus | cut -d " " -f 2-`
+			ISSUER=`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT -noout -issuer`
+			ISSUER="${ISSUER#*/}"
+			ISSUER="/$ISSUER"
+			country=`echo $SUBJECT | awk -F 'C=' '{print $2}' | cut -d / -f 1`
+			state_name=`echo $SUBJECT | awk -F 'ST=' '{print $2}' | cut -d / -f 1`
+			localityname=`echo $SUBJECT | awk -F 'L=' '{print $2}' | cut -d / -f 1`
+			organization_name=`echo $SUBJECT | awk -F 'O=' '{print $2}' | cut -d / -f 1`
+			organization_unit_name=`echo $SUBJECT | awk -F 'OU=' '{print $2}' | cut -d / -f 1`
+			common_name=`echo $SUBJECT | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+			emailAddress=`echo $SUBJECT | awk -F 'emailAddress=' '{print $2}' | cut -d / -f 1`
+
+			issuer_country=`echo $ISSUER | awk -F 'C=' '{print $2}' | cut -d / -f 1`
+			issuer_state_name=`echo $ISSUER | awk -F 'ST=' '{print $2}' | cut -d / -f 1`
+			issuer_localityname=`echo $ISSUER | awk -F 'L=' '{print $2}' | cut -d / -f 1`
+			issuer_organization_name=`echo $ISSUER | awk -F 'O=' '{print $2}' | cut -d / -f 1`
+			issuer_organization_unit_name=`echo $ISSUER | awk -F 'OU=' '{print $2}' | cut -d / -f 1`
+			issuer_common_name=`echo $ISSUER | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+			issuer_emailAddress=`echo $ISSUER | awk -F 'emailAddress=' '{print $2}' | cut -d / -f 1`
+			
+			`uci set certificate.$cert_name.type=$LOCAL_CERT`
+			`uci set certificate.$cert_name.CertType=$LOCAL_CERT`
+			`uci set certificate.$cert_name.source=2`              #Certificate Imported
+			`uci set certificate.$cert_name.allow_export=1`
+
+			if [ "$key" = "1" ]
+			then
+				`uci set certificate.$cert_name.has_private_key=1`
+			else
+				`uci set certificate.$cert_name.has_private_key=0`
+			fi
+			
+			if [ -n "$COMMA_SUBJECT" ];then
+				`uci set certificate.$cert_name.subject="$COMMA_SUBJECT"`
+			else
+				`uci set certificate.$cert_name.subject=-`
+			fi
+
+			if [ "$SUBJECT" = "$ISSUER" ];then
+				`uci set certificate.$cert_name.signed_by_str="Self Signed"`
+				`uci set certificate.$cert_name.signed_by=1`
+			else
+				# Get issue's organization name as signed_by
+				sign_by=`echo $ISSUER | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+				`uci set certificate.$cert_name.signed_by=2`
+
+				if [ -n "$sign_by" ];then
+					`uci set certificate.$cert_name.signed_by_str="$sign_by"`
+				else
+					`uci set certificate.$cert_name.signed_by_str="-"`
+				fi
+			fi
+
+			if [ -n "$country" ];then
+				`uci set certificate.$cert_name.sub_country_name="$country"`
+				`uci set certificate.$cert_name.issuer_country_name="$issuer_country"`
+			else
+				`uci set certificate.$cert_name.sub_country_name="-"`
+				`uci set certificate.$cert_name.issuer_country_name="-"`
+			fi
+			if [ -n "$state_name" ];then
+				`uci set certificate.$cert_name.sub_state="$state_name"`
+				`uci set certificate.$cert_name.issuer_state="$issuer_state_name"`
+			else
+				`uci set certificate.$cert_name.sub_state="-"`
+				`uci set certificate.$cert_name.issuer_state="-"`
+			fi
+			if [ -n "$localityname" ];then
+				`uci set certificate.$cert_name.sub_locality_name="$localityname"`
+				`uci set certificate.$cert_name.issuer_locality_name="$issuer_localityname"`
+			else
+				`uci set certificate.$cert_name.sub_locality_name="-"`
+				`uci set certificate.$cert_name.issuer_locality_name="-"`
+			fi
+			if [ -n "$organization_name" ];then
+				`uci set certificate.$cert_name.sub_organization_name="$organization_name"`
+				`uci set certificate.$cert_name.issuer_organization_name="$issuer_organization_name"`
+			else
+				`uci set certificate.$cert_name.sub_organization_name="-"`
+				`uci set certificate.$cert_name.issuer_organization_name="-"`
+			fi
+			if [ -n "$organization_unit_name" ];then
+				`uci set certificate.$cert_name.sub_organization_unit_name="$organization_unit_name"`
+				`uci set certificate.$cert_name.issuer_organization_unit_name="$issuer_organization_unit_name"`
+			else
+				`uci set certificate.$cert_name.sub_organization_unit_name="-"`
+				`uci set certificate.$cert_name.issuer_organization_unit_name="-"`
+				
+			fi
+			if [ -n "$common_name" ];then
+				`uci set certificate.$cert_name.sub_common_name="$common_name"`
+				`uci set certificate.$cert_name.issuer_common_name="$issuer_common_name"`
+			else
+				`uci set certificate.$cert_name.sub_common_name="-"`
+				`uci set certificate.$cert_name.issuer_common_name="-"`
+			fi
+			if [ -n "$emailAddress" ];then
+				`uci set certificate.$cert_name.sub_email_address="$emailAddress"`
+				`uci set certificate.$cert_name.issuer_email_address="$issuer_emailAddress"`
+			else
+				`uci set certificate.$cert_name.sub_email_address="-"`
+				`uci set certificate.$cert_name.issuer_email_address="-"`
+			fi
+
+			# add used by field
+			`uci set certificate.$cert_name.useby="-"`
+	
+
+			# Get subject Alt name and type
+			subjectAltnum=`cat /tmp/certOutput | grep -n "Subject Alternative Name"`
+			if [ -n "$subjectAltnum" ];then
+				subjectAltnum=`echo $subjectAltnum | cut -d : -f1`
+				req_line=`expr $subjectAltnum + 1`
+				sed_ext=p
+				subNameType=`sed -n $req_line$sed_ext /tmp/certOutput | cut -d : -f 1 | cut -d " " -f 2`
+				subNameValue=`sed -n $req_line$sed_ext /tmp/certOutput | cut -d : -f 2`
+				if [ "$subNameType" = "IP" ];then
+					`uci set certificate.$cert_name.sub_alt_name_type=$SUB_ALT_IP`
+				elif [ "$subNameType" = "DNS" ];then
+					`uci set certificate.$cert_name.sub_alt_name_type=$SUB_ALT_DNS`
+				elif [ "$subNameType" = "email" ];then
+					`uci set certificate.$cert_name.sub_alt_name_type=$SUB_ALT_EMAIL`
+				fi
+				`uci set certificate.$cert_name.sub_alt_name="$subNameValue"`
+			else
+				`uci set certificate.$cert_name.sub_alt_name="-"`
+				`uci set certificate.$cert_name.sub_alt_name_type="-"`
+			fi
+
+			key_enc_length=`cat /tmp/certOutput | grep Public-Key: | cut -d : -f 2 | cut -d "(" -f 2 | cut -d " " -f 1`
+
+			if [ -n "$key_enc_length" ];then
+				`uci set certificate.$cert_name.key_encryption="$key_enc_length"`
+			else
+				`uci set certificate.$cert_name.key_encryption="-"`
+			fi
+			rm -rf /tmp/certOutput
+		#}
+		fi
+
+		if [ "$cacert" = 1 ];then # CA-Certificate
+		#{
+			# Some Sanity Checking
+			check_dup=`ls $CA_CERT_DIR | grep $cert_name$CA_CERT_EXT.$PEM_EXT`
+			if [ -n "$check_dup" ];then
+				# Error: "Ca-Certificate exist with same name. Please choose another name."
+				echo "" > $TMP_UCI_FILE
+				rm -rf $TMP_CERTS_IN/*
+				logger -t system -p local0.error "Certificate import failed for $cert_name, CA certificate with the same name already exists."
+				exit 1
+			fi
+
+			# Add a new section in uci for ca-certificate. 
+			#Get the name of certificate from signed-by field of the device certificate
+			newCertName=$cert_name$CA_CERT_EXT
+			`uci set certificate.$newCertName=imported_certificate`
+			`uci set certificate.$newCertName.type=$CA_CERT`
+			`uci set certificate.$newCertName.CertType=$CA_CERT`
+			`uci set certificate.$newCertName.cert_name=$newCertName`
+
+			# Copy the CA certificate to /etc/ssl/certs
+			copyCaCert="cp -f $TMP_CERTS_IN/$cert_name.$PEM_EXT.CA $CA_CERT_DIR/$newCertName.$PEM_EXT"
+			#Create soft link
+			HASH=`openssl x509 -hash -noout -in $TMP_CERTS_IN/$cert_name.$PEM_EXT.CA`
+			ln -s $CA_CERT_DIR/$newCertName.$PEM_EXT $CA_CERT_DIR/$HASH.0
+
+			sub_hash=`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT.CA -noout -subject_hash`
+			`uci set certificate.$newCertName.sub_hash=$sub_hash`
+
+			# Validation to check Ca Certificate
+			`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT.CA -noout -text > /tmp/certOutput 2>&1`
+			if [ "$?" -ne 0 ];then
+				# Error: "Ca-Certificate validation Failed."
+				echo "" > $TMP_UCI_FILE
+				rm -rf $TMP_CERTS_IN/*
+				rm -rf /tmp/certOutput
+				logger -t system -p local0.error "Certificate import failed for $cert_name, CA certificate seems to be invalid."
+				return 1
+			fi
+			`sed -i "s/  */ /g" /tmp/certOutput`
+			true_ca=`cat /tmp/certOutput | grep CA:TRUE`
+			if [ -z "$true_ca" ];then
+				# Error: "Ca-Certificate validation Failed."
+				echo "" > $TMP_UCI_FILE
+				rm -rf $TMP_CERTS_IN/*
+				rm -rf /tmp/certOutput
+				logger -t system -p local0.error "Certificate import failed for $cert_name, CA certificate doesn't have CA:TRUE set in its contents."
+				return 1
+			fi
+
+			# Add all the information to display in GUI.
+			# Fill duration
+			`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT.CA -noout -startdate| cut -d= -f2 > /tmp/tmpCertStartTime`
+			`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT.CA -noout -enddate| cut -d= -f2 > /tmp/tmpCertEndTime`
+			`sed -i "s/  */ /g" /tmp/tmpCertStartTime`
+			`sed -i "s/  */ /g" /tmp/tmpCertEndTime`
+			while read mon day time year
+			do
+				year=`echo $year | cut -d ' ' -f 1`
+				case "$mon" in
+					Jan) mon=01 ;;
+					Feb) mon=02 ;;
+					Mar) mon=03 ;;
+					Apr) mon=04 ;;
+					May) mon=05 ;;
+					Jun) mon=06 ;;
+					Jul) mon=07 ;;
+					Aug) mon=08 ;;
+					Sep) mon=09 ;;
+					Oct) mon=10 ;;
+					Nov) mon=11 ;;
+					Dec) mon=12 ;;
+				esac
+				day_len=`echo $day| wc -c`
+				if [ "$day_len" = 2 ];then
+					day=0$day
+				fi
+				start_time="$year-$mon-$day"
+			done < /tmp/tmpCertStartTime
+	
+			while read mon day time year
+			do
+				year=`echo $year | cut -d ' ' -f 1`
+				case "$mon" in
+					Jan) mon=01 ;;
+					Feb) mon=02 ;;
+					Mar) mon=03 ;;
+					Apr) mon=04 ;;
+					May) mon=05 ;;
+					Jun) mon=06 ;;
+					Jul) mon=07 ;;
+					Aug) mon=08 ;;
+					Sep) mon=09 ;;
+					Oct) mon=10 ;;
+					Nov) mon=11 ;;
+					Dec) mon=12 ;;
+				esac
+				day_len=`echo $day| wc -c`
+				if [ "$day_len" = 2 ];then
+					day=0$day
+				fi
+				end_time="$year-$mon-$day"
+			done < /tmp/tmpCertEndTime
+			`uci set certificate.$newCertName.duration="From $start_time To $end_time"`
+			rm -rf /tmp/tmpCertStartTime
+			rm -rf /tmp/tmpCertEndTime
+
+			# Get all the info from certificate
+			SUBJECT=`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT.CA -noout -subject`
+			SUBJECT="${SUBJECT#*/}"
+			SUBJECT="/$SUBJECT"
+			COMMA_SUBJECT=`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT.CA -noout -subject -nameopt -sep_comma_plus | cut -d " " -f 2-`
+			ISSUER=`openssl x509 -in $TMP_CERTS_IN/$cert_name.$PEM_EXT.CA -noout -issuer`
+			ISSUER="${ISSUER#*/}"
+			ISSUER="/$ISSUER"
+			country=`echo $SUBJECT | awk -F 'C=' '{print $2}' | cut -d / -f 1`
+			state_name=`echo $SUBJECT | awk -F 'ST=' '{print $2}' | cut -d / -f 1`
+			localityname=`echo $SUBJECT | awk -F 'L=' '{print $2}' | cut -d / -f 1`
+			organization_name=`echo $SUBJECT | awk -F 'O=' '{print $2}' | cut -d / -f 1`
+			organization_unit_name=`echo $SUBJECT | awk -F 'OU=' '{print $2}' | cut -d / -f 1`
+			common_name=`echo $SUBJECT | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+			emailAddress=`echo $SUBJECT | awk -F 'emailAddress=' '{print $2}' | cut -d / -f 1`
+			
+			`uci set certificate.$newCertName.type=$CA_CERT`
+			`uci set certificate.$newCertName.CertType=$CA_CERT`
+			`uci set certificate.$newCertName.signed_by=0`
+			
+			if [ -n "$COMMA_SUBJECT" ];then
+				`uci set certificate.$newCertName.subject="$COMMA_SUBJECT"`
+			else
+				`uci set certificate.$newCertName.subject=-`
+			fi
+
+			if [ "$SUBJECT" = "$ISSUER" ];then
+				`uci set certificate.$newCertName.signed_by_str="Self Signed"`
+			else
+				# Get issue's organization name as signed_by
+				sign_by=`echo $ISSUER | awk -F 'CN=' '{print $2}' | cut -d / -f 1`
+				if [ -n "$sign_by" ];then
+					`uci set certificate.$newCertName.signed_by_str="$sign_by"`
+				else
+					`uci set certificate.$newCertName.signed_by_str="-"`
+				fi
+			fi
+
+			if [ -n "$country" ];then
+				`uci set certificate.$newCertName.sub_country_name="$country"`
+				`uci set certificate.$newCertName.issuer_country_name="$country"`
+			else
+				`uci set certificate.$newCertName.sub_country_name="-"`
+				`uci set certificate.$newCertName.issuer_country_name="-"`
+			fi
+			if [ -n "$state_name" ];then
+				`uci set certificate.$newCertName.sub_state="$state_name"`
+				`uci set certificate.$newCertName.issuer_state="$state_name"`
+			else
+				`uci set certificate.$newCertName.sub_state="-"`
+				`uci set certificate.$newCertName.issuer_state="-"`
+			fi
+			if [ -n "$localityname" ];then
+				`uci set certificate.$newCertName.sub_locality_name="$localityname"`
+				`uci set certificate.$newCertName.issuer_locality_name="$localityname"`
+			else
+				`uci set certificate.$newCertName.sub_locality_name="-"`
+				`uci set certificate.$newCertName.issuer_locality_name="-"`
+			fi
+			if [ -n "$organization_name" ];then
+				`uci set certificate.$newCertName.sub_organization_name="$organization_name"`
+				`uci set certificate.$newCertName.issuer_organization_name="$organization_name"`
+			else
+				`uci set certificate.$newCertName.sub_organization_name="-"`
+				`uci set certificate.$newCertName.issuer_organization_name="-"`
+			fi
+			if [ -n "$organization_unit_name" ];then
+				`uci set certificate.$newCertName.sub_organization_unit_name="$organization_unit_name"`
+				`uci set certificate.$newCertName.issuer_organization_unit_name="$organization_unit_name"`
+			else
+				`uci set certificate.$newCertName.sub_organization_unit_name="-"`
+				`uci set certificate.$newCertName.issuer_organization_unit_name="-"`
+			fi
+			if [ -n "$common_name" ];then
+				`uci set certificate.$newCertName.sub_common_name="$common_name"`
+				`uci set certificate.$newCertName.issuer_common_name="$common_name"`
+			else
+				`uci set certificate.$newCertName.sub_common_name="-"`
+				`uci set certificate.$newCertName.issuer_common_name="-"`
+			fi
+			if [ -n "$emailAddress" ];then
+				`uci set certificate.$newCertName.sub_email_address="$emailAddress"`
+				`uci set certificate.$newCertName.issuer_email_address="$emailAddress"`
+			else
+				`uci set certificate.$newCertName.sub_email_address="-"`
+				`uci set certificate.$newCertName.issuer_email_address="-"`
+			fi
+
+			# Get subject Alt name and type
+			subjectAltnum=`cat /tmp/certOutput | grep -n "Subject Alternative Name"`
+			if [ -n "$subjectAltnum" ];then
+				subjectAltnum=`echo $subjectAltnum | cut -d : -f1`
+				req_line=`expr $subjectAltnum + 1`
+				sed_ext=p
+				subNameType=`sed -n $req_line$sed_ext /tmp/certOutput | cut -d : -f 1 | cut -d " " -f 2`
+				subNameValue=`sed -n $req_line$sed_ext /tmp/certOutput | cut -d : -f 2`
+				if [ "$subNameType" = "IP" ];then
+					`uci set certificate.$newCertName.sub_alt_name_type=$SUB_ALT_IP`
+				elif [ "$subNameType" = "DNS" ];then
+					`uci set certificate.$newCertName.sub_alt_name_type=$SUB_ALT_DNS`
+				elif [ "$subNameType" = "email" ];then
+					`uci set certificate.$newCertName.sub_alt_name_type=$SUB_ALT_EMAIL`
+				fi
+				`uci set certificate.$newCertName.sub_alt_name="$subNameValue"`
+			else
+				`uci set certificate.$newCertName.sub_alt_name="-"`
+				`uci set certificate.$newCertName.sub_alt_name_type="-"`
+			fi
+			 `uci set certificate.$newCertName.is_ca_enabled=$CA_CERT`
+                        `uci set certificate.$newCertName.allow_export=0 > /dev/null 2>&1`
+                        `uci set certificate.$newCertName.source=2 > /dev/null 2>&1`
+                        `uci set certificate.$newCertName.useby="-" > /dev/null 2>&1`
+
+			key_enc_length=`cat /tmp/certOutput | grep Public-Key: | cut -d : -f 2 | cut -d "(" -f 2 | cut -d " " -f 1`
+
+			if [ -n "$key_enc_length" ];then
+				`uci set certificate.$newCertName.key_encryption="$key_enc_length"`
+			else
+				`uci set certificate.$newCertName.key_encryption="-"`
+			fi
+			rm -rf /tmp/certOutput
+		#}
+		fi
+		# Run the commands
+		if [ -n "$copyCertCmd" ];then
+			$copyCertCmd
+		fi
+		if [ -n "$copyKeyCmd" ];then
+			$copyKeyCmd
+		fi
+		if [ -n "$copyCaCert" ];then
+			$copyCaCert
+		fi
+		# Remove addtional fields.
+		`uci del certificate.$cert_name.format`
+		`uci del certificate.$cert_name.filename`
+		if [ "$cert_file_format" = $PKCS12 ];then
+			`uci del certificate.$cert_name.password`
+		fi
+
+		if [ "$cert" = "0" ];then
+			#Remove complete entry as we only have CA in the imported PKCS12 format file.
+			`uci delete certificate.$cert_name`
+		fi
+	#}
+	fi
+	# Do clean-up and commit the changes
+	rm -rf $TMP_CERTS_IN/*
+	uci commit certificate
+	if [ "$cert_name" != "" -a "$cert" != "0" ];then
+		$CERT_SCRIPT_OPSDB add $cert_name
+	fi
+	if [ "$newCertName" != "" ];then
+		$CERT_SCRIPT_OPSDB add $newCertName
+	fi
+	if [ "$CERT_NAME" != "" ];then
+		$CERT_SCRIPT_OPSDB del $CERT_NAME
+	fi
+	
+#}
+else
+	# Error : "Certificate with same name already exists."
+	echo "" > $TMP_UCI_FILE
+	rm -rf $TMP_CERTS_IN/*
+	logger -t system -p local0.error "Certificate import failed for $cert_name, empty certificate name."
+	exit 1
+fi
+}
+
+
+#Export Certificate
+
+export_certificate ()
+{
+        # Exporting a certificate require below arguments.
+        # 1 - Name of the certificate
+        # 2 - Type of certificate (0-local, 2-CSR, 1-CA)
+        # 3 - Download format (0-PEM, 1-PKCS12)
+        # 4 - Password (If Download format is PKCS12)
+        cert_name=`cat $TMP_UCI_FILE | grep "exported_certificate" | cut -d = -f1 | cut -d . -f2`
+        if [ -z "$cert_name" ];then
+                # Error : "Certificate name does not exists"
+                echo "" > $TMP_UCI_FILE
+                exit 1
+        fi
+	preinstalled_cert=`uci get certificate.$cert_name.preinstalled_cert`
+	#If the certificate is preinstalled certificate, then no need to check for format as all the preinstalled certs are 
+	# exported only in pem format.
+	if [ "$preinstalled_cert" = 1 ];then
+		cp -f $CERT_DIR/$cert_name.$CRT_EXT $TMP_CERTS_OUT/
+                echo "" > $TMP_UCI_FILE
+		exit 0
+	fi
+        check_cert=`ls $CERT_DIR | grep $cert_name.$PEM_EXT`
+        if [ -z "$check_cert" ];then
+                # Error : "Selecte Certificate does not exists"
+                echo "" > $TMP_UCI_FILE
+                exit 1
+        fi
+
+        cert_type=`uci get certificate.$cert_name.type`
+        cert_dl_format=$(uci get certificate.$cert_name.format)
+
+
+        # Delete old certificates if any.
+        rm -rf $TMP_CERTS_OUT/*
+
+        if [ "$cert_dl_format" = $EXPORT_PKCS12 ]; then
+                # PKCS12 format require a pass key
+                cert_password=`uci get certificate.$cert_name.password`
+        fi
+
+	if [ "$cert_type" = $LOCAL_CERT ];then  # local certificate
+	#{
+ 		# check if it is self signed cert or not.
+                signed_by=`uci get certificate.$cert_name.signed_by`
+
+                if [ "$signed_by" = 1 ];then #Self Signed
+		#{
+                        if [ "$cert_dl_format" = $EXPORT_PEM ];then # download in pem format
+                                cp -f $CERT_DIR/$cert_name.$PEM_EXT $TMP_CERTS_OUT/$cert_name.$PEM_EXT
+                        elif [ "$cert_dl_format" = $EXPORT_PKCS12 ];then # download in pkcs12 format
+                                `openssl pkcs12 -export -descert -password pass:$cert_password -nodes -inkey $KEY_DIR/$cert_name.$PEM_EXT -in $CERT_DIR/$cert_name.$PEM_EXT -out $TMP_CERTS_OUT/$cert_name.p12 > /dev/null 2>&1`
+
+                                if [ "$?" -ne 0 ];then
+                                        # Error : "Operation Failed"
+                                        echo "" > $TMP_UCI_FILE
+                                        rm -rf $TMP_CERTS_OUT/*
+                                        exit 1
+                                fi
+                        fi
+		#}
+                else # Signed by other (device Certificates)
+		#{
+			if [ "$cert_dl_format" = $EXPORT_PEM ];then # download in pem format
+				cp -f $CERT_DIR/$cert_name.$PEM_EXT $TMP_CERTS_OUT/$cert_name.$PEM_EXT
+			elif [ "$cert_dl_format" = $EXPORT_PKCS12 ];then # download in pkcs12 format along with private key and CA file
+				local CAFile issuer_hash status
+				issuer_hash=`openssl x509 -in $CERT_DIR/$cert_name.$PEM_EXT -noout -issuer_hash`
+				CAFile=`uci show certificate|grep $issuer_hash|cut -d '.' -f 2|head -n 1`
+				if [ -n "$CAFile" ]
+				then
+				#CA cert of the device device exist
+					`openssl pkcs12 -export -descert -password pass:$cert_password -nodes -inkey $KEY_DIR/$cert_name.$PEM_EXT -in $CERT_DIR/$cert_name.$PEM_EXT -certfile $CERT_DIR/$CAFile.$PEM_EXT  -out $TMP_CERTS_OUT/$cert_name.p12 >/dev/null 2>&1`
+					status=$?
+				else
+				#CA cert of the device device missing
+					`openssl pkcs12 -export -descert -password pass:$cert_password -nodes -inkey $KEY_DIR/$cert_name.$PEM_EXT -in $CERT_DIR/$cert_name.$PEM_EXT -out $TMP_CERTS_OUT/$cert_name.p12 >/dev/null 2>&1`
+					status=$?
+				fi
+
+				if [ "$status" -ne 0 ];then
+                                        # Error : "Operation Failed"
+					echo "" > $TMP_UCI_FILE
+					rm -rf $TMP_CERTS_OUT/*
+					exit 1
+				fi
+			fi
+		#}
+		fi
+	#}
+        elif [ "$cert_type" = $CSR ]; then #CSR
+	#{
+                # Can be downloaded only in pem format
+                cp -f $CERT_DIR/$cert_name.$PEM_EXT $TMP_CERTS_OUT/$cert_name.$PEM_EXT
+	#}
+	elif [ "$cert_type" = $CA_CERT ]; then #$CA
+	#{
+		if [ "$cert_dl_format" = $EXPORT_PEM ];then # download in pem format
+                	cp -f $CERT_DIR/$cert_name.* $TMP_CERTS_OUT/$cert_name.$PEM_EXT
+
+	       elif [ "$cert_dl_format" = $EXPORT_PKCS12 ];then
+		# download in pkcs12 format along with private key
+		#	`openssl pkcs12 -export -descert -password pass:$cert_password -nodes -inkey $KEY_DIR/$cert_name.$PEM_EXT -in $CERT_DIR/$cert_name.$PEM_EXT -out $TMP_CERTS_OUT/$cert_name.p12 >/dev/null 2>&1`
+		# As per issue PPSBR-1125 avoiding key file exporting
+			`openssl pkcs12 -export -descert -password pass:$cert_password -nodes -nokeys -in $CERT_DIR/$cert_name.$PEM_EXT -out $TMP_CERTS_OUT/$cert_name.p12 >/dev/null 2>&1`
+
+			if [ "$?" -ne 0 ];then
+	                	# Error : "Operation Failed"
+				echo "" > $TMP_UCI_FILE
+				rm -rf $TMP_CERTS_OUT/*
+                	        exit 1
+	                fi
+		fi
+	#}
+        fi
+
+        # Remove section from uci
+        echo "" > $TMP_UCI_FILE
+        exit 0
+}
+
+# Delete Certificate                                                                            
+delete_certificate () {                                                                         
+        # Deleting a certificate requires below arguments.                                      
+        # 1 - Name of the certificate                                                           
+        # 2 - Type of certificate (0-local, 1-CA 2-CSR)                                                                      
+        ret=0                                                                                   
+        cert_name=`cat $TMP_UCI_FILE | grep "delete_certificate" | cut -d = -f1 | cut -d . -f2`
+        if [ -z "$cert_name" ];then                                                             
+                # Error : "Certificate name does not exists"                                    
+                echo "" > $TMP_UCI_FILE                                                         
+                exit $ret                                                                       
+        fi                                                                                      
+        tmp_cert_type=`cat $TMP_UCI_FILE | grep "type=" | cut -d = -f2`                    
+        # Cleanup                                                                          
+        echo "" > $TMP_UCI_FILE                                                            
+	cert_type=`uci get certificate.$cert_name.type` > /dev/null 2>&1
+
+	`openssl x509 -in $CA_CERT_DIR/$cert_name.$PEM_EXT -noout -text > /tmp/certOutput 2>&1`
+	is_CA=`cat /tmp/certOutput | grep CA:TRUE`
+	if [ -n "$is_CA" ];then
+		#Delete soft link
+		HASH=`openssl x509 -hash -noout -in $CA_CERT_DIR/$cert_name.$PEM_EXT`
+		rm -f $CA_CERT_DIR/$HASH.0
+	fi
+	rm -f /tmp/certOutput
+
+        if [ -z "$cert_type" ];then                                                        
+                # CA Cert Case                                                             
+                cert_type=`uci get certificate.$cert_name$CA_CERT_EXT.type` >/dev/null 2>&1
+
+		#When cert_type can't be retrieved from uci certificate file then try to retrieve it from 
+		#uci preinstalled_certificate file
+		if [ -z "$cert_type" ]; then
+			cert_type=`uci get preinstalled_certificate.$cert_name.type` >/dev/null 2>&1
+                        if [ "$tmp_cert_type" = "'$cert_type'" ];then                        
+                                rm -rf $CA_CERT_DIR/$cert_name*        
+                                uci del preinstalled_certificate.$cert_name                 
+				uci commit preinstalled_certificate
+				exit 0
+			fi
+		fi
+                if [ -n "$cert_type" ];then                                                
+                        if [ "$tmp_cert_type" = "$cert_type" ];then                        
+                                rm -rf $CA_CERT_DIR/$cert_name$CA_CERT_EXT.$PEM_EXT        
+                                uci del certificate.$cert_name$CA_CERT_EXT                 
+                        else                                                               
+                                ret=1                                                      
+                        fi                                                         
+                else                                                               
+                        ret=1                                                      
+                fi                                                                 
+        else                                                                               
+                # First check if we are deleting correct certificate               
+                if [ -z "$tmp_cert_type" ];then                                    
+                        rm -rf $CERT_DIR/$cert_name.$PEM_EXT                       
+			rm -rf $KEY_DIR/$cert_name.$PEM_EXT                                
+                        uci del certificate.$cert_name                                          
+                fi                                                                        
+        fi                                                                                
+	uci commit certificate
+	$CERT_SCRIPT_OPSDB del $cert_name	
+        exit $ret
+}                               

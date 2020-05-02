@@ -1,0 +1,12 @@
+
+config igmpproxy
+	option quickleave '0'
+
+config igmp 'status'
+	option enable '0'
+	option mode 'Auto'
+
+config phyint 'vlan1'
+	option network 'vlan1'
+	option direction 'downstream'
+

@@ -1,0 +1,213 @@
+diff -rauN a/pppd/chap-new.c b/pppd/chap-new.c
+--- a/pppd/chap-new.c	2016-05-20 14:49:47.596430030 +0530
++++ b/pppd/chap-new.c	2016-05-23 16:30:39.223353043 +0530
+@@ -51,9 +51,9 @@
+ int (*chap_verify_hook)(char *name, char *ourname, int id,
+ 			struct chap_digest_type *digest,
+ 			unsigned char *challenge, unsigned char *response,
+-			char *message, int message_space,char *group) = NULL;
++			char *message, int message_space,char *group[]) = NULL;
+ 
+-int (*chap_authorisation_hook) __P((char *user,char *ourname,char *group)) = NULL;
++int (*chap_authorisation_hook) __P((char *user,char *ourname,char *group[])) = NULL;
+ #else
+ /* Hook for a plugin to validate CHAP challenge */
+ int (*chap_verify_hook)(char *name, char *ourname, int id,
+@@ -325,7 +325,7 @@
+ 		unsigned char *, unsigned char *, char *, int);
+ 	char rname[MAXNAMELEN+1];
+ #ifdef USE_PAM
+-    char radius_group[256] = {'\0'};
++    	char *radius_group[256] = {'\0'};
+ #endif
+ 	if ((ss->flags & LOWERUP) == 0)
+ 		return;
+@@ -362,7 +362,7 @@
+ #ifdef USE_PAM
+              ok = (*chap_verify_hook)(name, ss->name, id, ss->digest,
+                    ss->challenge + PPP_HDRLEN + CHAP_HDRLEN,
+-                   response, ss->message, sizeof(ss->message),radius_group);
++                   response, ss->message, sizeof(ss->message), radius_group);
+ #else
+ 
+ 		if (chap_verify_hook)
+@@ -408,7 +408,7 @@
+ 		     */
+ #ifdef USE_PAM
+          if (chap_authorisation_hook &&
+-                 (*chap_authorisation_hook)(name,our_name,radius_group) == 0)
++                 (*chap_authorisation_hook)(name,our_name, radius_group) == 0)
+             {
+               ss->flags |= AUTH_FAILED;
+               warn("Peer %q failed CHAP Session verification", name);
+diff -rauN a/pppd/chap-new.h b/pppd/chap-new.h
+--- a/pppd/chap-new.h	2016-05-23 17:33:24.466392415 +0530
++++ b/pppd/chap-new.h	2016-05-23 11:13:12.509005377 +0530
+@@ -116,9 +116,9 @@
+ extern int (*chap_verify_hook)(char *name, char *ourname, int id,
+ 			struct chap_digest_type *digest,
+ 			unsigned char *challenge, unsigned char *response,
+-			char *message, int message_space,char *group);
++			char *message, int message_space,char *group[]);
+ 
+-extern int (*chap_authorisation_hook) __P((char *user,char *ourname,char *group));
++extern int (*chap_authorisation_hook) __P((char *user,char *ourname,char *group[]));
+ #else
+ /* Hook for a plugin to validate CHAP challenge */
+ extern int (*chap_verify_hook)(char *name, char *ourname, int id,
+diff -rauN a/pppd/plugins/authorize/authorize.c b/pppd/plugins/authorize/authorize.c
+--- a/pppd/plugins/authorize/authorize.c	2016-05-20 14:47:20.370280913 +0530
++++ b/pppd/plugins/authorize/authorize.c	2016-05-23 16:26:35.002423316 +0530
+@@ -11,6 +11,7 @@
+ #include <stdio.h>
+ #include <errno.h>
+ #include <string.h>
++#include <syslog.h>
+ #include <unistd.h>
+ #include <malloc.h>
+ 
+@@ -30,9 +31,9 @@
+         return 1;
+ }
+ 
+-static int authorize (char *user,char *service,char *group)
++static int authorize (char *user,char *service, char *group[])
+ {
+-  int retval;
++  int retval, index=0;
+   struct sockaddr_in addr;
+   int rsock;
+   int action;
+@@ -63,24 +64,38 @@
+             return 0;
+           }
+ 
+-
+-       retval = cdb_get_enum_value(rsock, &action,
+-                      "/nacm:nacm/nacm:rule-list{%s}/feature-rule{%s}/action",group,confd_service);
+-       if(retval != CONFD_OK)
+-         {
+-           cdb_close(rsock);
+-           return 0;
+-         }
+-       if(action == 0)
+-         {
+-           cdb_close(rsock);
+-           return 1;
+-         }
+-       else
+-         {
+-          cdb_close(rsock);
+-          return 0;
+-         }
++       do 
++       {
++          if (cdb_get_enum_value(rsock, &action,
++                "/nacm:nacm/nacm:rule-list{%s}/feature-rule{%s}/action",
++                 group[index], confd_service) == CONFD_OK)
++          {
++             if(action == 0)
++              {
++                syslog(LOG_INFO, "Authentication success for group=%s",group[index]);
++                cdb_close(rsock);
++        	while(group[index] != NULL && strlen(group[index])!=0)
++                {
++                  free(group[index]);
++                }
++                return 1;
++              }
++             else
++              {
++                syslog(LOG_INFO, "Authentication failed for group=%s",group[index]);
++              }
++          }
++          else
++          {
++             syslog(LOG_WARNING, "Service not enabled on Group %s.",group[index]);
++          }
++          free(group[index]);
++          index++;
++        } while(group[index] != NULL && strlen(group[index])!=0);
++
++     syslog(LOG_ERR, "Authentication failed.");
++     cdb_close(rsock);
++     return 0;
+ 
+ }
+ 
+diff -rauN a/pppd/plugins/radius/radius.c b/pppd/plugins/radius/radius.c
+--- a/pppd/plugins/radius/radius.c	2016-05-20 14:48:54.545096975 +0530
++++ b/pppd/plugins/radius/radius.c	2016-05-23 16:33:18.525350346 +0530
+@@ -82,7 +82,7 @@
+                           struct chap_digest_type *digest,
+                           unsigned char *challenge,
+                           unsigned char *response,
+-                          char *message, int message_space,char *group);
++                          char *message, int message_space, char *group[]);
+ #else
+ static int radius_chap_verify(char *user, char *ourname, int id,
+ 			      struct chap_digest_type *digest,
+@@ -373,7 +373,7 @@
+ radius_chap_verify(char *user, char *ourname, int id,
+                    struct chap_digest_type *digest,
+                    unsigned char *challenge, unsigned char *response,
+-                   char *message, int message_space, char *group)
++                   char *message, int message_space, char *group[])
+ #else
+ static int
+ radius_chap_verify(char *user, char *ourname, int id,
+@@ -534,11 +534,45 @@
+     }
+ 
+ #ifdef USE_PAM
++#define MAX_GROUPS_SUPPORTED 255
++    unsigned int group_index = 0;
++    while (received) {
++	if (received->vendorcode == VENDOR_NONE) {
++	    switch (received->attribute) {
++
++	    case PW_CLASS:
++		if (received->lvalue <= MAXCLASSLEN) {
++
++                   group[group_index] = (char *)  calloc(1, strlen(received->strvalue)+1);
++                   strcpy(group[group_index], received->strvalue);
++                   group_index++;
++		}
++		break;
++
++            default:
++	        break;
++	    }
++            if (group_index == MAX_GROUPS_SUPPORTED)
++            {
++		syslog(LOG_ERR, "Reached max groups supported.");
++	      break;
++            }
++	}
++	received = received->next;
++    }
++    if (rstate.class == NULL)
++    {
++        group[group_index] = (char *)  calloc(1, strlen("default")+1);
++        strcpy(group[group_index],"default");
++    }
++#if 0
+     if (rstate.class != NULL)
+-        strcpy(group,rstate.class);
++        strcpy(group, rstate.class);
+     else
+         strcpy(group,"default");
+ #endif
++     
++#endif
+     rc_avpair_free(received);
+     rc_avpair_free (send);
+     log_user_accounting(user);
+@@ -679,6 +713,7 @@
+ 		if (vp->lvalue <= MAXCLASSLEN) {
+ 		    rstate.class_len=vp->lvalue;
+ 		    memcpy(rstate.class, vp->strvalue, rstate.class_len);
++
+ 		} /* else too big for our buffer - ignore it */
+ 		break;
+ 	    }

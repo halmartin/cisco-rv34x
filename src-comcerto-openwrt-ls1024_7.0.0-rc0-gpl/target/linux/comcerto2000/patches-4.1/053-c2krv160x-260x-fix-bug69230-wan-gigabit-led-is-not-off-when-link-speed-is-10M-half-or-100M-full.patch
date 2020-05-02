@@ -1,0 +1,13 @@
+# 2017-05-04: harry.lin <harry.lin@deltaww.com>
+# fix bug69230 wan gigabit led is not off when link speed is 10M half or 100M full
+--- linux-4.1.8/drivers/net/phy/broadcom.c.org	2017-05-04 19:24:09.617545578 +0800
++++ linux-4.1.8/drivers/net/phy/broadcom.c	2017-05-04 19:40:19.050671383 +0800
+@@ -254,6 +254,8 @@
+ 		phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
+ 		phy_write(phydev, 0x1e, 0x23e);
+ 		phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) | (1 << 1)));
++		phy_write(phydev, 0x1e, 0x12);
++		phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) | (6 << 0)));
+ 	}
+ 
+ 	return 0;

@@ -1,0 +1,74 @@
+#!/bin/sh
+
+
+UTILITY_NAME="/tmp/utility-ping"
+PING_UTILITY=
+counter=0
+
+count=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "echo-count") {print $(I+1)};}'`
+size=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "size") {print $(I+1)};}'`
+ttl=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "ttl") {print $(I+1)};}'`
+timeout=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "timeout") {print $(I+1)};}'`
+version=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "ip-version") {print $(I+1)};}'`
+target=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "target") {print $(I+1)};}'`
+
+if [ -n "$version" ];then
+	if [ "$version" = "ipv4" ];then
+		PING_UTILITY=ping	
+	else
+		PING_UTILITY=ping6
+	fi
+else
+	value=`echo $target | egrep "(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))"`
+	if [ -n "$value" ];then
+		PING_UTILITY=ping6
+	else
+		PING_UTILITY=ping
+	fi
+fi
+
+PING_COMMAND=$PING_UTILITY
+if [ -z "$count" ];then
+	count=4
+fi
+PING_COMMAND=$PING_COMMAND" -c "$count
+
+if [ -n "$size" ];then
+	PING_COMMAND=$PING_COMMAND" -s "$size
+fi
+
+
+if [ -n "$ttl" ];then
+	if [ "$PING_UTILITY" = "ping" ];then
+		PING_COMMAND=$PING_COMMAND" -t "$ttl
+	fi
+fi
+
+
+if [ -n "$timeout" ];then
+	if [ "$PING_UTILITY" = "ping" ];then
+		PING_COMMAND=$PING_COMMAND" -w "$timeout
+	fi
+fi
+
+PING_COMMAND=$PING_COMMAND" "$target
+# Prepare Output
+$PING_COMMAND &> $UTILITY_NAME
+errcode=$?
+
+job_id=$(ps | grep ping | grep $target | sed s/"^ *"//g | cut -f 1 -d ' ')
+
+if [ -z "$job_id" ]; then
+	job_id=`awk -vmin=1000 -vmax=2000 'BEGIN{srand(); print int(min+rand()*(max-min+1))}'`
+fi
+
+outfile="$UTILITY_NAME"_"$job_id"
+
+	cp -f $UTILITY_NAME $outfile
+	echo "job-id \"$job_id\""
+
+if [ "$errcode" -ne 0 ];then
+	exit $errcode
+else
+	exit 0
+fi

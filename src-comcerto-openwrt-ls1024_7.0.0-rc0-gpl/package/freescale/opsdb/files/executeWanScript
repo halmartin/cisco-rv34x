@@ -1,0 +1,31 @@
+#!/bin/sh
+
+i=1
+total=0
+tmp=0
+# Decide the end limit based on total number of interfaces. For every 10 sections in network file, we add 1 minute.
+totalIface=`uci show network | grep =interface | wc -l`
+
+while [ $tmp -lt $totalIface ]
+do
+	tmp=$((tmp+10))
+	total=$((total+1))
+done
+
+total=$((total-1))
+
+logger -t opsdb -p local0.crit "total=$total"
+
+sh /usr/bin/wanscript
+
+while [ $i -le $total ]
+do
+	sleep 60
+	logger -t opsdb -p local0.crit "executing $i time"
+	sh /usr/bin/wanscript
+	i=$((i+1))
+done
+
+cp -f /usr/bin/wanscript /etc/hotplug.d/iface/95-wanscript
+chmod +x /etc/hotplug.d/iface/95-wanscript
+

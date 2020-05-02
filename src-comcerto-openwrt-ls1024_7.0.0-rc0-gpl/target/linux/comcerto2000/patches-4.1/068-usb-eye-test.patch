@@ -1,0 +1,21 @@
+diff -rauN a/drivers/usb/dwc_otg/dwc_otg_driver.c b/drivers/usb/dwc_otg/dwc_otg_driver.c
+--- a/drivers/usb/dwc_otg/dwc_otg_driver.c	2017-09-25 11:52:43.395821755 +0530
++++ b/drivers/usb/dwc_otg/dwc_otg_driver.c	2017-09-25 11:48:30.898996070 +0530
+@@ -566,6 +566,7 @@
+ 
+ #define COMCERTO_USB0_PHY_CTRL_REG0 	(COMCERTO_DWC1_CFG_BASE + 0x000)
+ #define COMCERTO_USB0_DWC_CFG_REGF 		(USB2_PHY_BASE + 0x03C)
++#define COMCERTO_USB_EYE_TEST 		(COMCERTO_DWC1_CFG_BASE + 0x004)
+ 
+ 
+ 		/* take device out of reset , enable clock. */
+@@ -597,6 +598,9 @@
+ 		rd_data = readl(COMCERTO_USB0_DWC_CFG_REGF);
+ 		rd_data = ((rd_data & 0xFFFFFFF0)| 0x0);
+ 		writel (rd_data, COMCERTO_USB0_DWC_CFG_REGF);
++
++		// USB eye test command
++                writel (0x31331441, COMCERTO_USB_EYE_TEST);
+ }
+ 
+ 

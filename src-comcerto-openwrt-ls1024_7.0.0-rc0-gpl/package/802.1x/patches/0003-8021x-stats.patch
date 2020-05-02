@@ -1,0 +1,112 @@
+diff -aurN a/src/source/eapol_sm.c c/src/source/eapol_sm.c
+--- a/src/source/eapol_sm.c	2016-02-19 12:06:26.805445972 +0530
++++ c/src/source/eapol_sm.c	2016-02-19 12:14:54.321437274 +0530
+@@ -48,6 +48,9 @@
+ 	DBGPRINT(RT_DEBUG_ERROR,"IEEE 802.1X: " MACSTR " " #machine " entering state " #_state \
+ 		"\n", MAC2STR(sm->sta->addr));
+ 
++#define SM_STATS_ENTRY(_data) \
++sm_stats_entry(sm->sta->aid,sm->_data.state)\
++
+ #define SM_ENTER(machine, state) sm_ ## machine ## _ ## state ## _Enter(sm)
+ 
+ #define SM_STEP(machine) \
+@@ -55,6 +58,26 @@
+ 
+ #define SM_STEP_RUN(machine) sm_ ## machine ## _Step(sm)
+ 
++/* This function is to write state of the current port so as to get run time stats */
++void sm_stats_entry( int aid, int state) {
++
++	char str[200];
++        FILE *fp = NULL;
++	
++	sprintf(str, "echo %d > /tmp/stats/dot1x_port%d ",state,aid);
++        fp = popen(str,"r");
++
++	if(fp == NULL)
++        {
++                DBGPRINT(RT_DEBUG_TRACE,"FAILED to write 802.1x state of  port %d on switch\n",aid);
++                return;
++        }
++        else
++        	pclose(fp);
++
++}
++
++
+ /* Port Timers state machine - implemented as a function that will be called
+  * once a second as a registered event loop timeout */
+ 
+@@ -84,6 +107,7 @@
+ SM_STATE(AUTH_PAE, INITIALIZE)
+ {
+ 	SM_ENTRY(AUTH_PAE, INITIALIZE, auth_pae);
++	SM_STATS_ENTRY(auth_pae);
+ 	sm->currentId = 1;
+ 	sm->auth_pae.portMode = Auto;
+ }
+@@ -98,6 +122,7 @@
+ 		sm->auth_pae.authEapLogoffsWhileConnecting++;
+ 
+ 	SM_ENTRY(AUTH_PAE, DISCONNECTED, auth_pae);
++	SM_STATS_ENTRY(auth_pae);
+ 
+ 	sm->portStatus = Unauthorized;
+ 	setPortUnauthorized();
+@@ -137,6 +162,7 @@
+ 	}
+ 
+ 	SM_ENTRY(AUTH_PAE, CONNECTING, auth_pae);
++	SM_STATS_ENTRY(auth_pae);
+ 
+ #ifdef CONFIG_RV34X_8021X
+ 	/* don't send second identity packet to group mac */
+@@ -181,6 +207,7 @@
+ 		sm->auth_pae.authAuthFailWhileAuthenticating++;
+ 
+ 	SM_ENTRY(AUTH_PAE, HELD, auth_pae);
++	SM_STATS_ENTRY(auth_pae);
+ 
+ 	sm->portStatus = Unauthorized;
+ 	setPortUnauthorized();
+@@ -197,6 +224,7 @@
+ 		sm->auth_pae.authAuthSuccessesWhileAuthenticating++;
+ 							
+ 	SM_ENTRY(AUTH_PAE, AUTHENTICATED, auth_pae);
++	SM_STATS_ENTRY(auth_pae);
+ 
+ 	sm->portStatus = Authorized;
+ 	setPortAuthorized();
+@@ -213,6 +241,7 @@
+ 
+ 	DBGPRINT(RT_DEBUG_INFO,"AUTHENTICATING STATE:: STAID %d\n",sm->sta->aid);
+ 	SM_ENTRY(AUTH_PAE, AUTHENTICATING, auth_pae);
++	SM_STATS_ENTRY(auth_pae);
+ 
+ 	sm->authSuccess = FALSE;
+ 	sm->authFail = FALSE;
+@@ -235,6 +264,7 @@
+ 	}
+ 
+ 	SM_ENTRY(AUTH_PAE, ABORTING, auth_pae);
++	SM_STATS_ENTRY(auth_pae);
+ 
+ 	sm->authAbort = TRUE;
+ 	sm->currentId++;
+@@ -244,6 +274,7 @@
+ SM_STATE(AUTH_PAE, FORCE_AUTH)
+ {
+ 	SM_ENTRY(AUTH_PAE, FORCE_AUTH, auth_pae);
++	SM_STATS_ENTRY(auth_pae);
+ 
+ 	sm->portStatus = Authorized;
+ 	setPortAuthorized();
+@@ -257,6 +288,7 @@
+ SM_STATE(AUTH_PAE, FORCE_UNAUTH)
+ {
+ 	SM_ENTRY(AUTH_PAE, FORCE_UNAUTH, auth_pae);
++	SM_STATS_ENTRY(auth_pae);
+ 
+ 	sm->portStatus = Unauthorized;
+ 	setPortUnauthorized();

@@ -1,0 +1,32 @@
+#!/bin/sh
+# Copyright (C) 2006-2010 OpenWrt.org
+
+export HOTPLUG_TYPE="$1"
+
+. /lib/functions.sh
+
+PATH=/bin:/sbin:/usr/bin:/usr/sbin
+LOGNAME=root
+USER=root
+export PATH LOGNAME USER
+export DEVICENAME="${DEVPATH##*/}"
+
+taskset -p 2 $$ 2>&- >&-
+
+[ "$1" == "iface" ] && {
+	if [ -n "$(echo $DEVICE | grep ppoe-wan)" ] || [ -n "$(echo $DEVICE | grep pptp-wan)" ] || [ -n "$(echo $DEVICE | grep l2tp-wan)" ] || [ -n "$(echo $DEVICE | grep 3g-usb)" ]
+	then
+		[ -n "$(ifconfig $DEVICE | grep inet | cut -f 2 -d ':' | cut -f 1 -d ' ' | grep "10.64.64.")" ] &&
+		[ -n "$(ifconfig $DEVICE | grep inet | cut -f 3 -d ':' | cut -f 1 -d ' ' | grep "10.112.112.")" ] && {
+			. /etc/hotplug.d/iface/15-mwan3
+			. /etc/hotplug.d/iface/92-ppp-demand-mode
+			exit 0
+		}
+	fi
+}
+
+[ \! -z "$1" -a -d /etc/hotplug.d/$1 ] && {
+	for script in $(ls /etc/hotplug.d/$1/* 2>&-); do (
+		[ -f $script ] && . $script
+	); done
+}

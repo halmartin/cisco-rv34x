@@ -1,0 +1,527 @@
+diff -Naur vapi-2.18.3/VAPI/common/vapi/connection_itf.c vapi-2.18.3.new/VAPI/common/vapi/connection_itf.c
+--- vapi-2.18.3/VAPI/common/vapi/connection_itf.c	2011-05-10 18:26:55.000000000 +0300
++++ vapi-2.18.3.new/VAPI/common/vapi/connection_itf.c	2016-09-18 19:58:03.969487615 +0300
+@@ -22,6 +22,9 @@
+ #include "appitf.h"
+ #include "cfg.h"
+ #include "msp.h"
++#include "comcerto-ipv6-types.h"
++#include "comcerto-ethernet-interface-types.h"
++#include <linux/if_ether.h>	/* for ETH_P_IPV6 ETH_P_IPV6 */
+ 
+ extern SToneGenParams astDtmfToneGenParams_g[];
+ extern SAVLTree *pstResTree_g;
+@@ -3527,6 +3530,279 @@
+ 	return Status;
+ }
+ 
++/***************************************************************************
++ * VAPI_SetConnIPv6EthMac: The function does the following things -
++ ***************************************************************************/
++/*!
++*	\n \b Description: \n
++*	This function passes the Ethernet source and destination MAC address to the specified connection ID.\n
++*	\n
++*	<table style="text-align: left; width: 640px" border="0" cellpadding="2" cellspacing="0">
++*	<tr>
++*		<td style="vertical-align: top;">uiID</td>
++*		<td style="vertical-align: top;">Connection ID.</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">paucSrcMacAddr</td>
++*		<td style="vertical-align: top;">Source MAC Address in Ethernet frame header (Big-endian).</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">paucDestMacAddr</td>
++*		<td style="vertical-align: top;">Destination MAC address in Ethernet frame header (Big-endian).</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">pstRequest</td>
++*		<td style="vertical-align: top;">If NULL then the call is in blocking mode (synchronous).</td>
++*	</tr>
++*	</table>
++*
++*	\b Returns: \n
++*	\li SUCCESS or VAPI_ERR_PENDING
++*	\li VAPI_ERR_LIB_NOT_INITIALIZED
++*	\li VAPI_ERR_INVALID_DEVID
++*	\li VAPI_ERR_DEV_IS_NOT_UP
++*	\li VAPI_ERR_NOMEM
++*	\li VAPI_ERR_NULL_POINTER_PASSED
++*	\li VAPI_ERR_INVALID_PARAM
++*
++*	\n \b Usage:
++*	\include set_ip.c
++*
++*/
++VSTATUS VAPI_SetConnIPv6EthMac(IN CONNID ConnId, IN U8 * paucSrcMacAddr, IN U8 * paucDestMacAddr, IN SRequest * pstRequest)
++{
++	VSTATUS				status  = 1;
++	void				*message;
++	struct _SET_ETH_HDR	eth_hdr;
++	U8					device_response [DEFAULT_FIFO_MAX_SIZE];
++	U32					response_len = DEFAULT_FIFO_MAX_SIZE;
++	
++	// allocate a message
++	message = VAPI_AllocateMessage(DEFAULT_FIFO_MAX_SIZE);
++	if (message == NULL) {
++		status = VAPI_ERR_NOMEM;
++		return -1;
++	}
++	
++	// prepare the ethernet header for IPv6 operation
++	memset(&eth_hdr, 0x00, sizeof(struct _SET_ETH_HDR));
++	eth_hdr.param_4.bits.protocol = SET_ETH_HDR_PROTOCOL_IP_V6;
++	eth_hdr.param_4.bits.action = SET_ETH_HDR_ACTION_REGISTER;
++	memcpy(&(eth_hdr.assignedmac), paucSrcMacAddr, 6);
++	memcpy(&(eth_hdr.hostmac), paucDestMacAddr, 6);
++	eth_hdr.type = htons(ETH_P_IPV6);
++	
++	// set the ETH_HDR for IPv6
++	status = VAPI_SetMessageFromBuffer( message, 
++										CMD_CLASS_CONF_CHANNEL, 
++										CMD_TYPE_CONF_CHANGE, 
++										FC_SET_ETH_HDR_CHAN, 
++										8, 
++										(U16 *)&eth_hdr);
++	if(status != SUCCESS)
++		goto err;
++	
++	// send the ETH_HDR for IPv6
++	status = VAPI_SendConnectionMessage(ConnId, 
++										(SMsg *)message, 
++										NULL, 
++										device_response, 
++										&response_len);
++	err:
++		VAPI_FreeMessage(message);
++	
++	return status;
++}
++
++/***************************************************************************
++ * VAPI_SetIPConnMode: The function does the following things -
++ ***************************************************************************/
++/*!
++*	\n \b Description: \n
++*	This function passes required IPv4 or IPv6 mode to the specified connection ID.\n
++*	\n
++*	<table style="text-align: left; width: 640px" border="0" cellpadding="2" cellspacing="0">
++*	<tr>
++*		<td style="vertical-align: top;">uiID</td>
++*		<td style="vertical-align: top;">Connection ID.</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">Mode</td>
++*		<td style="vertical-align: top;">Connection IP Mode.\n
++* 		Valid values are:\n
++*  		- eChanIpMode_IPv4
++*  		- eChanIpMode_IPv6
++*		</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">pstRequest</td>
++*		<td style="vertical-align: top;">If NULL then the call is in blocking mode (synchronous).</td>
++*	</tr>
++*	</table>
++*
++*	\b Returns: \n
++*	\li SUCCESS or VAPI_ERR_PENDING
++*	\li VAPI_ERR_LIB_NOT_INITIALIZED
++*	\li VAPI_ERR_INVALID_DEVID
++*	\li VAPI_ERR_DEV_IS_NOT_UP
++*	\li VAPI_ERR_NOMEM
++*	\li VAPI_ERR_NULL_POINTER_PASSED
++*	\li VAPI_ERR_INVALID_PARAM
++*
++*	\n \b Usage:
++*	\include set_ip.c
++*
++*/
++VSTATUS VAPI_SetIPConnMode(IN CONNID ConnId, IN EChanIpMode Mode, IN SRequest * pstRequest)
++{
++	int status;
++	void *message;
++	U32 response_len = DEFAULT_FIFO_MAX_SIZE;
++	U8 device_response [DEFAULT_FIFO_MAX_SIZE];
++	
++	// allocate a message
++	message = VAPI_AllocateMessage(DEFAULT_FIFO_MAX_SIZE);
++	if (message == NULL) {
++		status = VAPI_ERR_NOMEM;
++		return -1;
++	}
++	
++	if ((Mode != eChanIpMode_IPv4) && (Mode != eChanIpMode_IPv6)) {
++		status = VAPI_ERR_INVALID_PARAM;
++		return -1;
++	}
++	
++	// add the command channel mode to the message (IPV6)
++	status = VAPI_SetMessage(	message, 
++								CMD_CLASS_CONF_CHANNEL, 
++								CMD_TYPE_CONF_CHANGE, 
++								FC_SET_CHANNEL_IP_MODE, 
++								1, 
++								(U16 *) Mode);
++	if(status != SUCCESS)
++		goto err;
++	
++	// send the command to the device, the response is stored in device_response
++	status = VAPI_SendConnectionMessage(ConnId, 
++									(SMsg *)message, 
++									NULL, 
++									device_response, 
++									&response_len);
++	err:
++		VAPI_FreeMessage(message);
++	
++	return status;
++}
++
++/***************************************************************************
++ * VAPI_SetConnIPv6Header: The function does the following things -
++ ***************************************************************************/
++/*!
++*	\n \b Description: \n
++*	Sets the source and destination IP addresses and UDP ports to the specified connection ID.\n
++*	\n
++*	<table style="text-align: left; width: 640px" border="0" cellpadding="2" cellspacing="0">
++*	<tr>
++*		<td style="vertical-align: top;">uiID</td>
++*		<td style="vertical-align: top;">Connection ID.</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">ipv6_src_addr</td>
++*		<td style="vertical-align: top;">IPv6 source address.</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">ipv6_dst_addr</td>
++*		<td style="vertical-align: top;">IPv6 destination address.</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">src_udp</td>
++*		<td style="vertical-align: top;">UDP source port.</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">dst_udp</td>
++*		<td style="vertical-align: top;">UDP destination port.</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">pstRequest</td>
++*		<td style="vertical-align: top;">If NULL then the call is in blocking mode (synchronous).</td>
++*	</tr>
++*	</table>
++*
++*	\b Returns: \n
++*	\li SUCCESS or VAPI_ERR_PENDING
++*	\li VAPI_ERR_LIB_NOT_INITIALIZED
++*	\li VAPI_ERR_INVALID_DEVID
++*	\li VAPI_ERR_DEV_IS_NOT_UP
++*	\li VAPI_ERR_NOMEM
++*	\li VAPI_ERR_NULL_POINTER_PASSED
++*	\li VAPI_ERR_INVALID_PARAM
++*
++*	\n \b Usage:
++*	\include set_ip.c
++*
++*/
++VSTATUS VAPI_SetConnIPv6Header(IN CONNID ConnId, 
++										IN U8 *ipv6_src_addr, 
++										IN U8 *ipv6_dst_addr, 
++										IN U16 src_udp, 
++										IN U16 dst_udp, 
++										IN SRequest * pstRequest)
++{
++	int status;
++	struct _SET_IPV6_HDR_CHANNEL ipv6_hdr;
++	void *message;
++	U32 response_len = DEFAULT_FIFO_MAX_SIZE;
++	U8 device_response [DEFAULT_FIFO_MAX_SIZE];
++	
++	// allocate a message
++	message = VAPI_AllocateMessage(DEFAULT_FIFO_MAX_SIZE);
++	if (message == NULL) {
++		status = VAPI_ERR_NOMEM;
++		return -1;
++	}
++	
++	memset(&ipv6_hdr, 0, sizeof(struct _SET_IPV6_HDR_CHANNEL));
++	ipv6_hdr.param_4.bits.serviceid = SET_IPV6_HDR_CHANNEL_SERVICEID_DEFAULTPKT;
++	// Traffic class bit 0:3, version, flow label bits 0:3, traffic class bit 4:7
++	ipv6_hdr.param_5.word = 0x0060;
++	// flow label bits 4:11 & 12:19
++	ipv6_hdr.param_6.word = 0x0000;
++	// len (overwritten)
++	ipv6_hdr.payload_len = 0x0000;
++	ipv6_hdr.param_8.bits.next_header_id = 0x11;
++	ipv6_hdr.param_8.bits.hop_limit = 0x80;
++	
++	memcpy(&ipv6_hdr.ipv6_src_15_0, ipv6_src_addr, 16);
++	memcpy(&ipv6_hdr.ipv6_dst_15_0, ipv6_dst_addr, 16);
++	
++	// set UDP ports
++	ipv6_hdr.uh_sport = htons(src_udp);
++	ipv6_hdr.uh_dport = htons(dst_udp);
++	
++	ipv6_hdr.uh_ulen = 0x0000;
++	ipv6_hdr.uh_sum = 0x0000;
++	
++	// Add the IPv6 header to the command
++	status = VAPI_SetMessageFromBuffer( message, 
++										CMD_CLASS_CONF_CHANNEL, 
++										CMD_TYPE_CONF_CHANGE, 
++										FC_SET_IP_HDR_CHANNEL, 
++										sizeof(struct _SET_IPV6_HDR_CHANNEL)/2, 
++										(U16 *)&ipv6_hdr);
++	if(status != SUCCESS)
++		goto err;
++
++	// send the command to the device, the response is stored in device_response
++	status = VAPI_SendConnectionMessage(ConnId, 
++										(SMsg *)message, 
++										NULL, 
++										device_response, 
++										&response_len);
++	err:
++		VAPI_FreeMessage(message);
++	
++	return status;
++}
+ 
+ /***************************************************************************
+  * VAPI_TranscodingSession: The function does the following things -
+diff -Naur vapi-2.18.3/VAPI/common/vapi/device_itf.c vapi-2.18.3.new/VAPI/common/vapi/device_itf.c
+--- vapi-2.18.3/VAPI/common/vapi/device_itf.c	2011-03-30 16:51:01.000000000 +0300
++++ vapi-2.18.3.new/VAPI/common/vapi/device_itf.c	2016-09-18 20:00:11.395853848 +0300
+@@ -22,6 +22,7 @@
+ #include "cfg.h"
+ #include "msp.h"
+ #include "resmgr.h"
++#include <linux/if_ether.h>	/* for ETH_P_IPV6 ETH_P_IPV6 */
+ 
+ extern Boolean bVapiInitialized_g;
+ /*Global Definitions*/
+@@ -1405,6 +1406,91 @@
+ }
+ 
+ /***************************************************************************
++ * VAPI_SetDeviceIPv6EthMac: The function does the following things -
++ ***************************************************************************/
++/*!
++*	\n \b Description: \n
++*	This function passes the Ethernet source and destination MAC address of a Comcerto device to MSP.\n
++*	This function must be called before setting up a connection.\n
++*	\n
++*	<table style="text-align: left; width: 640px" border="0" cellpadding="2" cellspacing="0">
++*	<tr>
++*		<td style="vertical-align: top;">uiID</td>
++*		<td style="vertical-align: top;">Device / Connection ID.</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">paucSrcMacAddr</td>
++*		<td style="vertical-align: top;">Source MAC Address in Ethernet frame header (Big-endian).</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">paucDestMacAddr</td>
++*		<td style="vertical-align: top;">Destination MAC address in Ethernet frame header (Big-endian).</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">pstRequest</td>
++*		<td style="vertical-align: top;">If NULL then the call is in blocking mode (synchronous).</td>
++*	</tr>
++*	</table>
++*
++*	\b Returns: \n
++*	\li SUCCESS or VAPI_ERR_PENDING
++*	\li VAPI_ERR_LIB_NOT_INITIALIZED
++*	\li VAPI_ERR_INVALID_DEVID
++*	\li VAPI_ERR_DEV_IS_NOT_UP
++*	\li VAPI_ERR_NOMEM
++*	\li VAPI_ERR_NULL_POINTER_PASSED
++*	\li VAPI_ERR_INVALID_PARAM
++*
++*	\n \b Usage:
++*	\include set_ip.c
++*
++*/
++VSTATUS VAPI_SetDeviceIPv6EthMac(IN U32 uiID, IN U8 * paucSrcMacAddr, IN U8 * paucDestMacAddr, IN SRequest * pstRequest)
++{
++	VSTATUS				status  = 1;
++	void				*message;
++	struct _SET_ETH_HDR	eth_hdr;
++	U8					device_response [DEFAULT_FIFO_MAX_SIZE];
++	U32					response_len = DEFAULT_FIFO_MAX_SIZE;
++	
++	// allocate a message
++	message = VAPI_AllocateMessage(DEFAULT_FIFO_MAX_SIZE);
++	if (message == NULL) {
++		status = VAPI_ERR_NOMEM;
++		return -1;
++	}
++	
++	// prepare the ethernet header for IPv6 operation
++	memset(&eth_hdr, 0x00, sizeof(struct _SET_ETH_HDR));
++	eth_hdr.param_4.bits.protocol = SET_ETH_HDR_PROTOCOL_IP_V6;
++	eth_hdr.param_4.bits.action = SET_ETH_HDR_ACTION_REGISTER;
++	memcpy(&(eth_hdr.assignedmac), paucSrcMacAddr, 6);
++	memcpy(&(eth_hdr.hostmac), paucDestMacAddr, 6);
++	eth_hdr.type = htons(ETH_P_IPV6);
++	
++	// set the ETH_HDR for IPv6
++	status = VAPI_SetMessageFromBuffer( message, 
++										CMD_CLASS_CONF_DEVICE, 
++										CMD_TYPE_CONF_CHANGE, 
++										FC_SET_ETH_HDR, 
++										8, 
++										(U16 *)&eth_hdr);
++	if(status != SUCCESS)
++		goto err;
++	
++	// send the ETH_HDR for IPv6 command
++	status = VAPI_SendDeviceMessage(uiID, 
++									(SMsg *)message, 
++									NULL, 
++									device_response, 
++									&response_len);    
++	err:
++		VAPI_FreeMessage(message);
++	
++	return status;
++}
++
++/***************************************************************************
+  * VAPI_SetDeviceIPAddr: The function does the following things -
+  ***************************************************************************/
+ /*!
+@@ -1541,6 +1627,81 @@
+ }
+ 
+ /***************************************************************************
++ * VAPI_SetDeviceIPv6Addr: The function does the following things -
++ ***************************************************************************/
++/*!
++*	\n \b Description: \n
++*	This function passes the IPv6 address of a Comcerto device to MSP.\n
++*	This function must be called before setting up a connection.\n
++*	\n
++*	<table style="text-align: left; width: 640px" border="0" cellpadding="2" cellspacing="0">
++*	<tr>
++*		<td style="background-color: rgb(213, 225, 232);"><b>Inputs-Outputs</b></td>
++*		<td style="background-color: rgb(213, 225, 232);"><b></b></td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">DevId</td>
++*		<td style="vertical-align: top;">Device identifier that uniquely identifies a device.</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">IPv6Addr</td>
++*		<td style="vertical-align: top;">IPv6 address</td>
++*	</tr>
++*	<tr>
++*		<td style="vertical-align: top;">pstRequest</td>
++*		<td style="vertical-align: top;">If NULL then the call is in blocking mode (synchronous).</td>
++*	</tr>
++*	</table>
++*
++*	\b Returns: \n
++*	\li SUCCESS or VAPI_ERR_PENDING
++*	\li VAPI_ERR_LIB_NOT_INITIALIZED
++*	\li VAPI_ERR_INVALID_DEVID
++*	\li VAPI_ERR_DEV_IS_NOT_UP
++*	\li VAPI_ERR_NOMEM
++*	\li VAPI_ERR_NULL_POINTER_PASSED
++*	\li VAPI_ERR_INVALID_PARAM
++*
++*	\n \b Usage:
++*	\include set_ip.c
++*
++*/
++VSTATUS VAPI_SetDeviceIPv6Addr(IN DEVID DevId, IN U8 *IPv6Addr, IN SRequest * pstRequest)
++{
++	VSTATUS			status  = 1;
++	void			*message;
++	U8				device_response [DEFAULT_FIFO_MAX_SIZE];
++	U32				response_len = DEFAULT_FIFO_MAX_SIZE;
++	
++	// allocate a message
++	message = VAPI_AllocateMessage(DEFAULT_FIFO_MAX_SIZE);
++	if (message == NULL) {
++		status = VAPI_ERR_NOMEM;
++		goto err;
++	}
++	
++	status = VAPI_SetMessageFromBuffer( message, 
++										CMD_CLASS_CONF_DEVICE, 
++										CMD_TYPE_CONF_CHANGE, 
++										FC_IP_ADDRESS_V6, 
++										8, 
++										(U16 *)IPv6Addr);
++	if(status != SUCCESS)
++		goto err;
++	
++	// send IPv6 address command
++	status = VAPI_SendDeviceMessage(DevId, 
++									(SMsg *)message, 
++									NULL, 
++									device_response, 
++									&response_len);
++	err:
++		VAPI_FreeMessage(message);
++	
++	return status;
++}
++
++/***************************************************************************
+  * VAPI_AssignBootMac: The function does the following things -
+  ***************************************************************************/
+ /*!
+diff -Naur vapi-2.18.3/VAPI/common/vapi/vapi.h vapi-2.18.3.new/VAPI/common/vapi/vapi.h
+--- vapi-2.18.3/VAPI/common/vapi/vapi.h	2016-09-18 17:25:04.737508679 +0300
++++ vapi-2.18.3.new/VAPI/common/vapi/vapi.h	2016-09-18 20:01:02.923903110 +0300
+@@ -185,6 +185,12 @@
+ #define MAX_SYNCDAT_BUF_SIZE	240
+ #define MAX_SYNCEOF_BUF_SIZE	1492
+ 
++/**Special Comcerto IP connection mode*/
++typedef enum {
++	eChanIpMode_IPv4,
++	eChanIpMode_IPv6
++} EChanIpMode;
++
+ /** Event codes defined for events coming from MSP*/
+ typedef enum {
+ 	eVAPI_SPI_EVENT,			/**< Event SPI like On-hook/Off-Hook*/
+@@ -1436,10 +1442,14 @@
+ 
+ VSTATUS VAPI_SetEthMac(IN U32 uiID, IN U8 ucLevel, IN U8 * paucSrcMacAddr, IN U8 * paucDestMacAddr, IN SRequest * pstRequest);
+ 
++VSTATUS VAPI_SetDeviceIPv6EthMac(IN U32 uiID, IN U8 * paucSrcMacAddr, IN U8 * paucDestMacAddr, IN SRequest * pstRequest);
++
+ VSTATUS VAPI_SetDeviceVlan(IN DEVID DevId, IN U16 VlanId, IN SRequest * pstRequest);
+ 
+ VSTATUS VAPI_SetDeviceIPAddr(IN DEVID DevId, IN SIpAddrInfo * pstIpAddrInfo, IN SRequest * pstRequest);
+ 
++VSTATUS VAPI_SetDeviceIPv6Addr(IN DEVID DevId, IN U8 *IPv6Addr, IN SRequest * pstRequest);
++
+ VSTATUS VAPI_SetCodecType(IN CONNID ConnId, IN ECodecIndex eCodecIndex, IN SRequest * pstRequest);
+ 
+ 
+@@ -1580,6 +1590,17 @@
+ VSTATUS VAPI_SwitchToT38(IN CONNID ConnId, IN SFaxConfigOpts * pstFaxConfigOpts, IN SRequest * pstRequest);
+ VSTATUS VAPI_AssignBootMAC(IN DEVID DevId, IN SRequest * pstRequest);
+ VSTATUS VAPI_SetConnIpParams(IN CONNID ConnId, IN SIpParams * pstIpParams, IN SRequest * pstRequest);
++VSTATUS VAPI_SetConnIPv6EthMac(IN CONNID ConnId, 
++										IN U8 * paucSrcMacAddr, 
++										IN U8 * paucDestMacAddr, 
++										IN SRequest * pstRequest);
++VSTATUS VAPI_SetConnIPv6Header(IN CONNID ConnId, 
++										IN U8 *ipv6_src_addr, 
++										IN U8 *ipv6_dst_addr, 
++										IN U16 src_udp, 
++										IN U16 dst_udp, 
++										IN SRequest * pstRequest);
++VSTATUS VAPI_SetIPConnMode(IN CONNID ConnId, IN EChanIpMode Mode, IN SRequest * pstRequest);
+ VSTATUS VAPI_SetConnVlan(CONNID ConnId, IN U16 VlanId, IN SRequest * pstRequest);
+ VSTATUS VAPI_SetMediaSubLayer(IN CONNID ConId, IN EMediaSubLayer eMediaSubLayer, IN SRequest * pstRequest);
+ VSTATUS VAPI_SendH245Message(IN CONNID ConnId, IN U16 uiH245MsgLength, IN U8 *ptrH245Msg, IN SRequest *pstRequest);

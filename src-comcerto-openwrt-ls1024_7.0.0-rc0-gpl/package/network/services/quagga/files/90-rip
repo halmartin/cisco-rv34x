@@ -1,0 +1,73 @@
+#!/bin/sh
+# This script is executed as part of the hotplug event with
+# HOTPLUG_TYPE=iface, triggered by various scripts when an interface
+# is configured (ACTION=ifup) or deconfigured (ACTION=ifdown).  The
+# interface is available as INTERFACE, the real device as DEVICE.
+
+[ "$ACTION" == "rtupd" ] && exit 0
+[ "$DEVICE" == "lo" ] && exit 0
+                 
+case "$ACTION" in
+	ifup)
+	ppp_iface=$(echo $INTERFACE | grep wan[0-9].*p.* )
+	if [ "$ppp_iface" != "" ]; then
+		ppp_iface1=$(echo $ppp_iface | sed s/6p//g | sed s/p//g )
+		echo $ppp_iface1 > /tmp/rip	
+		/etc/init.d/rip start /tmp/rip
+	fi
+
+	case "$INTERFACE" in
+		wan*)
+		proto=$(uci get network.$INTERFACE.proto)
+		if [ "$proto" == "static" ]; then
+			ipv6=$(uci get network.$INTERFACE.ipv6)
+			[ -n "$ipv6" ] || {
+				v1=$(uci get rip.$INTERFACE.v1_active)
+				v2=$(uci get rip.$INTERFACE.v2_active)
+				global=$(uci get rip.global.ipv4)
+				if [ "$global" == "1" ]; then
+					if [[ "$v1" == "1" || "$v2" == "1" ]]; then
+						vtysh -c "conf t" -c "router rip" -c "no network $DEVICE" -c "network $DEVICE" -c "quit" -c "exit" -c "exit"
+					fi
+				fi
+			}
+		fi
+		;;
+	esac
+
+        case "$DEVICE": in
+		br-vlan*)
+		# Whenever a new bridge is created, disable multicast snooping on that bridge to allow IPv6 multicast packets
+		# DEVICE contains the bridge name i.e br-vlan*
+
+		echo 0 >  /sys/devices/virtual/net/$DEVICE/bridge/multicast_snooping
+                echo $INTERFACE > /tmp/rip
+                /etc/init.d/rip start /tmp/rip
+		;;
+		eth0.*)
+                echo $INTERFACE | sed s/6// > /tmp/rip
+                /etc/init.d/rip start /tmp/rip
+		;;
+	esac
+
+	;;
+
+	ifdown)
+	ppp_iface=$(echo $INTERFACE | grep wan[0-9].*p.* )
+	if [ "$ppp_iface" != "" ]; then
+		ppp_iface1=$(echo $ppp_iface | sed s/6p//g | sed s/p//g )
+		echo $ppp_iface1 > /tmp/rip
+		/etc/init.d/rip start /tmp/rip
+	fi
+	backup_interface=$(uci get network-bkp.wan1.ifname)
+	#When WAN's VLAN is disabled/ changed, removed vlan configuration from vtysh configuration. 
+	#Backup interface is retrieved and it is cleared from vtysh configuration.
+        case "$backup_interface": in
+		eth0.*)
+			vtysh -c "conf t" -c "router rip" -c "no network $backup_interface" -c "no passive-interface $backup_interface" -c "quit" -c "exit" -c "exit"
+			vtysh -c "conf t" -c "router ripng" -c "no network $backup_interface" -c "no passive-interface $backup_interface" -c "quit" -c "exit" -c "exit"
+			vtysh -c "conf t" -c "no interface $backup_interface" -c "exit" -c "quit"
+		;;
+	esac
+	;;
+esac

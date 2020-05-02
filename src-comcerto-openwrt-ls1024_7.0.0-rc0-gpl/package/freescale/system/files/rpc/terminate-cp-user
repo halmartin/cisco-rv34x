@@ -1,0 +1,40 @@
+#!/bin/sh
+
+CPCTRL_DEAUTH_CMD="/usr/sbin/cportalctl deauth"
+CPORTALD_RESULT_FILE="/tmp/cportald.result"
+/usr/sbin/cportalctl simple > ${CPORTALD_RESULT_FILE} 2>/dev/null
+
+if [ "$1" = "one" ];then
+	MAC_ADDR="$2"
+
+	while read line; do
+		_ip_addr="$(echo $line | cut -d',' -f 1)"
+		_mac_addr="$(echo $line | cut -d',' -f 2)"
+		if [ "$MAC_ADDR" = "$_mac_addr" ];then
+			${CPCTRL_DEAUTH_CMD} $_ip_addr >/dev/null
+			break
+		fi
+	done < ${CPORTALD_RESULT_FILE}
+
+elif [ "$1" = "list" ];then
+        loop=$(echo $@ | tr -cd ' \t' | wc -c)
+        count=1
+        while [ "$count" -le $loop ]; do
+                count=$((count+1))
+                MAC_ADDR="$(echo $@ | cut -d' ' -f $count)"
+                while read line; do
+                        _ip_addr="$(echo $line | cut -d',' -f 1)"
+                        _mac_addr="$(echo $line | cut -d',' -f 2)"
+                        if [ "$MAC_ADDR" = "$_mac_addr" ];then
+                                ${CPCTRL_DEAUTH_CMD} $_ip_addr >/dev/null
+                        fi
+                done < ${CPORTALD_RESULT_FILE}
+        done
+
+else
+	while read line; do
+		_ip_addr="$(echo $line | cut -d',' -f 1)"
+		_mac_addr="$(echo $line | cut -d',' -f 2)"
+		${CPCTRL_DEAUTH_CMD} $_ip_addr >/dev/null
+	done < ${CPORTALD_RESULT_FILE}
+fi

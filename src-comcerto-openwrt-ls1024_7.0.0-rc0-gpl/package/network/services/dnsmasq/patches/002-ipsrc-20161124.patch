@@ -1,0 +1,139 @@
+From d54a1027ff8e14605bb05e0d0f4f3f4107263f43 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy <ganesh.reddy@nxp.com>
+Date: Tue, 12 Dec 2017 15:49:10 +0530
+Subject: [PATCH] IPsource gaurd support changes based on new dnsmasq2.78
+
+- The changes were based on the previous patch 002-ipsrc-20161124.patch
+
+Signed-off-by: Ganesh Reddy <ganesh.reddy@nxp.com>
+---
+ src/lease.c   |  7 ++++++
+ src/rfc2131.c | 73 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 80 insertions(+)
+
+diff --git a/src/lease.c b/src/lease.c
+index 634372d..5442262 100644
+--- a/src/lease.c
++++ b/src/lease.c
+@@ -14,6 +14,9 @@
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
++/* 12/12/2017  	Ganesh Reddy <ganesh.reddy@nxp.com>
++		IPSource Guard support changes
++*/
+ #include "dnsmasq.h"
+ 
+ #ifdef HAVE_DHCP
+@@ -1066,6 +1069,10 @@ int do_script_run(time_t now)
+     {
+       lease = old_leases;
+                   
++      if (lease->hwaddr_len == ETHER_ADDR_LEN &&
++	  (lease->hwaddr_type == ARPHRD_ETHER || lease->hwaddr_type == ARPHRD_IEEE802))
++	  nxp_ip_source_guard(&lease->addr, &lease->hwaddr, 0);
++
+       /* If the lease still has an old_hostname, do the "old" action on that first */
+       if (lease->old_hostname)
+ 	{
+diff --git a/src/rfc2131.c b/src/rfc2131.c
+index f3a7e53..2ba0999 100644
+--- a/src/rfc2131.c
++++ b/src/rfc2131.c
+@@ -14,6 +14,10 @@
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+ 
++/* 12/12/2017		Ganesh Reddy <ganesh.reddy@nxp.com>
++			IPSource Guard support changes
++*/
++
+ #include "dnsmasq.h"
+ 
+ #ifdef HAVE_DHCP
+@@ -25,6 +29,73 @@
+ static void add_extradata_opt(struct dhcp_lease *lease, unsigned char *opt);
+ #endif
+ 
++#include <stdio.h>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <string.h>
++#include <arpa/inet.h>
++
++int nxp_ip_source_guard(char *ip, unsigned char *emac, uint8_t add);
++
++int nxp_ip_source_guard(char *ip, unsigned char *emac, uint8_t add)
++{
++  unsigned char mac_address[30];
++  char ip_address[20];
++  int j;
++
++  char str[100];
++  int clientSocket, nBytes, i, retval;
++  char buffer[1024] = "";
++  struct sockaddr_in serverAddr;
++  socklen_t addr_size;
++
++  snprintf(mac_address, sizeof(mac_address), "%02x:%02x:%02x:%02x:%02x:%02x", emac[0], emac[1],emac[2],  emac[3],  emac[4],emac[5]);
++  snprintf(ip_address, sizeof(ip_address), "%d.%d.%d.%d", ip[0], ip[1],ip[2],ip[3]);
++
++  /*Create UDP socket*/
++  if ((clientSocket = socket(PF_INET, SOCK_DGRAM, 0)) == -1 ) {
++      printf("\r\n socket() creation failed \r\n");
++      return -1;
++  }
++
++  /*Configure settings in address struct*/
++  serverAddr.sin_family = AF_INET;
++  serverAddr.sin_port = htons(27891);
++  serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
++  memset(serverAddr.sin_zero, '\0', sizeof (serverAddr.sin_zero));
++
++  /*Initialize size variable to be used later on*/
++  addr_size = sizeof(serverAddr);
++
++  if(add == 1)
++       sprintf(str, "rtkssdk_diag -A 1 -i %s -m %s -e 0 -r 1 -t 1", ip_address, mac_address);
++  else if(add == 0)
++       sprintf(str, "rtkssdk_diag -A 1 -i %s -m %s -e 1 -r 1 -o 1", ip_address, mac_address);
++  else
++       my_syslog(LOG_ERR, _("Unknown operand add/del"));
++
++
++  strcat(buffer, str);
++  nBytes = strlen(buffer) + 1;
++
++  /*Send message to server*/
++  if ((retval = sendto(clientSocket,buffer,nBytes,0,(struct sockaddr *)&serverAddr,addr_size)) == -1 ) {
++      printf("\r\n sendto() call failed \r\n");
++      close(clientSocket);
++      return -1;
++  }
++
++  if(add == 1)
++    my_syslog(MS_DHCP | LOG_INFO, _("If IP Source Guard Enable, Add the Record with IP [%d.%d.%d.%d] and MAC [%x:%x:%x:%x:%x:%x]"),
++                          ip[0], ip[1],ip[2],ip[3], emac[0],  emac[1],emac[2],  emac[3],  emac[4],emac[5]);
++  else
++    my_syslog(MS_DHCP | LOG_INFO, _("If IP Srouce Guard Enable, Delete the Record with IP [%d.%d.%d.%d] and MAC [%x:%x:%x:%x:%x:%x]"),
++                          ip[0], ip[1],ip[2],ip[3], emac[0],  emac[1],emac[2],  emac[3],  emac[4],emac[5], add);
++
++    close(clientSocket);
++    return 0;
++}
++
+ static int sanitise(unsigned char *opt, char *buf);
+ static struct in_addr server_id(struct dhcp_context *context, struct in_addr override, struct in_addr fallback);
+ static unsigned int calc_time(struct dhcp_context *context, struct dhcp_config *config, unsigned char *opt);
+@@ -1415,6 +1486,8 @@ size_t dhcp_reply(struct dhcp_context *context, char *iface_name, int int_index,
+ 
+ 	  log_packet("DHCPACK", &mess->yiaddr, emac, emac_len, iface_name, hostname, NULL, mess->xid);  
+ 	  
++	  nxp_ip_source_guard(&mess->yiaddr , emac, 1);
++
+ 	  clear_packet(mess, end);
+ 	  option_put(mess, end, OPTION_MESSAGE_TYPE, 1, DHCPACK);
+ 	  option_put(mess, end, OPTION_SERVER_IDENTIFIER, INADDRSZ, ntohl(server_id(context, override, fallback).s_addr));
+-- 
+1.9.1
+

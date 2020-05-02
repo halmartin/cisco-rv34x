@@ -1,0 +1,28 @@
+#!/bin/sh
+CAPTURE_TIMEOUT=3600
+
+#CAPTURE_COMMAND="tcpdump -c 66666 -G $CAPTURE_TIMEOUT -W 1 -w $CAPTURE_FILE_NAME -ni $ifname"
+
+
+CAPTURE_FILE_NAME=$1
+INTERFACE_NAME=$2
+
+captureSigHandler ()
+{
+	logger -t system "PACKET CAPTURE: Signal Received. Killing self"
+	logger -t system "PACKET CAPTURE: Starting fast path related daemon."
+	/etc/init.d/cmm start
+	exit 0
+}
+
+trap captureSigHandler SIGINT SIGHUP SIGTERM SIGSEGV SIGQUIT
+
+logger -t system "PACKET CAPTURE: Stopping fast path related daemon to capture all data packets."
+/etc/init.d/cmm stop
+
+logger -t system "PACKET CAPTURE: Started packet capture on interface: $INTERFACE_NAME. Packets capturing into the file: $CAPTURE_FILE_NAME"
+tcpdump -G $CAPTURE_TIMEOUT -W 1 -w $CAPTURE_FILE_NAME -c 66666 -U -ni $INTERFACE_NAME
+
+logger -t system "PACKET CAPTURE: Starting fast path related daemon."
+/etc/init.d/cmm start
+exit 0

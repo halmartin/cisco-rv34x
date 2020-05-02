@@ -1,0 +1,23 @@
+diff -aurpN uci-2015-08-27.1-orig/uci.h uci-2015-08-27.1/uci.h
+--- uci-2015-08-27.1-orig/uci.h	2017-02-13 04:05:59.034813297 -0600
++++ uci-2015-08-27.1/uci.h	2017-02-13 04:07:46.402818263 -0600
+@@ -10,6 +10,10 @@
+  * but WITHOUT ANY WARRANTY; without even the implied warranty of
+  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  * GNU Lesser General Public License for more details.
++ *
++ * Changes:
++ *	13/02/2017	NXP	Changed default conf directory to /tmp version of it.
++ *
+  */
+ 
+ #ifndef __LIBUCI_H
+@@ -35,7 +39,7 @@ extern "C" {
+ #include <stdio.h>
+ #include <stdint.h>
+ 
+-#define UCI_CONFDIR "/etc/config"
++#define UCI_CONFDIR "/tmp/etc/config"
+ #define UCI_SAVEDIR "/tmp/.uci"
+ #define UCI_DIRMODE 0700
+ #define UCI_FILEMODE 0600

@@ -1,0 +1,160 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+#We are maintaining following sequence
+#conn-name;status;primary_dns;secondary_dns;primary_wins;secondary_wins;default_domain;backup_server1;backup_server2;backup_server3;split_tunnel;split_dns"
+
+ATTRIBUTEFILE="/etc/cisco_ezvpn_attr"
+DNSFILE="/etc/cisco_ezvpn_attr"
+STATSFILE="/tmp/stats/teleworker_stats"
+TUN_STATUS_FILE="/tmp/tvpncstatus.log"
+rm -f $STATSFILE
+touch $STATSFILE
+
+client_enable=0;
+backup=0;
+wins=0;
+dns=0;
+client(){
+	local cfg=$1
+	config_get_bool enable "$cfg" enable 0
+	if [ "$enable" -eq 1 ]
+	then
+		config_get client_name "$cfg" client_name
+		config_get backup_server1 "$cfg" backup_server1
+		config_get backup_server2 "$cfg" backup_server2
+		config_get backup_server3 "$cfg" backup_server3
+
+		client_enable=1;
+		status="DOWN"
+
+		ipsec statusall | grep "$client_name\|"$client_name"_bkp0\|"$client_name"_bkp1\|"$client_name"_bkp2\|"$client_name"_bkp3" > $TUN_STATUS_FILE
+		tun_up=`grep -e "ESTABLISHED" $TUN_STATUS_FILE`
+		tun_connecting=`grep -e "CONNECTING" $TUN_STATUS_FILE`
+
+		local final_client_name=`echo $client_name | cut -d '_' -f 2-`
+
+		if [ -n "$tun_connecting" ]
+		then
+			#At any point of time, only one tunnel is enabled and it is down
+			echo "$final_client_name;CONNECTING;;;;;;;;;;;" >> $STATSFILE
+			rm $TUN_STATUS_FILE
+			exit 0;
+		elif [ -n "$tun_up" ]
+		then
+			status="UP"
+			established_conn=`echo $tun_up | awk -F '['  '{print $1}'`
+		else
+#At any point of time, only one tunnel is enabled and it is down
+			echo "$final_client_name;$status;;;;;;;;;;;" >> $STATSFILE
+			rm $TUN_STATUS_FILE
+			exit 0;
+		fi
+		local num_dns=0
+
+		[ -f "$ATTRIBUTEFILE" ] && {
+			num_split_dns=`grep "splitdns" $ATTRIBUTEFILE|wc -l`
+			default_domain_search=`grep "search" $ATTRIBUTEFILE`
+			num_nbns=`grep "NBNS" $ATTRIBUTEFILE|wc -l`
+
+			if [ $num_split_dns -gt 0 ]
+			then
+				split_dns=`grep "splitdns" $ATTRIBUTEFILE|cut -d ' ' -f 2|xargs`
+			fi
+
+			if [ -n "$default_domain_search" ]
+			then
+				default_domain=`grep "search" $ATTRIBUTEFILE | cut -d " " -f 2`
+			fi
+
+			backup_servers=`grep "backupserver" $ATTRIBUTEFILE|cut -d " " -f 2|sed 's/,/ /g'`
+			i=1
+			for backup_server in $backup_servers
+			do
+				case $i in
+				1)
+					backup_server1=$backup_server
+					;;
+				2)
+					backup_server2=$backup_server
+					;;
+				3)
+					backup_server3=$backup_server
+					;;
+				esac
+
+				i=$((i+1))
+			done
+
+			#If backup servers are not passed by server then admin configured servers should be retained.
+			[ -n $backup_servers ] && {
+				case $i in
+				2) #we have one admin configured bkp server.
+					backup_server2=""
+					backup_server3=""
+				;;
+				3)
+					backup_server3=""
+				;;
+				esac
+			}
+			if [ $num_nbns -eq 1 ]
+			then
+				primary_wins=`grep "NBNS" $ATTRIBUTEFILE|cut -d " " -f 2`
+			elif [ $num_nbns -gt 1 ]
+			then
+				primary_wins=`grep "NBNS" $ATTRIBUTEFILE|cut -d " " -f 2|tail -n 1`
+				secondary_wins=`grep "NBNS" $ATTRIBUTEFILE|cut -d " " -f 2|tail -n 2|head -n 1`
+			fi
+		}
+
+		[ -f "$DNSFILE" ] && {
+			num_dns=`grep -e "nameserver.*strongSwan" $DNSFILE |wc -l`
+
+			if [ $num_dns -eq 1 ]
+			then
+				primary_dns=`grep -e "nameserver.*strongSwan" $DNSFILE |head -n 1|cut -d " " -f 2`
+			elif [ $num_dns -gt 1 ]
+			then
+				primary_dns=`grep -e "nameserver.*strongSwan" $DNSFILE |tail -n 1|cut -d " " -f 2`
+				secondary_dns=`grep -e "nameserver.*strongSwan" $DNSFILE |tail -n 2|head -n 1|cut -d " " -f 2`
+			fi
+		}
+
+		split_tunnel=$(ipsec statusall $established_conn | tail -n 1 | cut -d '=' -f 4)
+
+		[ "$primary_dns" == "" ] && { primary_dns=0.0.0.0; }
+		[ "$secondary_dns" == "" ] && { secondary_dns=0.0.0.0; }
+		[ "$primary_wins" == "" ] && { primary_wins=0.0.0.0; }
+		[ "$secondary_wins" == "" ] && { secondary_wins=0.0.0.0; }
+		[ "$default_domain" == "" ] && { default_domain=NONE; }
+		[ "$backup_server1" == "" ] && { backup_server1=0.0.0.0; }
+		[ "$backup_server2" == "" ] && { backup_server2=0.0.0.0; }
+		[ "$backup_server3" == "" ] && { backup_server3=0.0.0.0; }
+		[ "$split_dns" == "" ] && { split_dns=NONE; }
+
+		rm $TUN_STATUS_FILE
+		echo "$final_client_name;$status;$primary_dns;$secondary_dns;$primary_wins;$secondary_wins;$default_domain;$backup_server1;$backup_server2;$backup_server3;$split_tunnel;$split_dns;" >> $STATSFILE
+#At any point of time, only one tunnel is enabled
+		config_clear strongswan
+		exit 0
+	fi
+}
+
+start() {
+
+	config_load strongswan
+
+	args=""
+	config_foreach client client
+#	if [ $client_enable == 0 ]
+#	then
+#	echo "None;DOWN;0.0.0.0;0.0.0.0;0.0.0.0;0.0.0.0;NONE;0.0.0.0;0.0.0.0;0.0.0.0;NONE;NONE;" >> $STATSFILE
+#	fi
+}
+stop() {
+	return 0;
+}
+start

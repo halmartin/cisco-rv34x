@@ -1,0 +1,27 @@
+From 9d143f7f0a3255c61635c4366f18afe3d8d2ff31 Mon Sep 17 00:00:00 2001
+From: b39609 <vidya.g@freescale.com>
+Date: Mon, 29 Jan 2018 18:05:35 +0530
+Subject: [PATCH] Setting WiFi device properly while sending the packet from
+ Linux to VWD.
+
+Signed-off-by: b39609 <vidya.g@freescale.com>
+---
+ net/core/dev.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/net/core/dev.c b/net/core/dev.c
+index da73ebd..e0ed751 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -3029,7 +3029,7 @@ out:
+ int dev_queue_xmit_sk(struct sock *sk, struct sk_buff *skb)
+ {
+ #if defined(CONFIG_CPE_FAST_PATH)
+-	if (skb->dev->flags & IFF_WIFI_OFLD)
++	if (skb->dev->wifi_offload_dev)
+ 		skb->dev = skb->dev->wifi_offload_dev;
+ 
+ 	return original_dev_queue_xmit(skb);
+-- 
+1.9.1
+

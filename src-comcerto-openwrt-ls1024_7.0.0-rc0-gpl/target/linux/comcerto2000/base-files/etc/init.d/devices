@@ -1,0 +1,13 @@
+#!/bin/sh /etc/rc.common
+
+START=60
+
+start() {
+	major=`grep membuf /proc/devices | awk '{ print $1 }'`
+
+	rm -f /dev/membuf
+
+	if [ -n "$major" ]; then
+		mknod /dev/membuf c $major 0
+	fi
+}

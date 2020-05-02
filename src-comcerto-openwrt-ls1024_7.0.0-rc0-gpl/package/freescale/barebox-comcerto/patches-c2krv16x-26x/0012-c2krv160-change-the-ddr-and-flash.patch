@@ -1,0 +1,81 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Change the ddr and flash for PP bring up.
+--- barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c.org	2017-01-19 15:02:48.078377725 +0800
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c	2017-01-19 15:05:57.318378104 +0800
+@@ -60,7 +60,7 @@
+                 .max_speed_hz = 4000000, /* max freq this device can work with */
+                 .bus_num = SPI_BUS_NUM_1, /* which driver to attach this device to */
+                 .chip_select = SPI_CHIP_SELECT_NUM_0, /* which chip select this device is connected to */
+-                .mode = SPI_CPOL | SPI_CPHA | SPI_DMA, /* operating modes */
++                .mode = SPI_CPOL | SPI_CPHA, /* operating modes */
+ 		.flash_name = MX66L51235F_SPI_FLASH_NAME, /* Flash name is one of the flash in the flash table.*/
+ 						/* This flash table information is maintained in the */
+ 						/* SPI flash client driver. */
+@@ -95,7 +95,7 @@
+ static struct c2k_spi_master c2k_spi_1_data = {
+         .chipselect = c2k_spi_cs,
+         .num_chipselect = ARRAY_SIZE(c2k_spi_cs),
+-	.bus_num = SPI_BUS_NUM_0, /* This field is used to identify LS SPI flash/HS SPI flash */
++	.bus_num = SPI_BUS_NUM_1, /* This field is used to identify LS SPI flash/HS SPI flash */
+ };
+ 
+ static struct device_d device_spi = {
+@@ -114,7 +114,7 @@
+ static struct c2k_spi_master c2k_fast_spi_1_data = {
+ 	.chipselect = c2k_fast_spi_cs,
+ 	.num_chipselect = ARRAY_SIZE(c2k_fast_spi_cs),
+-	.bus_num = SPI_BUS_NUM_1, /* This field is used to identify LS SPI flash/HS SPI flash */
++	.bus_num = SPI_BUS_NUM_0, /* This field is used to identify LS SPI flash/HS SPI flash */
+ };
+ 
+ 
+@@ -176,7 +176,7 @@
+ 	.id = -1,
+ 	.name = "mem",
+ 	.map_base = 0x00000000,
+-	.size = SZ_512M,
++	.size = SZ_1G,
+ 	.platform_data = &sdram_pdata,
+ };
+ 
+--- barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/config.h.org	2017-01-19 14:55:59.238377924 +0800
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/config.h	2017-01-19 14:56:25.528377753 +0800
+@@ -3,7 +3,7 @@
+ 
+ #define CONFIG_LBA48
+ 
+-#define DDR_SIZE        SZ_512M
++#define DDR_SIZE        SZ_1G
+ 
+ #define CFG_I2C_EEPROM0_ADDR     0x50
+ #define I2C_EEPROM0_DEVICE_NAME	"eeprom0"
+--- barebox-2011.06.0/arch/arm/mach-comcerto/include/mach/comcerto_spi.h.org	2017-01-19 14:57:22.065878330 +0800
++++ barebox-2011.06.0/arch/arm/mach-comcerto/include/mach/comcerto_spi.h	2017-01-19 14:57:58.578377999 +0800
+@@ -28,8 +28,8 @@
+ 	unsigned char bus_num;
+ };
+ 
+-#define	SPI_FLASH_BAREBOX_DEV_NAME	"spi0"
+-#define	FAST_SPI_FLASH_BAREBOX_DEV_NAME	"spi1"
++#define	SPI_FLASH_BAREBOX_DEV_NAME	"spi1"
++#define	FAST_SPI_FLASH_BAREBOX_DEV_NAME	"spi0"
+ 
+ #define	SPI_FLASH_DEVICE_DRIVER		"c2k_spi_flash"
+ 
+--- barebox-2011.06.0/drivers/spi/c2k_spi_flash.h.org	2017-01-19 15:00:50.818377994 +0800
++++ barebox-2011.06.0/drivers/spi/c2k_spi_flash.h	2017-01-19 15:02:25.068378039 +0800
+@@ -66,11 +66,11 @@
+ /* FLASH INFORMATION    */
+ /************************/
+ #define	MX66L51235F_FLASH_NAME			MX66L51235F_SPI_FLASH_NAME
+-#define	MX66L51235F_FLASH_SIZE			(64*1024*1024)
++#define	MX66L51235F_FLASH_SIZE			(4*1024*1024)
+ #define	MX66L51235F_FLASH_SECTOR_SIZE		(64*1024)
+ #define	MX66L51235F_FLASH_PAGE_SIZE		(256)
+-#define	MX66L51235F_CHUNK_SIZE			(128)
+-#define	MX66L51235F_FLASH_SUPPORT_ADDRESS_MODE	(4)
++#define	MX66L51235F_CHUNK_SIZE			(8)
++#define	MX66L51235F_FLASH_SUPPORT_ADDRESS_MODE	(3)
+ 
+ #define	S25FL064A_FLASH_NAME			S25FL064A_SPI_FLASH_NAME
+ #define	S25FL064A_FLASH_SIZE			(8*1024*1024)

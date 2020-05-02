@@ -1,0 +1,9 @@
+#!/bin/sh /etc/rc.common
+
+#/usr/lib/webif/functions.sh
+#/lib/config/uci.sh
+
+
+reload (){
+	uci commit schedule
+}

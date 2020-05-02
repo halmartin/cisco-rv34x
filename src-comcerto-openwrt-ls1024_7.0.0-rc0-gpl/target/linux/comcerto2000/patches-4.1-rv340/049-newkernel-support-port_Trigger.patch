@@ -1,0 +1,34 @@
+--- a/net/ipv4/netfilter/ipt_TRIGGER.c	2017-04-24 14:18:52.936109268 +0530
++++ b/net/ipv4/netfilter/ipt_TRIGGER.c	2017-04-24 14:19:14.662966880 +0530
+@@ -304,7 +304,7 @@ static unsigned int trigger_dnat(struct
+ 	struct tcphdr *tcph;
+ 	struct nf_conn *ct;
+ 	enum ip_conntrack_info ctinfo;
+-	struct nf_nat_ipv4_multi_range_compat newrange;
++    struct nf_nat_range range;
+ 
+ 	iph = ip_hdr(*pskb);
+ 	tcph = (void *)iph + (iph->ihl << 2);	/* Might be TCP, UDP */
+@@ -324,17 +324,15 @@ static unsigned int trigger_dnat(struct
+ 	nf_ct_dump_tuple_ip(&ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple);
+ 
+ 	/* Alter the destination of imcoming packet. */
+-	newrange = ((struct nf_nat_ipv4_multi_range_compat) {
+-		    1, { {
+-		    NF_NAT_RANGE_MAP_IPS, trig->srcip, trig->srcip, {
+-		    0}, {
+-		    0}
+-		    }}});
++    memset(&range,0,sizeof(range));
++    range.flags = NF_NAT_RANGE_MAP_IPS;
++    range.min_addr.ip = trig->srcip;
++    range.max_addr.ip = trig->srcip;
+ 
+ 	ct->status |= IPS_TRIGGER;
+ 
+ 	/* Hand modified range to generic setup. */
+-	return nf_nat_setup_info(ct, &newrange.range[0], NF_NAT_MANIP_DST);
++	return nf_nat_setup_info(ct, &range, NF_NAT_MANIP_DST);
+ }
+ 
+ static inline int trigger_refresh_matched(const struct ipt_trigger *i, u_int16_t proto, u_int16_t sport)

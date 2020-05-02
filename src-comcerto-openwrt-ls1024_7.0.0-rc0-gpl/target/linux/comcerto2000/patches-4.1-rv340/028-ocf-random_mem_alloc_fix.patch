@@ -1,0 +1,13 @@
+# 2017-02-14: sudhakar.mukkara@nxp.com
+# DNCPE-220:Kmalloc is called with GFP_DMA flag which is causing kernel to crash due to GFP_DMA is not accepted while refilling the buffers.So the GFP_KERNEL is added to the kmalloc flags.
+--- linux-4.1.8/crypto/ocf/random.c
++++ linux-4.1.8/crypto/ocf/random.c
+@@ -218,7 +218,7 @@
+ 	 * some devices can transferr their RNG data direct into memory,
+ 	 * so make sure it is device friendly
+ 	 */
+-	buf = kmalloc(NUM_INT * sizeof(int), GFP_DMA);
++	buf = kmalloc(NUM_INT * sizeof(int), GFP_KERNEL);
+ 	if (NULL == buf) {
+ 		printk("crypto: RNG could not allocate memory\n");
+ 		retval = -ENOMEM;

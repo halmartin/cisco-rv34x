@@ -1,0 +1,3048 @@
+# 16-02-2017: Abdul Moiz <abdul.moiz@nxp.com>
+# Changes done by NXP to support Dual boot and other fixes
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/boot ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/boot
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/boot	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/boot	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,289 @@
++#!/bin/sh
++
++. /env/config
++
++gpio_set_value $GPIO_LED_DIAG $OFF 
++
++echo "Setting env LAN, WAN..."
++boardinfo -m
++echo "done"
++echo -n "Exporting env LAN, WAN..."
++export LAN="$LAN" WAN="$WAN"
++echo "done"
++
++if [  "X$LAN" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN" != "XFF:FF:FF:FF:FF:FF" ]; then
++  echo "FOUND MACs from Boardinfo using same in bootargs"
++  export eth0_ethaddr="$WAN" eth1_ethaddr="$LAN"
++  echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr"
++  bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr"
++elif [  "X$LAN" = "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN" = "XFF:FF:FF:FF:FF:FF" ]; then
++  echo -e "One or More MACs from Boardinfo are INVALID OR NOT Programmed!!!\nHalting Boot Up...done."
++  exit 1
++fi
++echo "done"
++
++if [ x$1 = xnand ]; then
++	rootfs_loc=nand
++	kernel_loc=nand
++elif [ x$1 = xnor ]; then
++	rootfs_loc=nor
++	kernel_loc=nor
++elif [ x$1 = xsata ]; then
++	rootfs_loc=sata
++	kernel_loc=sata
++elif [ x$1 = xfastspi ]; then
++	rootfs_loc=fastspi
++	kernel_loc=fastspi
++elif [ x$1 = xspi ]; then
++	rootfs_loc=spi
++	kernel_loc=spi
++elif [ x$1 = xi2c ]; then
++	rootfs_loc=i2c
++	kernel_loc=i2c
++elif [ x$1 = xnfs ]; then
++	rootfs_loc=net
++	kernel_loc=nfs
++elif [ x$1 = xtftp ]; then
++	rootfs_loc=net
++	kernel_loc=tftp
++fi
++
++echo -n "Setting active/inactive env..."
++imageenv -g
++echo "done"
++echo -n "Exporting env..."
++export active="$active" inactive="$inactive"
++echo "done"
++echo "active = $active inactive = $inactive"
++
++if [ x$1 = xactive ]; then
++  echo "Booting active $active ..."
++  if [ x$active = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$active = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  fi
++elif [ x$1 = xinactive ]; then
++  echo "Booting inactive $inactive ..."
++  if [ x$inactive = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$inactive = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  fi
++else
++  echo "Booting default active $active ..."
++  if [ x$active = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$active = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  else
++    kernel=kernel1
++    rootfs=rootfs1
++  fi
++fi
++
++if [ x$rootfs = xrootfs1 ]; then
++  rootfs_mtdblock_nand=$ROOTFS_PART1
++elif [ x$rootfs = xrootfs2 ]; then
++  rootfs_mtdblock_nand=$ROOTFS_PART2
++fi
++
++if [ x$ip = xdhcp ]; then
++	bootargs="$bootargs ip=dhcp"
++elif [ x$ip = xnone ]; then
++	bootargs="$bootargs ip=none"
++else
++  bootargs="$bootargs ip=${eth0.ipaddr}::${eth0.gateway}:${eth0.netmask}:::"
++fi
++
++
++if [ x$rootfs_loc = xnet ]; then
++	bootargs="$bootargs root=/dev/nfs nfsroot=$nfsroot,v3,tcp noinitrd"
++elif [ x$rootfs_loc = xinitrd ]; then
++	bootargs="$bootargs root=/dev/ram0 rootfstype=ramfs rdinit=/linuxrc"
++elif [ x$rootfs_loc = xsata ]; then
++	bootargs="$bootargs root=/dev/sda2 rootfstype=$rootfs_type rw noinitrd"
++else
++	if [ x$rootfs_loc = xnand ]; then
++		rootfs_mtdblock=$rootfs_mtdblock_nand
++	elif [ x$rootfs_loc = xnor ]; then
++		rootfs_mtdblock=$rootfs_mtdblock_nor
++	elif [ x$rootfs_loc = xfastspi ]; then
++		rootfs_mtdblock=$rootfs_mtdblock_fastspi
++	elif [ x$rootfs_loc = xspi ]; then
++		rootfs_mtdblock=$rootfs_mtdblock_spi
++	elif [ x$rootfs_loc = xi2c ]; then
++		rootfs_mtdblock=$rootfs_mtdblock_i2c
++	fi
++
++	if [ x$rootfs_type = xubifs ]; then
++		if [ -z $ubiroot ]; then
++			ubiroot="rootfs"
++		fi
++		if [ x$rootfs_loc = xnand ]; then
++			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock ,4096"
++		else
++			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock "
++		fi
++	else
++		bootargs="$bootargs root=/dev/mtdblock$rootfs_mtdblock"
++	fi
++
++	bootargs="$bootargs rootfstype=$rootfs_type rw noinitrd"
++fi
++
++if [ -n $nor_parts ]; then
++	mtdparts="${mtdparts}${nor_device}:${nor_parts}"
++fi
++
++if [ -n $nand_parts ]; then
++	if [ -n ${mtdparts} ]; then
++		mtdparts="${mtdparts};"
++	fi
++	mtdparts="${mtdparts}${nand_device}:${nand_parts}"
++fi
++
++if [ -n $spi_parts ]; then
++	if [ -n ${mtdparts} ]; then
++		mtdparts="${mtdparts};"
++	fi
++	mtdparts="${mtdparts}${spi_device}:${spi_parts}"
++fi
++
++if [ -n $fast_spi_parts ]; then
++	if [ -n ${mtdparts} ]; then
++		mtdparts="${mtdparts};"
++	fi
++	mtdparts="${mtdparts}${fast_spi_device}:${fast_spi_parts}"
++fi
++
++
++if [ -n $i2c_parts -a -n $i2c_device ]; then
++	if [ -n ${mtdparts} ]; then
++		mtdparts="${mtdparts};"
++	fi
++	mtdparts="${mtdparts}${i2c_device}:${i2c_parts}"
++fi
++
++if [ -n $mtdparts ]; then
++	bootargs="${bootargs} mtdparts=${mtdparts}"
++fi
++
++if [ -e /dev/ram0 ]; then
++if [ ! -e /dev/ram0.kernelraw ]; then
++	# arm raw kernel images are usually located at sdram start + 0x8000
++	addpart /dev/ram0 8M@0x8000(kernelraw)
++fi
++
++if [ ! -e /dev/ram0.kernel ]; then
++	# Here we can safely put the kernel without risking of overwriting it
++	# while extracting
++	addpart /dev/ram0 8M@32M(kernel)
++fi
++fi
++
++if [ x$kernel_loc = xnfs ] || [ x$kernel_loc = xtftp ]; then
++	if [ x$ip = xdhcp ]; then
++		dhcp
++	fi
++	if [ $kernelimage_type = uimage ]; then
++		netload="/dev/ram0.kernel"
++	elif [ x$kernelimage_type = xmulti-uimage ]; then
++		netload="/dev/ram0.kernel"
++	elif [ $kernelimage_type = zimage ]; then
++		netload="/dev/ram0.kernel"
++	elif [ $kernelimage_type = raw ]; then
++		netload="/dev/ram0.kernelraw"
++	elif [ $kernelimage_type = raw_lzo ]; then
++		netload="/dev/ram0.kernel"
++	else
++		echo "error: set kernelimage_type to one of 'uimage', 'zimage', 'raw' or 'raw_lzo'"
++		exit 1
++	fi
++	$kernel_loc $kernelimage $netload || exit 1
++	kdev="$netload"
++elif [ x$kernel_loc = xnor ]; then
++	kdev="/dev/nor0.kernel"
++elif [ x$kernel_loc = xnand ]; then
++  kdev="/dev/nand0.${kernel}.bb"
++elif [ x$kernel_loc = xfastspi ]; then
++	kdev="/dev/spi1.kernel"
++elif [ x$kernel_loc = xspi ]; then
++	kdev="/dev/spi0.kernel"
++elif [ x$kernel_loc = xi2c ]; then
++	kdev="/dev/i2ceeprom0.kernel"
++elif [ x$kernel_loc = xsata ]; then
++	addpart /dev/mem 3M@0x3008000(uImage)
++	sata read 3008000 1 5000
++	kdev="/dev/mem.uImage"
++	sata stop
++else
++	echo "error: set kernel_loc to one of 'nfs', 'tftp', 'nand', 'nor' , 'spi' , 'fastspi' or 'i2c'"
++	exit 1
++fi
++
++if [ -n $usb3_internal_clk ]; then
++	bootargs="$bootargs usb3_internal_clk=$usb3_internal_clk"
++fi
++
++if [ -n $pci_data ]; then
++  bootargs="$bootargs $pci_data"
++fi
++
++version
++if [ -n $bootver ]; then
++  bootargs="$bootargs bareboxver="$bootver""
++fi
++
++version_rv16x_26x
++if [ -n $bootver_rv16x_26x ]; then
++  bootargs="$bootargs bareboxver_rv16x_26x="$bootver_rv16x_26x""
++fi
++
++echo "booting kernel of type $kernelimage_type from $kdev"
++
++if [ x$kernelimage_type = xuimage ]; then
++	bootm $kdev
++  if [ $? != 0 ]; then
++    echo "bootm Failed to boot $kdev "
++    if [ x$kernel = xkernel1 ]; then
++      kernel=kernel2
++      rootfs=$ROOTFS_PART2
++    elif [ x$kernel = xkernel2 ]; then
++      kernel=kernel1
++      rootfs=$ROOTFS_PART1
++    fi
++    kdev="/dev/nand0.${kernel}.bb"
++    echo "Checking $kdev ..."
++    imageenv -c $kdev
++    if [ $? = 0 ]; then
++      imageenv -s "$rootfs"
++      echo "Booting kernel $kdev with Rootfs part : $rootfs"
++      bootm $kdev
++    else
++      echo "bootm Failed to boot $kdev Too!"
++      echo "Please execute Recovery Procedure!"
++      erase /dev/nand0.env
++      exit 1
++    fi
++  fi
++elif [ x$kernelimage_type = xmulti-uimage ]; then
++#limited multi image support, assuming that kernel is image 0 and ramdisk is image 1
++	bootm -r @1 -L 0x1A00000 $kdev
++elif [ x$kernelimage_type = xzimage ]; then
++	bootz $kdev
++elif [ x$kernelimage_type = xraw ]; then
++	if [ $kernel_loc != net ]; then
++		cp $kdev /dev/ram0.kernelraw
++	fi
++	bootu /dev/ram0.kernelraw
++elif [ x$kernelimage_type = xraw_lzo ]; then
++	unlzo $kdev /dev/ram0.kernelraw
++	bootu /dev/ram0.kernelraw
++fi
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/erase_firmware ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/erase_firmware
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/erase_firmware	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/erase_firmware	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,27 @@
++#!/bin/sh
++
++. /env/config
++
++if [ x$1 = ximage1 ]; then
++  echo "Erasing Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++elif [ x$1 = ximage2 ]; then
++  echo "Erasing Firmware image2"
++  kernel=kernel2
++  rootfs=rootfs2
++else
++  echo "No Input Option >> Erasing Default Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++fi
++if [ ! -e "/dev/nand0.$kernel" -o ! -e "/dev/nand0.$rootfs" ]; then
++  echo "Partition /dev/nand0.$kernel OR /dev/nand0.$rootfs does not exist!"
++  exit 1
++fi
++echo "Erasing Kernel ..."
++erase /dev/nand0.$kernel
++echo "done."
++echo "Erasing Rootfs ..."
++erase /dev/nand0.$rootfs
++echo "done."
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/hush_hack ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/hush_hack
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/hush_hack	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/hush_hack	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1 @@
++nand -a /dev/nand0.*
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/init ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/init
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/init	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/init	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,47 @@
++#!/bin/sh
++
++PATH=/env/bin
++export PATH
++
++. /env/config
++if [ -e /dev/nor0 -a -n "$nor_parts" ]; then
++	addpart /dev/nor0 $nor_parts
++fi
++
++if [ -e /dev/disk0 -a -n "$disk_parts" ]; then
++	addpart /dev/disk0 $disk_parts
++fi
++
++if [ -e /dev/nand0 -a -n "$nand_parts" ]; then
++	addpart /dev/nand0 $nand_parts
++
++	# Uh, oh, hush first expands wildcards and then starts executing
++	# commands. What a bug!
++	source /env/bin/hush_hack
++fi
++
++if [ -e /dev/i2ceeprom0 -a -n "$i2c_parts" ]; then
++	addpart /dev/i2ceeprom0 $i2c_parts
++fi
++
++if [ -e /dev/spi0 -a -n "$spi_parts" ]; then
++	addpart /dev/spi0 $spi_parts
++fi
++
++if [ -e /dev/spi1 -a -n "$fast_spi_parts" ]; then
++	addpart /dev/spi1 $fast_spi_parts
++fi
++
++if [ -f /env/bin/init_board ]; then
++	/env/bin/init_board
++fi
++
++echo
++echo -n "Hit any key to stop autoboot: "
++timeout -a $autoboot_timeout
++if [ $? != 0 ]; then
++	. /env/bin/_update_help
++	exit
++fi
++
++boot
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/recover_fw ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/recover_fw
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/recover_fw	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/recover_fw	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,32 @@
++#!/bin/sh
++
++. /env/config
++RESPONSE=N
++readline "Do you want to update NAND Barebox [Y/y]? : " RESPONSE
++if [ x$RESPONSE = xY -o x$RESPONSE = xy ]; then
++  echo "RESPONSE=$RESPONSE >> Updating Barebox image $bareboximage ..."
++  . /env/bin/update -t barebox -d nand -m tftp -f $bareboximage
++  echo "done Barebox Update"
++else
++  echo "RESPONSE=$RESPONSE >> Barebox Updated Skipped in Recovery Procedure!"
++fi
++if [ x$1 = ximage1 ]; then
++  echo "Updating Firmware $1 ..."
++  kernel=kernel1
++  rootfs=rootfs1
++elif [ x$1 = ximage2 ]; then
++  echo "Updating Firmware $1 ..."
++  kernel=kernel2
++  rootfs=rootfs2
++else
++  echo "No input option >> Updating Default Firmware image1 ..."
++  kernel=kernel1
++  rootfs=rootfs1
++fi
++echo "Updating Kernel with Image : $kernelimage ..."
++. /env/bin/update -t $kernel -d nand -m tftp -f $kernelimage
++echo "done Kernel Update."
++echo "Updating Rootfs with Image : $rootfsimage ..."
++. /env/bin/update -t $rootfs -d nand -m tftp -f $rootfsimage
++echo "done Rootfs Update."
++echo "To set last updated image as default (active), Please set active/backup environment variables by editing and saving File: /env/config and reset board"
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/update ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/update	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,100 @@
++#!/bin/sh
++
++type=""
++device_type=""
++check=n
++mode=tftp
++
++. /env/config
++
++while getopt "ht:d:f:a:s:m:c" Option
++do
++if [ ${Option} = t ]; then
++	type=${OPTARG}
++elif [ ${Option} = d ]; then
++	device_type=${OPTARG}
++elif [ ${Option} = f ]; then
++	imagename=${OPTARG}
++elif [ ${Option} = a ]; then
++	address=${OPTARG}
++elif [ ${Option} = s ]; then
++	size=${OPTARG}
++elif [ ${Option} = c ]; then
++	check=y
++elif [ ${Option} = m ]; then
++	mode=${OPTARG}
++else
++	. /env/bin/_update_help
++	exit 0
++fi
++done
++
++if [ x${type} = xkernel1 -o  x${type} = xkernel2 ]; then
++	image=$kernelimage
++elif [ x${type} = xrootfs1 -o  x${type} = xrootfs2 ]; then
++	image=$rootfsimage
++elif [ x${type} = xbarebox ]; then
++	image=$bareboximage
++	if [ x${image} = x ]; then
++		image=barebox.bin
++	fi
++elif [ x${type} = xuloader ]; then
++	image=$uloaderimage
++elif [ x${type} = xbareboxenv ]; then
++	image=$bareboxenvimage
++	if [ x${image} = x ]; then
++		image=bareboxenv.bin
++	fi
++	type=env
++elif [ x${type} = xmd5sum1 -o  x${type} = xmd5sum2 ]; then
++  image=$md5sumimage
++elif [ x${type} = xconfigcert ]; then
++  image=$imageconfig
++elif [ x${type} = xwebrootdb ]; then
++	image=$imageweb
++elif [ x${type} = xlicense ]; then
++	image=$imagelic
++else
++	. /env/bin/_update_help
++	exit 1
++fi
++
++if [ x${imagename} != x ]; then
++	image=${imagename}
++fi
++
++if [ x${device_type} = xnand ]; then
++	part=/dev/nand0.${type}.bb
++elif [ x${device_type} = xnor ]; then
++	part=/dev/nor0.${type}
++elif [ x${device_type} = xi2c ]; then
++	part=/dev/i2ceeprom0.${type}
++elif [ x${device_type} = xspi ]; then
++	part=/dev/spi0.${type}
++elif [ x${device_type} = xfastspi ]; then
++	part=/dev/spi1.${type}
++else
++	. /env/bin/_update_help
++	exit 1
++fi
++
++if [ x${mode} != xtftp ] && [ x${mode} != xxmodem ] && [ x${mode} != xddr ]; then
++	echo "unsupported mode ${mode}."
++	. /env/bin/_update_help
++	exit 1
++fi
++
++. /env/bin/_update || exit 1
++
++if [ x${check} = xy ]; then
++	if [ x${mode} = xddr ]; then
++		crc32 -f $part
++		crc32 $address+$size
++	elif [ x${mode} = xtftp ]; then
++		crc32 -f $part
++	else
++		crc32 -f $image -F $part
++	fi
++else
++	true
++fi
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/_update ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/_update
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/_update	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/_update	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,71 @@
++#!/bin/sh
++
++if [ x$mode = xddr ]; then
++	if [ -z "$part" -o -z "$address" -o -z "$size" ]; then
++		echo "define \$part, \$address and \$size"
++		exit 1
++	fi
++else
++	if [ -z "$part" -o -z "$image" ]; then
++		echo "define \$part and \$image"
++		exit 1
++	fi
++fi
++
++if [ ! -e "$part" ]; then
++	echo "Partition $part does not exist"
++	exit 1
++fi
++
++if [ x$mode = xtftp ]; then
++	if [ x$ip = xdhcp ]; then
++		dhcp
++	fi
++
++	ping $eth0.serverip
++	if [ $? -ne 0 ] ; then
++		echo "Server did not reply! Update aborted."
++		exit 1
++	fi
++
++elif [ x$mode = xxmodem ]; then
++	loadb -f $image -c
++	if [ $? -ne 0 ] ; then
++		echo "loadb failed or cancelled! Update aborted."
++		exit 1
++	fi
++fi
++
++unprotect $part
++
++if [ x${device_type} != xi2c ]; then
++	echo
++	echo "erasing partition $part"
++	echo
++	erase $part
++fi
++
++if [ x$mode = xddr ]; then
++	echo
++	echo "flashing $size@$address to $part"
++	echo
++else
++	echo
++	echo "flashing $image to $part"
++	echo
++fi
++
++if [ x$mode = xtftp ]; then
++	tftp $image $part
++	if [ $? -ne 0 ] ; then
++		echo "!!!Probable use of old NAND layout.!!!"
++		echo "Use 'erase_old_nand_fmt' command to clean NAND."
++		exit 1
++	fi
++elif [ x$mode = xddr ]; then
++	memcpy $address -d $part 0 $size
++else
++	cp $image $part
++fi
++
++protect $part
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_barebox ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_barebox
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_barebox	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_barebox	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,3 @@
++#!/bin/sh
++
++. /env/bin/update -t barebox -d $1
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_firmware ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_firmware
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_firmware	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_firmware	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,30 @@
++#!/bin/sh
++
++. /env/config
++
++if [ x$1 = ximage1 ]; then
++  echo "Updating Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++  md5sum=md5sum1
++elif [ x$1 = ximage2 ]; then
++  echo "Updating Firmware image2"
++  kernel=kernel2
++  rootfs=rootfs2
++  md5sum=md5sum2
++else
++  echo "No Input Option >> Updating Default Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++  md5sum=md5sum1
++fi
++echo "Updating Kernel with Image : $kernelimage ..."
++update -t $kernel -d nand
++echo "done Kernel Update"
++echo "Updating Rootfs with Image : $rootfsimage ..."
++update -t $rootfs -d nand
++echo "done Rootfs Update"
++echo "Updating md5sum with Image : $md5sumimage ..."
++update -t $md5sum -d fastspi
++echo "done md5sum Update"
++echo "To set last updated image as default (active), Please set active/backup environment variables by editing and saving File: /env/config and reset board"
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/_update_help ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/_update_help
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/_update_help	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/_update_help	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,18 @@
++#!/bin/sh
++
++echo "usage: update -t <uloader | barebox | bareboxenv | kernel1 | kernel2 | rootfs1 | rootfs2> -d <nand | fastspi> [-m tftp|xmodem|ddr] [-f imagename |-a address] -c"
++echo "update tools."
++echo ""
++echo "options"
++echo " -c     to check the crc32 for the image and flashed one"
++echo ""
++echo "default mode is tftp"
++echo "type update -t uloader -d fastspi [-m tftp|xmodem|ddr] [-f imagename|-a address] to update uloader into flash"
++echo "type update -t barebox -d nand [-m tftp|xmodem|ddr] [-f imagename|-a address] to update barebox into flash"
++echo "type update -t <kernel1 | kernel2> -d nand [-m tftp|xmodem|ddr] [-f imagename| -a address] to update kernel into flash"
++echo "type update -t <rootfs1 | rootfs2> -d nand [-m tftp|xmodem|ddr] [-f imagename| -a address] to update rootfs into flash"
++echo "type update_firmware <image1 | image2> to update kernel, rootfs on image1 OR image2"
++echo "type update -t configcert -d nand to update yaffs2 partition : config "
++echo "type update -t webrootdb -d nand to update yaffs2 partition : webrootdb"
++echo "type update -t license -d nand to update yaffs2 partition : license"
++echo "type update_yaffs2 to update all yaffs2 partitions config, webrootdb, license"
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_kernel ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_kernel
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_kernel	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_kernel	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,3 @@
++#!/bin/sh
++
++. /env/bin/update -t kernel -d $1
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_rootfs ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_rootfs
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_rootfs	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_rootfs	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,3 @@
++#!/bin/sh
++
++. /env/bin/update -t rootfs -d $1
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_uloader ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_uloader
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_uloader	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_uloader	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,3 @@
++#!/bin/sh
++
++. /env/bin/update -t uloader -d $1
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_yaffs2 ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_yaffs2
+--- ./arch/arm/boards/comcerto-mfcnevm/env/bin/update_yaffs2	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/bin/update_yaffs2	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,13 @@
++#!/bin/sh
++
++. /env/config
++
++echo "Updating configcert with Image : $imageconfig ..."
++update -t configcert -d nand
++echo "done."
++echo "Updating webrootdb with Image : $imageweb ..."
++update -t webrootdb -d nand
++echo "done."
++echo "Updating license with Image : $imagelic ... "
++update -t license -d nand
++echo "done."
+diff -Naur ./arch/arm/boards/comcerto-mfcnevm/env/config ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/config
+--- ./arch/arm/boards/comcerto-mfcnevm/env/config	2017-02-10 22:09:02.902646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-mfcnevm/env/config	2017-02-15 20:09:29.156994160 +0530
+@@ -36,18 +36,33 @@
+ #rootfs_type=jffs2
+ rootfs_type=ubifs
+ #rootfs_type=ext4
+-rootfsimage=root.$rootfs_type-128k
++rootfsimage=openwrt-comcerto2000-hgw-rootfs-ubi_nand.img
+ 
+ # The image type of the kernel. Can be uimage, multi-uimage, zimage, raw, or raw_lzo
+ kernelimage_type=uimage
+ #kernelimage_type=multi-uimage
+-kernelimage=uImage
++kernelimage=openwrt-comcerto2000-hgw-uImage.img
++
++# md5sum image
++md5sumimage=md5sum_fw-mfcnevm-img
++
++# yaffs2 custom images
++imageconfig=root_configcert.yaffs2
++imageweb=root_webrootdb.yaffs2
++imagelic=root_license.yaffs2
++
++# active inactive image identifiers
++active=image1
++inactive=image2
++
++# Rootfs Partition Identifiers
++ROOTFS_PART1=9
++ROOTFS_PART2=12
+ 
+ #nfsroot="$eth0.serverip:/opt/work/busybox/rootfs_arm"
+ 
+ nand_device="comcertonand"
+-nand_parts="1024k(barebox)ro,1024k(bareboxenv),4M(kernel),-(rootfs)"
+-rootfs_mtdblock_nand=8
++nand_parts="1024k(barebox),1024k(bareboxfact)ro,1024k(env),8M(kernel1),92M(rootfs1),1024k(reserved_dtb1),8M(kernel2),92M(rootfs2),1024k(reserved_dtb2),2M(configcert),12M(reserved),32M(webrootdb),2M(license)"
+ 
+ nor_parts="128k(uloader)ro,512k(barebox)ro,128k(env),4M(kernel),48M(rootfs)"
+ nor_device="comcertoflash.0"
+@@ -56,13 +71,11 @@
+ i2c_parts="64k(uloader)ro"
+ 
+ fast_spi_device="spi1.0"
+-fast_spi_parts="128k(uloader)ro,512k(barebox)ro,128k(env),4M(kernel),-(rootfs)"
+-rootfs_mtdblock_fastspi=13
++fast_spi_parts="128k(uloader)ro,512k(barebox)ro,128k(env),128k(boardinfo)ro,64k(md5sum1),64k(md5sum2)"
+ 
+ autoboot_timeout=3
+ 
+ usb3_internal_clk="yes"
+ 
+ bootargs="console=ttyS0,115200n8, init=/etc/preinit"
+-bootargs="$bootargs mac_addr=$eth0.ethaddr,$eth1.ethaddr,$eth2.ethaddr"
+ 
+diff -Naur ./arch/arm/boards/comcerto-rv16x-26x/env/bin/boot ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot
+--- ./arch/arm/boards/comcerto-rv16x-26x/env/bin/boot	2017-02-10 22:09:02.902646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot	2017-02-15 20:09:29.156994160 +0530
+@@ -4,48 +4,48 @@
+ 
+ gpio_set_value $GPIO_LED_DIAG $OFF 
+ 
+-echo "Setting env LAN, WAN1, WAN2..."
++echo "Setting env LAN, WAN..."
+ boardinfo -m
+ echo "done"
+-echo -n "Exporting env LAN, WAN1, WAN2..."
+-export LAN="$LAN" WAN1="$WAN1" WAN2="$WAN2"
++echo -n "Exporting env LAN, WAN..."
++export LAN="$LAN" WAN="$WAN"
+ echo "done"
+ 
+-if [  "X$LAN" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN1" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN2" != "XFF:FF:FF:FF:FF:FF" ]; then
++if [  "X$LAN" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN" != "XFF:FF:FF:FF:FF:FF" ]; then
+   echo "FOUND MACs from Boardinfo using same in bootargs"
+-  export eth0_ethaddr="$WAN2" eth1_ethaddr="$WAN1" eth2_ethaddr="$LAN"
+-  echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr, eth2mac = $eth2_ethaddr"
+-  bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr,$eth2_ethaddr"
+-elif [  "X$LAN" = "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN1" = "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN2" = "XFF:FF:FF:FF:FF:FF" ]; then
++  export eth0_ethaddr="$WAN" eth1_ethaddr="$LAN"
++  echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr"
++  bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr"
++elif [  "X$LAN" = "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN" = "XFF:FF:FF:FF:FF:FF" ]; then
+   echo -e "One or More MACs from Boardinfo are INVALID OR NOT Programmed!!!\nHalting Boot Up...done."
+   exit 1
+ fi
+ echo "done"
+ 
+ if [ x$1 = xnand ]; then
+-  rootfs_loc=nand
+-  kernel_loc=nand
++	rootfs_loc=nand
++	kernel_loc=nand
+ elif [ x$1 = xnor ]; then
+-  rootfs_loc=nor
+-  kernel_loc=nor
++	rootfs_loc=nor
++	kernel_loc=nor
+ elif [ x$1 = xsata ]; then
+-  rootfs_loc=sata
+-  kernel_loc=sata
++	rootfs_loc=sata
++	kernel_loc=sata
+ elif [ x$1 = xfastspi ]; then
+-  rootfs_loc=fastspi
+-  kernel_loc=fastspi
++	rootfs_loc=fastspi
++	kernel_loc=fastspi
+ elif [ x$1 = xspi ]; then
+-  rootfs_loc=spi
+-  kernel_loc=spi
++	rootfs_loc=spi
++	kernel_loc=spi
+ elif [ x$1 = xi2c ]; then
+-  rootfs_loc=i2c
+-  kernel_loc=i2c
++	rootfs_loc=i2c
++	kernel_loc=i2c
+ elif [ x$1 = xnfs ]; then
+-  rootfs_loc=net
+-  kernel_loc=nfs
++	rootfs_loc=net
++	kernel_loc=nfs
+ elif [ x$1 = xtftp ]; then
+-  rootfs_loc=net
+-  kernel_loc=tftp
++	rootfs_loc=net
++	kernel_loc=tftp
+ fi
+ 
+ echo -n "Setting active/inactive env..."
+@@ -95,136 +95,141 @@
+ fi
+ 
+ if [ x$ip = xdhcp ]; then
+-  bootargs="$bootargs ip=dhcp"
++	bootargs="$bootargs ip=dhcp"
+ elif [ x$ip = xnone ]; then
+-  bootargs="$bootargs ip=none"
++	bootargs="$bootargs ip=none"
+ else
+   bootargs="$bootargs ip=${eth0.ipaddr}::${eth0.gateway}:${eth0.netmask}:::"
+ fi
+ 
++
+ if [ x$rootfs_loc = xnet ]; then
+-  bootargs="$bootargs root=/dev/nfs nfsroot=$nfsroot,v3,tcp noinitrd"
++	bootargs="$bootargs root=/dev/nfs nfsroot=$nfsroot,v3,tcp noinitrd"
+ elif [ x$rootfs_loc = xinitrd ]; then
+-  bootargs="$bootargs root=/dev/ram0 rootfstype=ramfs rdinit=/linuxrc"
++	bootargs="$bootargs root=/dev/ram0 rootfstype=ramfs rdinit=/linuxrc"
+ elif [ x$rootfs_loc = xsata ]; then
+-  bootargs="$bootargs root=/dev/sda2 rootfstype=$rootfs_type rw noinitrd"
++	bootargs="$bootargs root=/dev/sda2 rootfstype=$rootfs_type rw noinitrd"
+ else
+-  if [ x$rootfs_loc = xnand ]; then
+-    rootfs_mtdblock=$rootfs_mtdblock_nand
+-  elif [ x$rootfs_loc = xnor ]; then
+-    rootfs_mtdblock=$rootfs_mtdblock_nor
+-  elif [ x$rootfs_loc = xfastspi ]; then
+-    rootfs_mtdblock=$rootfs_mtdblock_fastspi
+-  elif [ x$rootfs_loc = xspi ]; then
+-    rootfs_mtdblock=$rootfs_mtdblock_spi
+-  elif [ x$rootfs_loc = xi2c ]; then
+-    rootfs_mtdblock=$rootfs_mtdblock_i2c
+-  fi
+-
+-  if [ x$rootfs_type = xubifs ]; then
+-    if [ -z $ubiroot ]; then
+-      ubiroot="rootfs"
+-    fi
+-    bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock"
+-  else
+-    bootargs="$bootargs root=/dev/mtdblock$rootfs_mtdblock"
+-  fi
++	if [ x$rootfs_loc = xnand ]; then
++		rootfs_mtdblock=$rootfs_mtdblock_nand
++	elif [ x$rootfs_loc = xnor ]; then
++		rootfs_mtdblock=$rootfs_mtdblock_nor
++	elif [ x$rootfs_loc = xfastspi ]; then
++		rootfs_mtdblock=$rootfs_mtdblock_fastspi
++	elif [ x$rootfs_loc = xspi ]; then
++		rootfs_mtdblock=$rootfs_mtdblock_spi
++	elif [ x$rootfs_loc = xi2c ]; then
++		rootfs_mtdblock=$rootfs_mtdblock_i2c
++	fi
++
++	if [ x$rootfs_type = xubifs ]; then
++		if [ -z $ubiroot ]; then
++			ubiroot="rootfs"
++		fi
++		if [ x$rootfs_loc = xnand ]; then
++			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock ,4096"
++		else
++			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock "
++		fi
++	else
++		bootargs="$bootargs root=/dev/mtdblock$rootfs_mtdblock"
++	fi
+ 
+-  bootargs="$bootargs rootfstype=$rootfs_type rw noinitrd"
++	bootargs="$bootargs rootfstype=$rootfs_type rw noinitrd"
+ fi
+ 
+ if [ -n $nor_parts ]; then
+-  mtdparts="${mtdparts}${nor_device}:${nor_parts}"
++	mtdparts="${mtdparts}${nor_device}:${nor_parts}"
+ fi
+ 
+ if [ -n $nand_parts ]; then
+-  if [ -n ${mtdparts} ]; then
+-    mtdparts="${mtdparts};"
+-  fi
+-  mtdparts="${mtdparts}${nand_device}:${nand_parts}"
++	if [ -n ${mtdparts} ]; then
++		mtdparts="${mtdparts};"
++	fi
++	mtdparts="${mtdparts}${nand_device}:${nand_parts}"
+ fi
+ 
+ if [ -n $spi_parts ]; then
+-  if [ -n ${mtdparts} ]; then
+-    mtdparts="${mtdparts};"
+-  fi
+-  mtdparts="${mtdparts}${spi_device}:${spi_parts}"
++	if [ -n ${mtdparts} ]; then
++		mtdparts="${mtdparts};"
++	fi
++	mtdparts="${mtdparts}${spi_device}:${spi_parts}"
+ fi
+ 
+ if [ -n $fast_spi_parts ]; then
+-  if [ -n ${mtdparts} ]; then
+-    mtdparts="${mtdparts};"
+-  fi
+-  mtdparts="${mtdparts}${fast_spi_device}:${fast_spi_parts}"
++	if [ -n ${mtdparts} ]; then
++		mtdparts="${mtdparts};"
++	fi
++	mtdparts="${mtdparts}${fast_spi_device}:${fast_spi_parts}"
+ fi
+ 
+ 
+ if [ -n $i2c_parts -a -n $i2c_device ]; then
+-  if [ -n ${mtdparts} ]; then
+-    mtdparts="${mtdparts};"
+-  fi
+-  mtdparts="${mtdparts}${i2c_device}:${i2c_parts}"
++	if [ -n ${mtdparts} ]; then
++		mtdparts="${mtdparts};"
++	fi
++	mtdparts="${mtdparts}${i2c_device}:${i2c_parts}"
+ fi
+ 
+ if [ -n $mtdparts ]; then
+-  bootargs="${bootargs} mtdparts=${mtdparts}"
++	bootargs="${bootargs} mtdparts=${mtdparts}"
+ fi
+ 
+ if [ -e /dev/ram0 ]; then
+ if [ ! -e /dev/ram0.kernelraw ]; then
+-  # arm raw kernel images are usually located at sdram start + 0x8000
+-  addpart /dev/ram0 8M@0x8000(kernelraw)
++	# arm raw kernel images are usually located at sdram start + 0x8000
++	addpart /dev/ram0 8M@0x8000(kernelraw)
+ fi
+ 
+ if [ ! -e /dev/ram0.kernel ]; then
+-  # Here we can safely put the kernel without risking of overwriting it
+-  # while extracting
+-  addpart /dev/ram0 8M@32M(kernel)
++	# Here we can safely put the kernel without risking of overwriting it
++	# while extracting
++	addpart /dev/ram0 8M@32M(kernel)
+ fi
+ fi
+ 
+ if [ x$kernel_loc = xnfs ] || [ x$kernel_loc = xtftp ]; then
+-  if [ x$ip = xdhcp ]; then
+-    dhcp
+-  fi
+-  if [ $kernelimage_type = uimage ]; then
+-    netload="/dev/ram0.kernel"
+-  elif [ x$kernelimage_type = xmulti-uimage ]; then
+-    netload="/dev/ram0.kernel"
+-  elif [ $kernelimage_type = zimage ]; then
+-    netload="/dev/ram0.kernel"
+-  elif [ $kernelimage_type = raw ]; then
+-    netload="/dev/ram0.kernelraw"
+-  elif [ $kernelimage_type = raw_lzo ]; then
+-    netload="/dev/ram0.kernel"
+-  else
+-    echo "error: set kernelimage_type to one of 'uimage', 'zimage', 'raw' or 'raw_lzo'"
+-    exit 1
+-  fi
+-  $kernel_loc $kernelimage $netload || exit 1
+-  kdev="$netload"
++	if [ x$ip = xdhcp ]; then
++		dhcp
++	fi
++	if [ $kernelimage_type = uimage ]; then
++		netload="/dev/ram0.kernel"
++	elif [ x$kernelimage_type = xmulti-uimage ]; then
++		netload="/dev/ram0.kernel"
++	elif [ $kernelimage_type = zimage ]; then
++		netload="/dev/ram0.kernel"
++	elif [ $kernelimage_type = raw ]; then
++		netload="/dev/ram0.kernelraw"
++	elif [ $kernelimage_type = raw_lzo ]; then
++		netload="/dev/ram0.kernel"
++	else
++		echo "error: set kernelimage_type to one of 'uimage', 'zimage', 'raw' or 'raw_lzo'"
++		exit 1
++	fi
++	$kernel_loc $kernelimage $netload || exit 1
++	kdev="$netload"
+ elif [ x$kernel_loc = xnor ]; then
+-  kdev="/dev/nor0.kernel"
++	kdev="/dev/nor0.kernel"
+ elif [ x$kernel_loc = xnand ]; then
+   kdev="/dev/nand0.${kernel}.bb"
+ elif [ x$kernel_loc = xfastspi ]; then
+-  kdev="/dev/spi1.kernel"
++	kdev="/dev/spi1.kernel"
+ elif [ x$kernel_loc = xspi ]; then
+-  kdev="/dev/spi0.kernel"
++	kdev="/dev/spi0.kernel"
+ elif [ x$kernel_loc = xi2c ]; then
+-  kdev="/dev/i2ceeprom0.kernel"
++	kdev="/dev/i2ceeprom0.kernel"
+ elif [ x$kernel_loc = xsata ]; then
+-  addpart /dev/mem 3M@0x3008000(uImage)
+-  sata read 3008000 1 5000
+-  kdev="/dev/mem.uImage"
+-  sata stop
++	addpart /dev/mem 3M@0x3008000(uImage)
++	sata read 3008000 1 5000
++	kdev="/dev/mem.uImage"
++	sata stop
+ else
+-  echo "error: set kernel_loc to one of 'nfs', 'tftp', 'nand', 'nor' , 'spi' , 'fastspi' or 'i2c'"
+-  exit 1
++	echo "error: set kernel_loc to one of 'nfs', 'tftp', 'nand', 'nor' , 'spi' , 'fastspi' or 'i2c'"
++	exit 1
+ fi
+ 
+ if [ -n $usb3_internal_clk ]; then
+-  bootargs="$bootargs usb3_internal_clk=$usb3_internal_clk"
++	bootargs="$bootargs usb3_internal_clk=$usb3_internal_clk"
+ fi
+ 
+ if [ -n $pci_data ]; then
+@@ -248,7 +253,7 @@
+ echo "booting kernel of type $kernelimage_type from $kdev"
+ 
+ if [ x$kernelimage_type = xuimage ]; then
+-  bootm $kdev
++	bootm $kdev
+   if [ $? != 0 ]; then
+     echo "bootm Failed to boot $kdev "
+     if [ x$kernel = xkernel1 ]; then
+@@ -274,15 +279,15 @@
+   fi
+ elif [ x$kernelimage_type = xmulti-uimage ]; then
+ #limited multi image support, assuming that kernel is image 0 and ramdisk is image 1
+-  bootm -r @1 -L 0x1A00000 $kdev
++	bootm -r @1 -L 0x1A00000 $kdev
+ elif [ x$kernelimage_type = xzimage ]; then
+-  bootz $kdev
++	bootz $kdev
+ elif [ x$kernelimage_type = xraw ]; then
+-  if [ $kernel_loc != net ]; then
+-    cp $kdev /dev/ram0.kernelraw
+-  fi
+-  bootu /dev/ram0.kernelraw
++	if [ $kernel_loc != net ]; then
++		cp $kdev /dev/ram0.kernelraw
++	fi
++	bootu /dev/ram0.kernelraw
+ elif [ x$kernelimage_type = xraw_lzo ]; then
+-  unlzo $kdev /dev/ram0.kernelraw
+-  bootu /dev/ram0.kernelraw
++	unlzo $kdev /dev/ram0.kernelraw
++	bootu /dev/ram0.kernelraw
+ fi
+diff -Naur ./arch/arm/boards/comcerto-rv16x-26x/env/bin/update ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update
+--- ./arch/arm/boards/comcerto-rv16x-26x/env/bin/update	2017-02-10 22:09:02.902646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/bin/update	2017-02-15 20:09:29.156994160 +0530
+@@ -30,7 +30,7 @@
+ done
+ 
+ if [ x${type} = xkernel1 -o  x${type} = xkernel2 ]; then
+-  image=$kernelimage
++	image=$kernelimage
+ elif [ x${type} = xrootfs1 -o  x${type} = xrootfs2 ]; then
+ 	image=$rootfsimage
+ elif [ x${type} = xbarebox ]; then
+diff -Naur ./arch/arm/boards/comcerto-rv16x-26x/env/config ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/config
+--- ./arch/arm/boards/comcerto-rv16x-26x/env/config	2017-02-10 22:09:02.902646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/config	2017-02-17 00:04:27.372388209 +0530
+@@ -63,7 +63,7 @@
+ 
+ usb3_internal_clk="yes"
+ 
+-loglevel=4
++loglevel=8
+ 
+ pci_data="pcie0_gen1_only=yes pcie1_gen1_only=no  pcie_external_clk=yes"
+ 
+diff -Naur ./arch/arm/configs/comcerto-2k_mfcnevm_defconfig ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_mfcnevm_defconfig
+--- ./arch/arm/configs/comcerto-2k_mfcnevm_defconfig	2017-02-10 22:09:02.894646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_mfcnevm_defconfig	2017-02-15 20:09:29.156994160 +0530
+@@ -38,6 +38,7 @@
+ #
+ # CONFIG_MACH_COMCERTO_C2K_EVM is not set
+ CONFIG_MACH_COMCERTO_C2K_MFCNEVM=y
++# CONFIG_MACH_COMCERTO_C2K_RV16X_26X is not set
+ # CONFIG_MACH_COMCERTO_C2K_ASIC is not set
+ # CONFIG_MACH_COMCERTO_C2K_RTSM is not set
+ 
+@@ -50,7 +51,7 @@
+ # CONFIG_COMCERTO_ULOADER is not set
+ # CONFIG_COMCERTO_NAND_ULOADER is not set
+ CONFIG_COMCERTO_NAND=y
+-# CONFIG_COMCERTO_GPIO is not set
++CONFIG_COMCERTO_GPIO=y
+ # CONFIG_M86201 is not set
+ # CONFIG_M86202 is not set
+ # CONFIG_M86203 is not set
+@@ -101,6 +102,7 @@
+ CONFIG_HAS_MODULES=y
+ CONFIG_CMD_MEMORY=y
+ CONFIG_ENV_HANDLING=y
++CONFIG_GENERIC_GPIO=y
+ 
+ #
+ # General Settings
+@@ -116,10 +118,10 @@
+ CONFIG_HAVE_CONFIGURABLE_MEMORY_LAYOUT=y
+ # CONFIG_MEMORY_LAYOUT_DEFAULT is not set
+ CONFIG_MEMORY_LAYOUT_FIXED=y
+-CONFIG_STACK_BASE=0x00700000
++CONFIG_STACK_BASE=0x01200000
+ CONFIG_STACK_SIZE=0x8000
+ CONFIG_MALLOC_BASE=0x00100000
+-CONFIG_MALLOC_SIZE=0x500000
++CONFIG_MALLOC_SIZE=0x1000000
+ # CONFIG_BROKEN is not set
+ # CONFIG_EXPERIMENTAL is not set
+ CONFIG_MALLOC_DLMALLOC=y
+@@ -169,10 +171,10 @@
+ # scripting
+ #
+ CONFIG_CMD_EDIT=y
+-# CONFIG_CMD_SLEEP is not set
++CONFIG_CMD_SLEEP=y
+ CONFIG_CMD_SAVEENV=y
+ CONFIG_CMD_LOADENV=y
+-# CONFIG_CMD_EXPORT is not set
++CONFIG_CMD_EXPORT=y
+ CONFIG_CMD_PRINTENV=y
+ CONFIG_CMD_READLINE=y
+ CONFIG_CMD_TRUE=y
+@@ -196,22 +198,26 @@
+ CONFIG_CMD_NAND=y
+ CONFIG_CMD_NOR=y
+ CONFIG_CMD_COPY=y
++CONFIG_CMD_BOARDINFO=y
++CONFIG_CMD_IMAGEENV=y
+ 
+ #
+ # console
+ #
+ CONFIG_CMD_CLEAR=y
+ CONFIG_CMD_ECHO=y
+-# CONFIG_CMD_ECHO_E is not set
++CONFIG_CMD_ECHO_E=y
+ 
+ #
+ # memory
+ #
+-# CONFIG_CMD_LOADB is not set
+-# CONFIG_CMD_LOADY is not set
+-# CONFIG_CMD_MEMINFO is not set
+-# CONFIG_CMD_CRC is not set
+-# CONFIG_CMD_MTEST is not set
++CONFIG_CMD_LOADB=y
++CONFIG_CMD_LOADY=y
++CONFIG_CMD_MEMINFO=y
++CONFIG_CMD_CRC=y
++CONFIG_CMD_CRC_CMP=y
++CONFIG_CMD_MTEST=y
++CONFIG_CMD_MTEST_ALTERNATIVE=y
+ 
+ #
+ # flash
+@@ -223,9 +229,9 @@
+ # booting
+ #
+ CONFIG_CMD_BOOTM=y
+-# CONFIG_CMD_BOOTM_ZLIB is not set
+-# CONFIG_CMD_BOOTM_BZLIB is not set
+-# CONFIG_CMD_BOOTM_SHOW_TYPE is not set
++CONFIG_CMD_BOOTM_ZLIB=y
++CONFIG_CMD_BOOTM_BZLIB=y
++CONFIG_CMD_BOOTM_SHOW_TYPE=y
+ CONFIG_CMD_BOOTZ=y
+ CONFIG_CMD_BOOTU=y
+ CONFIG_CMD_RESET=y
+@@ -234,11 +240,14 @@
+ CONFIG_CMD_PARTITION=y
+ CONFIG_CMD_TEST=y
+ CONFIG_CMD_VERSION=y
++CONFIG_CMD_VERSION_RV16X_26X=y
+ CONFIG_CMD_HELP=y
+ CONFIG_CMD_DEVINFO=y
++CONFIG_CMD_GPIO=y
+ # CONFIG_CMD_UNLZO is not set
+ # CONFIG_CMD_I2C is not set
+ CONFIG_CMD_SATA=y
++CONFIG_CMD_CHKRESET=y
+ #
+ # c2000
+ #
+@@ -369,6 +378,7 @@
+ # CONFIG_FS_FAT is not set
+ CONFIG_PARTITION_NEED_MTD=y
+ CONFIG_ZLIB=y
++CONFIG_BZLIB=y
+ CONFIG_CRC32=y
+ # CONFIG_DIGEST is not set
+ # CONFIG_GENERIC_FIND_NEXT_BIT is not set
+diff -Naur ./arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig
+--- ./arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig	2017-02-10 22:09:02.894646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_mfcnevm_diags_defconfig	2017-02-15 20:09:29.156994160 +0530
+@@ -38,6 +38,7 @@
+ #
+ # CONFIG_MACH_COMCERTO_C2K_EVM is not set
+ CONFIG_MACH_COMCERTO_C2K_MFCNEVM=y
++# CONFIG_MACH_COMCERTO_C2K_RV16X_26X is not set
+ # CONFIG_MACH_COMCERTO_C2K_ASIC is not set
+ # CONFIG_MACH_COMCERTO_C2K_RTSM is not set
+ 
+@@ -151,6 +152,7 @@
+ CONFIG_HAS_MODULES=y
+ CONFIG_CMD_MEMORY=y
+ CONFIG_ENV_HANDLING=y
++CONFIG_GENERIC_GPIO=y
+ 
+ #
+ # General Settings
+@@ -222,10 +224,10 @@
+ #
+ # CONFIG_CMD_EDIT is not set
+ # CONFIG_CMD_EXEC is not set
+-# CONFIG_CMD_SLEEP is not set
++CONFIG_CMD_SLEEP=y
+ CONFIG_CMD_SAVEENV=y
+ CONFIG_CMD_LOADENV=y
+-# CONFIG_CMD_EXPORT is not set
++CONFIG_CMD_EXPORT=y
+ CONFIG_CMD_PRINTENV=y
+ CONFIG_CMD_READLINE=y
+ CONFIG_CMD_TRUE=y
+@@ -249,6 +251,8 @@
+ CONFIG_CMD_NAND=y
+ CONFIG_CMD_NOR=y
+ CONFIG_CMD_COPY=y
++CONFIG_CMD_BOARDINFO=y
++CONFIG_CMD_IMAGEENV=y
+ 
+ #
+ # console
+@@ -288,10 +292,14 @@
+ CONFIG_CMD_PARTITION=y
+ CONFIG_CMD_TEST=y
+ CONFIG_CMD_VERSION=y
++CONFIG_CMD_VERSION_RV16X_26X=y
+ CONFIG_CMD_HELP=y
+ CONFIG_CMD_DEVINFO=y
++CONFIG_CMD_GPIO=y
+ # CONFIG_CMD_UNLZO is not set
+ # CONFIG_CMD_I2C is not set
++CONFIG_CMD_CHKRESET=y
++
+ #
+ # c2000
+ #
+diff -Naur ./arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig
+--- ./arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig	2017-02-10 22:09:02.894646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_mfcnevm_nand_uloader_defconfig	2017-02-15 20:09:29.156994160 +0530
+@@ -37,6 +37,7 @@
+ #
+ # CONFIG_MACH_COMCERTO_C2K_EVM is not set
+ CONFIG_MACH_COMCERTO_C2K_MFCNEVM=y
++# CONFIG_MACH_COMCERTO_C2K_RV16X_26X is not set
+ # CONFIG_MACH_COMCERTO_C2K_ASIC is not set
+ # CONFIG_MACH_COMCERTO_C2K_RTSM is not set
+ 
+@@ -223,6 +224,7 @@
+ # CONFIG_CMD_TIMEOUT is not set
+ # CONFIG_CMD_PARTITION is not set
+ # CONFIG_CMD_VERSION is not set
++# CONFIG_CMD_VERSION_RV16X_26X is not set
+ # CONFIG_CMD_HELP is not set
+ # CONFIG_CMD_DEVINFO is not set
+ # CONFIG_CMD_UNLZO is not set
+diff -Naur ./arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig
+--- ./arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig	2017-02-10 22:09:02.894646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_mfcnevm_uloader_defconfig	2017-02-15 20:09:29.156994160 +0530
+@@ -37,6 +37,7 @@
+ #
+ # CONFIG_MACH_COMCERTO_C2K_EVM is not set
+ CONFIG_MACH_COMCERTO_C2K_MFCNEVM=y
++# CONFIG_MACH_COMCERTO_C2K_RV16X_26X is not set
+ # CONFIG_MACH_COMCERTO_C2K_ASIC is not set
+ # CONFIG_MACH_COMCERTO_C2K_RTSM is not set
+ 
+@@ -187,6 +188,8 @@
+ # CONFIG_CMD_UMOUNT is not set
+ # CONFIG_CMD_NOR is not set
+ # CONFIG_CMD_COPY is not set
++# CONFIG_CMD_BOARDINFO is not set
++# CONFIG_CMD_IMAGEENV is not set
+ 
+ #
+ # console
+@@ -220,9 +223,12 @@
+ # CONFIG_CMD_TIMEOUT is not set
+ # CONFIG_CMD_PARTITION is not set
+ # CONFIG_CMD_VERSION is not set
++# CONFIG_CMD_VERSION_RV16X_26X is not set
+ # CONFIG_CMD_HELP is not set
+ # CONFIG_CMD_DEVINFO is not set
+ # CONFIG_CMD_UNLZO is not set
++# CONFIG_CMD_CHKRESET is not set
++# CONFIG_CMD_GPIO is not set
+ 
+ #
+ # c2000
+diff -Naur ./arch/arm/configs/comcerto-2k_rv16x-26x_defconfig ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig
+--- ./arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	2017-02-10 22:09:02.894646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	2017-02-15 20:09:29.156994160 +0530
+@@ -51,7 +51,7 @@
+ # CONFIG_COMCERTO_ULOADER is not set
+ # CONFIG_COMCERTO_NAND_ULOADER is not set
+ CONFIG_COMCERTO_NAND=y
+-# CONFIG_COMCERTO_GPIO is not set
++CONFIG_COMCERTO_GPIO=y
+ # CONFIG_M86201 is not set
+ # CONFIG_M86202 is not set
+ # CONFIG_M86203 is not set
+@@ -102,6 +102,7 @@
+ CONFIG_HAS_MODULES=y
+ CONFIG_CMD_MEMORY=y
+ CONFIG_ENV_HANDLING=y
++CONFIG_GENERIC_GPIO=y
+ 
+ #
+ # General Settings
+@@ -117,10 +118,10 @@
+ CONFIG_HAVE_CONFIGURABLE_MEMORY_LAYOUT=y
+ # CONFIG_MEMORY_LAYOUT_DEFAULT is not set
+ CONFIG_MEMORY_LAYOUT_FIXED=y
+-CONFIG_STACK_BASE=0x00700000
++CONFIG_STACK_BASE=0x01200000
+ CONFIG_STACK_SIZE=0x8000
+ CONFIG_MALLOC_BASE=0x00100000
+-CONFIG_MALLOC_SIZE=0x500000
++CONFIG_MALLOC_SIZE=0x1000000
+ # CONFIG_BROKEN is not set
+ # CONFIG_EXPERIMENTAL is not set
+ CONFIG_MALLOC_DLMALLOC=y
+@@ -170,10 +171,10 @@
+ # scripting
+ #
+ CONFIG_CMD_EDIT=y
+-# CONFIG_CMD_SLEEP is not set
++CONFIG_CMD_SLEEP=y
+ CONFIG_CMD_SAVEENV=y
+ CONFIG_CMD_LOADENV=y
+-# CONFIG_CMD_EXPORT is not set
++CONFIG_CMD_EXPORT=y
+ CONFIG_CMD_PRINTENV=y
+ CONFIG_CMD_READLINE=y
+ CONFIG_CMD_TRUE=y
+@@ -198,21 +199,24 @@
+ CONFIG_CMD_NOR=y
+ CONFIG_CMD_UPDATE_SPI=y
+ CONFIG_CMD_COPY=y
++CONFIG_CMD_BOARDINFO=y
++CONFIG_CMD_IMAGEENV=y
+ 
+ #
+ # console
+ #
+ CONFIG_CMD_CLEAR=y
+ CONFIG_CMD_ECHO=y
+-# CONFIG_CMD_ECHO_E is not set
++CONFIG_CMD_ECHO_E=y
+ 
+ #
+ # memory
+ #
+-# CONFIG_CMD_LOADB is not set
+-# CONFIG_CMD_LOADY is not set
+-# CONFIG_CMD_MEMINFO is not set
+-# CONFIG_CMD_CRC is not set
++CONFIG_CMD_LOADB=y
++CONFIG_CMD_LOADY=y
++CONFIG_CMD_MEMINFO=y
++CONFIG_CMD_CRC=y
++CONFIG_CMD_CRC_CMP=y
+ # CONFIG_CMD_MTEST is not set
+ CONFIG_CMD_MEM_FLASH_TEST=y
+ 
+@@ -237,11 +241,14 @@
+ CONFIG_CMD_PARTITION=y
+ CONFIG_CMD_TEST=y
+ CONFIG_CMD_VERSION=y
++CONFIG_CMD_VERSION_RV16X_26X=y
+ CONFIG_CMD_HELP=y
+ CONFIG_CMD_DEVINFO=y
++CONFIG_CMD_GPIO=y
+ # CONFIG_CMD_UNLZO is not set
+ # CONFIG_CMD_I2C is not set
+ CONFIG_CMD_SATA=y
++CONFIG_CMD_CHKRESET=y
+ #
+ # c2000
+ #
+diff -Naur ./arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig
+--- ./arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig	2017-02-10 22:09:02.894646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig	2017-02-15 20:09:29.156994160 +0530
+@@ -224,6 +224,7 @@
+ # CONFIG_CMD_TIMEOUT is not set
+ # CONFIG_CMD_PARTITION is not set
+ # CONFIG_CMD_VERSION is not set
++# CONFIG_CMD_VERSION_RV16X_26X is not set
+ # CONFIG_CMD_HELP is not set
+ # CONFIG_CMD_DEVINFO is not set
+ # CONFIG_CMD_UNLZO is not set
+diff -Naur ./arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig
+--- ./arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig	2017-02-10 22:09:02.894646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig	2017-02-15 20:09:29.156994160 +0530
+@@ -188,6 +188,8 @@
+ # CONFIG_CMD_UMOUNT is not set
+ # CONFIG_CMD_NOR is not set
+ # CONFIG_CMD_COPY is not set
++# CONFIG_CMD_BOARDINFO is not set
++# CONFIG_CMD_IMAGEENV is not set
+ 
+ #
+ # console
+@@ -221,9 +223,12 @@
+ # CONFIG_CMD_TIMEOUT is not set
+ # CONFIG_CMD_PARTITION is not set
+ # CONFIG_CMD_VERSION is not set
++# CONFIG_CMD_VERSION_RV16X_26X is not set
+ # CONFIG_CMD_HELP is not set
+ # CONFIG_CMD_DEVINFO is not set
+ # CONFIG_CMD_UNLZO is not set
++# CONFIG_CMD_CHKRESET is not set
++# CONFIG_CMD_GPIO is not set
+ 
+ #
+ # c2000
+diff -Naur ./arch/arm/lib/bootb.c ../../b/barebox-2011.06.0/arch/arm/lib/bootb.c
+--- ./arch/arm/lib/bootb.c	2017-02-10 22:09:02.966646833 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/lib/bootb.c	2017-02-16 16:16:35.599440162 +0530
+@@ -1,3 +1,7 @@
++/* 16-02-2017:Abdul Moiz <abdul.moiz@nxp.com>
++ * 1. Added Barebox dual boot support based
++ * 2. Changed BAREBOX_PART_SIZE to 1024 i.e barebox partition size
++ */
+ #include <boot.h>
+ #include <common.h>
+ #include <command.h>
+@@ -10,7 +14,11 @@
+ #include <asm/io.h>
+ 
+ #define ULOADER_PART_SIZE 0x20000 /* 128 KB */
++#ifdef CONFIG_COMCERTO_NAND_ULOADER
++#define BAREBOX_PART_SIZE 0x100000 /* 1024 KB */
++#else
+ #define BAREBOX_PART_SIZE 0x80000 /* 512 KB */
++#endif
+ #define BAREBOX_LODING_ADDR (COMCERTO_AXI_DDR_BASE + 0x1000000)
+ 
+ #ifdef CONFIG_COMCERTO_NAND_ULOADER
+@@ -85,7 +93,7 @@
+ 	volatile u32 	*src 	= (u32 *)(COMCERTO_AXI_EXP_BASE + ULOADER_PART_SIZE); /* Start of NOR + uLdr size(128K) */
+ 	volatile u32 	*dst 	= (u32*)BAREBOX_LODING_ADDR;
+ #endif
+-	int 		count 	= BAREBOX_PART_SIZE; /* 512k for Barebox */
++	int 		count 	= BAREBOX_PART_SIZE; /* 1024k for Nand Barebox, 512k for Nor/SPI Barebox */
+ 
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
+ 	void * boot_addr;
+@@ -103,7 +111,7 @@
+ #ifdef CONFIG_COMCERTO_NAND_ULOADER
+ 	/* this option is used when uloader is in NOR flash or I2C EEPROM and
+ 	barebox is in NAND */
+-	printf("\nCopying Barebox from NAND Flash(bootopt=%d)\n", bootopt);
++	printf("\nCopying Barebox from NAND Flash(bootopt=%d) @offset = 0x%0X\n", bootopt, 0);
+ 	read_nand(BAREBOX_LODING_ADDR, 0x0, count);
+ #else
+ 
+@@ -143,7 +151,19 @@
+ 
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
+ 	boot_addr = (void *) verify_and_authenticate_boot_image((u8 *)BAREBOX_LODING_ADDR);
+-	if (boot_addr != NULL) {
++
++#if ( CONFIG_COMCERTO_NAND_ULOADER && (CONFIG_MACH_COMCERTO_C2K_RV16X_26X || CONFIG_MACH_COMCERTO_C2K_MFCNEVM))
++  if (boot_addr == NULL) {
++    /* this option is used when uloader is in NOR flash or I2C EEPROM and
++     barebox is in NAND */
++    printf("\nActive Image validation error");
++    printf("\nCopying Barebox from NAND Flash(bootopt=%d) @offset = 0x%0X\n", bootopt, (unsigned)BAREBOX_PART_SIZE);
++    read_nand(BAREBOX_LODING_ADDR, BAREBOX_PART_SIZE, count);
++    boot_addr = (void *) verify_and_authenticate_boot_image((u8 *)BAREBOX_LODING_ADDR);
++  }
++#endif
++
++  if (boot_addr != NULL) {
+ 		bb_go((void*) boot_addr);
+ 	}
+ 	else {
+diff -Naur ./arch/arm/mach-comcerto/Kconfig ../../b/barebox-2011.06.0/arch/arm/mach-comcerto/Kconfig
+--- ./arch/arm/mach-comcerto/Kconfig	2017-02-10 22:09:02.894646830 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/mach-comcerto/Kconfig	2017-02-15 20:09:29.156994160 +0530
+@@ -34,11 +34,13 @@
+ 
+ config  MACH_COMCERTO_C2K_MFCNEVM
+         bool "MFCN_EVM"
++	select GENERIC_GPIO
+         help
+ 
+ config  MACH_COMCERTO_C2K_RV16X_26X
+-        bool "RV16X_26X"
+-        help
++	bool "RV16X_26X"
++	select GENERIC_GPIO
++	help
+ 
+ config  MACH_COMCERTO_C2K_ASIC
+ 	bool "ASIC"
+@@ -88,6 +90,8 @@
+ 	select COMCERTO_SERDES if !MACH_COMCERTO_C2K_RTSM
+ 	select COMCERTO_I2C
+ 	select COMCERTO_NAND if !MACH_COMCERTO_C2K_RTSM
++	select COMCERTO_GPIO if MACH_COMCERTO_C2K_RV16X_26X
++	select COMCERTO_GPIO if MACH_COMCERTO_C2K_MFCNEVM
+ 	select COMCERTO_SATA
+ 	select COMCERTO_SECUREBOOT
+ 	help
+diff -Naur ./commands/boardinfo.c ../../b/barebox-2011.06.0/commands/boardinfo.c
+--- ./commands/boardinfo.c	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/commands/boardinfo.c	2017-02-15 20:09:29.156994160 +0530
+@@ -0,0 +1,596 @@
++/*
++ * Copyright (c) 2015 Vinaykumar Masane <vinaykumar.masane@freescale>,
++ * Freescale Semicondunctors Pvt. Ltd.
++ *
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++/**
++ * @file
++ * @brief boardinfo: Update OR Show Board Information Parameters
++ */
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <linux/ctype.h>
++#include <fs.h>
++#include <fcntl.h>
++#include <string.h>
++#include <command.h>
++#include <common.h>
++#include <malloc.h>
++#include <errno.h>
++#include <environment.h>
++
++#define SIZE_PID 14         /* Max  14 Character Product ID */
++#define SIZE_VID  3         /* Max  03 Character H/W Version */
++#define SIZE_S_N 11         /* Max  11 Character Board Serial Number */
++#define SIZE_P_N 12         /* Max  12 Character Board Part Number */
++#define SIZE_PROD_NAME 16   /* Max  16 Character Board Product Name */
++#define SIZE_PROD_SERIES 16 /* Max  16 Character Board Product Series */
++
++#define COUNT_MAC        2 /* 2 MAC-IDs one each for LAN and WAN */
++#define TOTAL_MAC_OCTET  6 /* No. of MAC Octets in MAC ID */
++
++#define KEY_CR 0x0D  /* Enter Key Press */
++
++#define OFFSET_ALPHA 0x37
++#define OFFSET_DIGIT 0x30
++
++typedef struct c2krv16x_26x_board_info {
++  unsigned char pid[16];             /* type 1byte length 1byte data 12 Product ID */
++  unsigned char vid[8];              /* H/W Version */
++  unsigned char s_n[16];             /* Board Serial Number */
++  unsigned char mac[2][8];           /* MAC Information */
++  unsigned char p_n[16];             /* Board Serial Number */
++  unsigned char prod_name[64];       /* Board Product Name */
++  unsigned char prod_series[16];     /* Board Product Series */
++}  __attribute__ ((__packed__)) c2krv16x_26x;
++
++char *help_string = "Check Usage: boardinfo <Enter>\n";
++char *filename = "/dev/spi1.boardinfo";
++
++static int command_boardinfo_mac(int argc, char *argv[])
++{
++  int fd = -1, n_read = 0, i = 0;
++  unsigned char out_str[18] = {0}, ifname[6] = {0};
++  c2krv16x_26x *board_data = NULL;
++  unsigned char macdata[512];
++  int mac_offset,j;
++  int count = 2;
++  fd = open(filename, O_RDONLY, 0);
++  if (fd < 0) {
++    printf("could not open %s!\n", filename);
++    return COMMAND_ERROR;
++  }
++
++  board_data = (c2krv16x_26x *)xmalloc(sizeof(c2krv16x_26x));
++  if ( board_data == NULL )
++  {
++    printf("Error %d! : %s\n", errno, errno_str());
++    close(fd);
++    return COMMAND_ERROR;
++  }
++
++  memset((char *)macdata, 0x00, sizeof(macdata));
++  if ( (n_read = read(fd, macdata, sizeof(c2krv16x_26x))) < 0 )
++  {
++    printf("Read Error %d! : %s\n", errno, errno_str());
++    free(board_data);
++    close(fd);
++    return COMMAND_ERROR;
++  }
++  close(fd);
++  flush(stdout);
++
++  mac_offset=macdata[1];
++  if(mac_offset == 0xFF)
++  {
++    for (i = 0; i < COUNT_MAC; i++)
++    {
++      memset(ifname, 0x00, sizeof(ifname));
++      memset(out_str, 0x00, sizeof(out_str));
++
++      for(j=0;j<6;j++)
++         board_data->mac[i][j] = 0xFF;
++
++      sprintf(out_str,"%02X:%02X:%02X:%02X:%02X:%02X",\
++                        (unsigned char)board_data->mac[i][0],\
++                        (unsigned char)board_data->mac[i][1],\
++                        (unsigned char)board_data->mac[i][2],\
++                        (unsigned char)board_data->mac[i][3],\
++                        (unsigned char)board_data->mac[i][4],\
++                        (unsigned char)board_data->mac[i][5]);
++      sprintf(ifname,"%s", i == 0 ? "LAN" : "WAN");
++      printf("\n%-3s MAC : %s", ifname, out_str);
++      setenv(ifname, out_str);
++    }
++    free(board_data);
++    printf("\n");
++    return COMMAND_SUCCESS;
++  }
++
++  count=count + mac_offset;
++  mac_offset = macdata[count + 1];
++  count = count + mac_offset + 2;
++  mac_offset = macdata[count + 1];
++
++  count = count + mac_offset + 2;
++  for (i = 0; i < COUNT_MAC; i++)
++  {
++    memset(ifname, 0x00, sizeof(ifname));
++    memset(out_str, 0x00, sizeof(out_str));
++    count = count + 2;
++    for(j=0;j<6;j++)
++       board_data->mac[i][j] = macdata[count++];
++
++    sprintf(out_str,"%02X:%02X:%02X:%02X:%02X:%02X",\
++                      (unsigned char)board_data->mac[i][0],\
++                      (unsigned char)board_data->mac[i][1],\
++                      (unsigned char)board_data->mac[i][2],\
++                      (unsigned char)board_data->mac[i][3],\
++                      (unsigned char)board_data->mac[i][4],\
++                      (unsigned char)board_data->mac[i][5]);
++    sprintf(ifname,"%s", i == 0 ? "LAN" : "WAN" );
++    printf("\n%-3s MAC : %s", ifname, out_str);
++    setenv(ifname, out_str);
++  }
++
++  free(board_data);
++  printf("\n");
++  return COMMAND_SUCCESS;
++}
++
++static int command_boardinfo_update(int argc, char *argv[])
++{
++  int ret = 0, fd = -1, n_written = 0;
++  int i, j, len = 2, n_mac_octet = 0;
++  char c = '\0';
++  unsigned char type = 0xFF;
++  unsigned int count = 2;
++  unsigned char boarddata[512] = {'\0'};
++  unsigned char macdata[3][6];
++  enum mac_octet_state {
++    empty = 0,
++    half  = 1,
++    full  = 2
++  };
++  enum mac_octet_state isOctetFull = empty;
++  c2krv16x_26x board_data;
++
++  flush(stdin);
++
++  memset(&board_data, 0x00, sizeof(board_data));
++
++  printf("\nEnter PID : ");
++  while (len < (SIZE_PID + 2))
++  {
++    c = getc();
++    if ( isalnum(c) || c == KEY_CR || c == '-' )
++    {
++      c = toupper(c);
++      putchar(c);
++    }
++    else
++    {
++      printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
++      return COMMAND_ERROR;
++    }
++    if ( c == KEY_CR )
++    {
++      break;
++    }
++    len++;
++    boarddata[count++] = c;
++  }
++  type = 0xCB;
++  boarddata[count - len] = type;
++  boarddata[count - len + 1] = len - 2;
++
++  printf("\nEnter VID : ");
++  len = 2;
++  count = count + len;
++  while (len < (SIZE_VID + 2))
++  {
++    c = getc();
++    if ( isalnum(c) || c == KEY_CR )
++    {
++      c = toupper(c);
++      putchar(c);
++    }
++    else
++    {
++      printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
++      return COMMAND_ERROR;
++    }
++    if ( c == KEY_CR )
++    {
++      break;
++    }
++    len++;
++    boarddata[count++] = c;
++  }
++  type = 0x89;
++  boarddata[count - len] = type;
++  boarddata[count - len + 1] = len - 2;
++
++  printf("\nEnter S/N : ");
++  len = 2;
++  count = count + len;
++  while (len < (SIZE_S_N + 2))
++  {
++    c = getc();
++    if ( isalnum(c) || c == KEY_CR )
++    {
++      c = toupper(c);
++      putchar(c);
++    }
++    else
++    {
++      printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
++      return COMMAND_ERROR;
++    }
++    if ( c == KEY_CR )
++    {
++      break;
++    }
++    len++;
++    boarddata[count++] = c;
++  }
++    type = 0xC1;
++    boarddata[count - len ] = type;
++    boarddata[count - len + 1] = len - 2;
++
++  for (i = 0; i < COUNT_MAC; i++)
++  {
++    isOctetFull = empty;
++    n_mac_octet = 0;
++    type = 0xC3;
++    boarddata[count++] = type;
++    boarddata[count++] = 6;
++    printf("\nEnter %-3s MAC : ",  i == 0 ? "LAN" : "WAN" );
++    while (n_mac_octet < (TOTAL_MAC_OCTET))
++    {
++      c = toupper(getc());
++      putchar(c);
++      if ((isxdigit(c)) && ( isOctetFull < full ))
++      {
++        unsigned char offset = 0;
++        offset = isupper(c) ? OFFSET_ALPHA : isdigit(c) ? OFFSET_DIGIT : 0;
++        if ( isOctetFull == empty )
++        {
++          macdata[i][n_mac_octet] = ((unsigned int)c - offset) << 4;
++          isOctetFull = half;
++        }
++        else if ( isOctetFull == half )
++        {
++          macdata[i][n_mac_octet] |= (((unsigned int)c - offset) & 0xFF);
++          ++n_mac_octet;
++          isOctetFull = full;
++        }
++      }
++      else if ((  c == ':' ) && ( isOctetFull == full ))
++      {
++        isOctetFull = empty;
++        continue;
++      }
++      else
++      {
++        printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
++        return COMMAND_ERROR;
++      }
++    }
++    for (j=0;j<6;j++)
++      boarddata[count++] = macdata[i][j];
++  }
++
++  printf("\nEnter Part No : ");
++  len = 2;
++  count = count + len;
++  while (len < (SIZE_P_N + 2))
++  {
++    c = getc();
++
++    if ( isprint(c))
++    {
++      c = toupper(c);
++      putchar(c);
++    }
++    else
++    {
++      printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
++      return COMMAND_ERROR;
++    }
++    if ( c == KEY_CR )
++    {
++      break;
++    }
++    len++;
++    boarddata[count++] = c;
++   }
++  type = 0xC0;
++  boarddata[count - len ] = type;
++  boarddata[count - len + 1] = len - 2;
++
++  printf("\nEnter PROD Name : ");
++  len = 2;
++  count = count + len;
++  while (len < (SIZE_PROD_NAME + 2))
++  {
++    c = getc();
++    if (c == KEY_CR)
++      break;
++
++    if ( isprint(c))
++    {
++      c = toupper(c);
++      putchar(c);
++    }
++    else
++    {
++      printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
++      return COMMAND_ERROR;
++    }
++    if ( c == KEY_CR )
++    {
++      break;
++    }
++    len++;
++    boarddata[count++] = c;
++  }
++  type = 0xDB;
++  boarddata[count - len ] = type;
++  boarddata[count - len + 1] = len - 2;
++
++  printf("\nEnter PROD Series : ");
++  len = 2;
++  count = count + len;
++  while (len < (SIZE_PROD_SERIES + 2))
++  {
++    c = getc();
++    if (c == KEY_CR)
++      break;
++
++    if ( isprint(c))
++    {
++      c = toupper(c);
++      putchar(c);
++    }
++    else
++    {
++      printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
++      return COMMAND_ERROR;
++    }
++    if ( c == KEY_CR )
++    {
++      break;
++    }
++    len++;
++    boarddata[count++] = c;
++  }
++  type = 0xA0;
++  boarddata[count - len ] = type;
++  boarddata[count - len + 1] = len - 2;
++
++  fd = open(filename, O_RDWR, 0);
++  if (fd < 0) {
++    printf("could not open %s!\n", filename);
++    return COMMAND_ERROR;
++  }
++
++  /* Erase Board Info Partition */
++  ret = erase(fd, ~0, 0);
++
++  /* ENOSYS is no error here, many devices do not need it */
++  if (ret && errno != -ENOSYS) {
++    printf("could not erase %s: %s\n", filename, errno_str());
++    close(fd);
++    return COMMAND_ERROR;
++  }
++  if ( (n_written = write(fd, boarddata, sizeof(boarddata))) < 0 )
++  {
++    printf("Write Error %d! : %s\n", errno, errno_str());
++    close(fd);
++    return COMMAND_ERROR;
++  }
++  close(fd);
++  printf("\n");
++  return COMMAND_SUCCESS;
++}
++
++static int command_boardinfo_show(int argc, char *argv[])
++{
++  int fd = -1, n_read = 0, i = 0, count = 2;
++  char out_str[18] = {0}, ifname[6] = {0};
++  c2krv16x_26x *board_data = NULL;
++  char buf_boarddata[512];
++  unsigned char mac_data[3][8];
++  int mac_length = 0;
++  int j = 0, pid_length, vid_length, sn_length, pn_length, swver_length, prodname_length, prodsrs_length, swdesc_length, swobjid_length;
++
++  fd = open(filename, O_RDONLY, 0);
++  if (fd < 0) {
++    printf("could not open %s!\n", filename);
++    return COMMAND_ERROR;
++  }
++  board_data = (c2krv16x_26x *)xmalloc(sizeof(c2krv16x_26x));
++  if ( board_data == NULL )
++  {
++    printf("Error %d! : %s\n", errno, errno_str());
++    close(fd);
++    printf("\n");
++    return COMMAND_ERROR;
++  }
++
++  memset((char *)buf_boarddata, 0x00, sizeof(buf_boarddata));
++  if ( (n_read = read(fd, (char *)buf_boarddata, sizeof(buf_boarddata))) < 0 )
++  {
++    printf("Read Error %d! : %s\n", errno, errno_str());
++    free(board_data);
++    close(fd);
++    return COMMAND_ERROR;
++  }
++  close(fd);
++  flush(stdout);
++
++  pid_length = buf_boarddata[1];
++
++  if (pid_length == 0xFF)
++  {
++    printf("\nBoardinfo Partition %s is Empty!!!\nPlease program Boardinfo Partition using command: boardinfo -u\n", filename);
++    return COMMAND_ERROR;
++  }
++
++  printf("\nPID  : ");
++  for (i = 0; i < pid_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  vid_length = buf_boarddata[count + 1];
++  count = count + 2;
++  printf("\nVID  : ");
++  for (i = 0; i < vid_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  sn_length = buf_boarddata[count + 1];
++  count = count + 2;
++  printf("\nS/N  : ");
++  for (i = 0; i < sn_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  for (i = 0; i < COUNT_MAC; i++)
++  {
++    mac_length=buf_boarddata[count + 1];
++    count = count + 2;
++    for (j = 0; j < mac_length; j++)
++    {
++      mac_data[i][j] = buf_boarddata[count++];
++    }
++    memset(ifname, 0x00, sizeof(ifname));
++    memset(out_str, 0x00, sizeof(out_str));
++    sprintf(out_str,"%02X:%02X:%02X:%02X:%02X:%02X",\
++                      (unsigned char)mac_data[i][0],\
++                      (unsigned char)mac_data[i][1],\
++                      (unsigned char)mac_data[i][2],\
++                      (unsigned char)mac_data[i][3],\
++                      (unsigned char)mac_data[i][4],\
++                      (unsigned char)mac_data[i][5]);
++
++    sprintf(ifname,"%s", i == 0 ? "LAN" : "WAN" );
++    printf("\n%-3s MAC : %s", ifname, out_str);
++    setenv(ifname, out_str);
++  }
++
++  pn_length = buf_boarddata[count + 1];
++  count = count + 2;
++  printf("\nP/N  : ");
++  for (i = 0; i < pn_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  prodname_length = buf_boarddata[count + 1];
++  count = count + 2;
++  printf("\nPROD_NAME  : ");
++  for (i = 0; i < prodname_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  prodsrs_length = buf_boarddata[count + 1];
++  count = count + 2;
++  printf("\nPROD_SERIES  : ");
++  for (i = 0; i < prodsrs_length; i++)
++  {
++    if (isprint(buf_boarddata[count]))
++      putchar(buf_boarddata[count]);
++    else
++      putchar(' ');
++    count++;
++  }
++
++  free(board_data);
++  printf("\n");
++  return COMMAND_SUCCESS;
++}
++
++static int do_boardinfo(struct command *cmdtp, int argc, char *argv[])
++{
++  if (strcmp(argv[1], "-m") == 0)
++  {
++    command_boardinfo_mac(argc, argv);
++  }
++  else if (strcmp(argv[1], "-u") == 0)
++  {
++    command_boardinfo_update(argc, argv);
++  }
++  else if (strcmp(argv[1], "-s") == 0)
++  {
++    command_boardinfo_show(argc, argv);
++  }
++  else
++  {
++    return COMMAND_ERROR_USAGE;
++  }
++  return COMMAND_SUCCESS;
++}
++
++static const __maybe_unused char cmd_boardinfo_help[] =
++"Usage: boardinfo [OPTIONS]\n"
++"\n"
++"options:\n"
++" -m  lists boardinfo MAC ID contents from /dev/spi1.boardinfo\n"
++" -u  update boardinfo (default updates info to /dev/spi1.boardinfo)\n"
++" -s  lists boardinfo contents from /dev/spi1.boardinfo\n"
++" e.g.    boardinfo -u\n"
++"Enter PID : <MAX 14 char>\n"
++"Enter VID : <MAX  3 char>\n"
++"Enter S/N : <MAX 11 char>\n"
++"Enter LAN MAC   : <6 octets of MAC address with : separator e.g. aa:bb:cc:dd:ee:f0 >\n"
++"Enter WAN MAC 	 : <6 octets of MAC address with : separator e.g. aa:bb:cc:dd:ee:f1 >\n"
++;
++
++BAREBOX_CMD_START(boardinfo)
++  .cmd    = do_boardinfo,
++  .usage    = "Read / Update Board Information",
++  BAREBOX_CMD_HELP(cmd_boardinfo_help)
++BAREBOX_CMD_END
+diff -Naur ./commands/check_reset.c ../../b/barebox-2011.06.0/commands/check_reset.c
+--- ./commands/check_reset.c	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/commands/check_reset.c	2017-02-15 20:09:29.160994160 +0530
+@@ -0,0 +1,67 @@
++/*
++ * Copyright (c) 2016 Vinaykumar Masane-B47602 <vinaykumar.masane@freescale>,
++ * Freescale Semicondunctors Pvt. Ltd.
++ *
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++/**
++ * @file
++ * @brief chkreset: During Boot-up Parse Reset key press for 3 sec
++ * @                If Reset Key found pressed (0) for min 3 sec,
++ * @                halt at barebox prompt with Diag LED Solid RED
++ * @                else continue to boot further
++ */
++
++#include <common.h>
++#include <command.h>
++#include <linux/ctype.h>
++#include <environment.h>
++#include <gpio.h>
++#include <mach/comcerto-2000.h>
++
++/**
++ * @param[in] cmdtp FIXME
++ * @param[in] argc Argument count from command line
++ * @param[in] argv List of input arguments
++ */
++static int do_chkreset(struct command *cmdtp, int argc, char *argv[])
++{
++  int value = 0;
++  const int gpio_reset = 46;
++
++  gpio_direction_input(gpio_reset);
++  value = gpio_get_value(gpio_reset);
++  if(value < 0)
++  {
++    printf("GPIO  failed returned = %d\n", value);
++    return COMMAND_ERROR;
++  }
++  setenv("val_gpio_reset", value == 0 ? "clear" : "set");
++  printf("GPIO # %d value = %d\n", gpio_reset, value);
++  return COMMAND_SUCCESS;
++}
++
++static const __maybe_unused char cmd_chkreset_help[] =
++"Usage: chkreset\n"
++;
++
++BAREBOX_CMD_START(chkreset)
++  .cmd    = do_chkreset,
++  .usage    = "check Reset Button Press Status",
++  BAREBOX_CMD_HELP(cmd_chkreset_help)
++BAREBOX_CMD_END
+diff -Naur ./commands/imageenv.c ../../b/barebox-2011.06.0/commands/imageenv.c
+--- ./commands/imageenv.c	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/commands/imageenv.c	2017-02-15 20:09:29.160994160 +0530
+@@ -0,0 +1,206 @@
++/*
++ * Copyright (c) 2015 Vinaykumar Masane-B47602 <vinaykumar.masane@freescale>,
++ * Koneti Nagesh-B47094 <nagesh.koneti@freescale.com>
++ * Freescale Semicondunctors Pvt. Ltd.
++ *
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++/**
++ * @file
++ * @brief imageenv: Read and Export active image partition for bootup
++ */
++
++#include <image.h>
++#include <common.h>
++#include <command.h>
++#include <fs.h>
++#include <fcntl.h>
++#include <linux/ctype.h>
++#include <errno.h>
++#include <xfuncs.h>
++#include <malloc.h>
++#include <environment.h>
++
++#define ENV_BUFSIZE 2
++
++#ifdef CONFIG_MACH_COMCERTO_C2K_MFCNEVM
++#define IMGENV_ROOTFS_PART1 "9"
++#define IMGENV_ROOTFS_PART2 "12"
++#elif CONFIG_MACH_COMCERTO_C2K_RV16X_26X
++#define IMGENV_ROOTFS_PART1 "4"
++#define IMGENV_ROOTFS_PART2 "7"
++#endif
++
++char *file_env = "/dev/nand0.env";
++/**
++ * @param[in] cmdtp FIXME
++ * @param[in] argc Argument count from command line
++ * @param[in] argv List of input arguments
++ */
++static int command_imageenv_get(int argc, char *argv[])
++{
++  int ret;
++  int fd;
++  char buf[ENV_BUFSIZE] = {0xFF};
++
++  if (argc < 2)
++  {
++    printf("Insufficient argument/s!\n");
++    return COMMAND_ERROR_USAGE;
++  }
++
++  fd = open(file_env, O_RDONLY);
++  if (fd < 0) {
++    printf("could not open the file\n");
++    return COMMAND_ERROR;
++  }
++
++  ret = read(fd, buf, ENV_BUFSIZE);
++  if(ret < 0)
++  {
++    printf("Reading from the file failed\n");
++    close(fd);
++    return COMMAND_ERROR;
++  }
++  close(fd);
++
++  if (buf[0] == 0x32)
++  {
++    setenv("active","image2");
++    setenv("inactive","image1");
++  }
++  else if(buf[0] == 0x31)
++  {
++    setenv("active","image1");
++    setenv("inactive","image2");
++  }
++  printf("\n");
++  return COMMAND_SUCCESS;
++}
++
++static int command_imageenv_set(int argc, char *argv[])
++{
++  int ret, n_written;
++  int fd;
++  char *pch = NULL;
++  char buf[ENV_BUFSIZE] = {0xFF};
++  char *buf_boorargs;
++  char mtd_str[10] = {0};
++
++  if (argc < 3)
++  {
++    printf("Insufficient argument/s!\n");
++    return COMMAND_ERROR_USAGE;
++  }
++
++  fd = open(file_env, O_WRONLY);
++  if (fd < 0) {
++    printf("could not open %s!\n", file_env);
++    return COMMAND_ERROR;
++  }
++
++  if (strcmp(argv[2], IMGENV_ROOTFS_PART2) == 0)
++  {
++    buf[0] = 0x32;
++    setenv("active","image2");
++    setenv("inactive","image1");
++  }
++  else if(strcmp(argv[2], IMGENV_ROOTFS_PART1) == 0)
++  {
++    buf[0] = 0x31;
++    setenv("active","image1");
++    setenv("inactive","image2");
++  }
++
++  /* Erase Env Partition */
++  ret = erase(fd, ~0, 0);
++
++  /* ENOSYS is no error here, many devices do not need it */
++  if (ret && errno != -ENOSYS) {
++    printf("could not erase %s: %s\n", file_env, errno_str());
++    close(fd);
++    return COMMAND_ERROR;
++  }
++  if ( (n_written = write(fd, buf, sizeof(buf))) < 0 )
++  {
++    printf("Write Error %d! : %s\n", errno, errno_str());
++    close(fd);
++    return COMMAND_ERROR;
++  }
++  close(fd);
++
++  buf_boorargs = getenv("bootargs");
++  pch = strstr (buf_boorargs,"ubi.mtd=");
++  sprintf(mtd_str, "ubi.mtd=%s", argv[2]);
++  strncpy (pch, mtd_str, sizeof(mtd_str));
++  setenv("bootargs", buf_boorargs);
++
++  return COMMAND_SUCCESS;
++}
++
++static int command_imageenv_check(int argc, char *argv[])
++{
++  struct image_handle *os_handle = NULL;
++
++  if (argc < 3)
++  {
++    printf("Insufficient argument/s!\n");
++    return COMMAND_ERROR_USAGE;
++  }
++
++  os_handle = map_image(argv[2], 1);
++  if (!os_handle)
++    return COMMAND_ERROR;
++  else
++    return COMMAND_SUCCESS;
++}
++
++static int do_imageenv(struct command *cmdtp, int argc, char *argv[])
++{
++  if (strcmp(argv[1], "-g") == 0)
++  {
++    return command_imageenv_get(argc, argv);
++  }
++  else if (strcmp(argv[1], "-s") == 0)
++  {
++    return command_imageenv_set(argc, argv);
++  }
++  else if (strcmp(argv[1], "-c") == 0)
++  {
++    return command_imageenv_check(argc, argv);
++  }
++  else
++  {
++    return COMMAND_ERROR_USAGE;
++  }
++}
++
++static const __maybe_unused char cmd_imageenv_help[] =
++"Usage: imageenv [OPTIONS]\n"
++"\n"
++"options:\n"
++" -g  Get active image information\n"
++" -s < 4 | 7 > Set active image to boot\n"
++" -c </dev/nand0.kernel1.bb | /dev/nand0.kernel2.bb > Check kernel imaeg validity\n"
++;
++
++BAREBOX_CMD_START(imageenv)
++  .cmd    = do_imageenv,
++  .usage    = "get / set / check active image ID",
++  BAREBOX_CMD_HELP(cmd_imageenv_help)
++BAREBOX_CMD_END
+diff -Naur ./commands/Kconfig ../../b/barebox-2011.06.0/commands/Kconfig
+--- ./commands/Kconfig	2017-02-10 22:09:02.974646833 +0530
++++ ../../b/barebox-2011.06.0/commands/Kconfig	2017-02-15 20:09:29.160994160 +0530
+@@ -173,6 +173,22 @@
+ 	default y
+ 	prompt "copy"
+ 
++config CMD_BOARDINFO
++	bool
++	depends on MACH_COMCERTO_C2K_RV16X_26X ||  MACH_COMCERTO_C2K_MFCNEVM
++	prompt "RV16X_26X boardinfo"
++	default n
++	help
++	  This command allows to update and show RV16X_26X Board Specfic Information.
++
++config CMD_IMAGEENV
++	bool
++	depends on MACH_COMCERTO_C2K_RV16X_26X ||  MACH_COMCERTO_C2K_MFCNEVM
++	prompt "RV16X_26X imageenv"
++	default n
++	help
++	  This command reads and sets active<>inactive ID for board boot-up.
++
+ endmenu
+ 
+ menu "console                       "
+@@ -323,6 +339,14 @@
+ 	tristate
+ 	prompt "reset"
+ 
++config CMD_CHKRESET
++	bool
++	depends on MACH_COMCERTO_C2K_RV16X_26X ||  MACH_COMCERTO_C2K_MFCNEVM
++	prompt "RV16X_26X Check Reset"
++	default n
++	help
++	  This command allows to update and show RV16X_26X Board Specfic Information.
++
+ config CMD_GO
+ 	tristate
+ 	prompt "go"
+@@ -356,6 +380,12 @@
+ 	default y
+ 	prompt "version"
+ 
++config CMD_VERSION_RV16X_26X
++        tristate
++        depends on MACH_COMCERTO_C2K_RV16X_26X ||  MACH_COMCERTO_C2K_MFCNEVM
++        default y
++        prompt "rv16x_26x version"
++
+ config CMD_HELP
+ 	tristate
+ 	default y
+diff -Naur ./commands/Makefile ../../b/barebox-2011.06.0/commands/Makefile
+--- ./commands/Makefile	2017-02-10 22:09:02.974646833 +0530
++++ ../../b/barebox-2011.06.0/commands/Makefile	2017-02-15 20:09:29.160994160 +0530
+@@ -12,6 +12,7 @@
+ obj-$(CONFIG_CMD_EXEC)		+= exec.o
+ obj-$(CONFIG_CMD_SLEEP)		+= sleep.o
+ obj-$(CONFIG_CMD_RESET)		+= reset.o
++obj-$(CONFIG_CMD_CHKRESET)		+= check_reset.o
+ obj-$(CONFIG_CMD_GO)		+= go.o
+ obj-$(CONFIG_NET)		+= net.o
+ obj-$(CONFIG_CMD_PARTITION)	+= partition.o
+@@ -43,6 +44,7 @@
+ obj-$(CONFIG_CMD_TRUE)		+= true.o
+ obj-$(CONFIG_CMD_FALSE)		+= false.o
+ obj-$(CONFIG_CMD_VERSION)	+= version.o
++obj-$(CONFIG_CMD_VERSION_RV16X_26X)	+= version_rv16x_26x.o				
+ obj-$(CONFIG_CMD_SOCINFO)	+= socinfo.o
+ obj-$(CONFIG_CMD_HELP)		+= help.o
+ obj-$(CONFIG_CMD_LSMOD)		+= lsmod.o
+@@ -69,3 +71,5 @@
+ obj-$(CONFIG_CMD_AR8328)	+= atheros.o
+ obj-$(CONFIG_CMD_COPY)		+= copy.o
+ obj-$(CONFIG_CMD_SATA)		+= sata.o
++obj-$(CONFIG_CMD_BOARDINFO)  += boardinfo.o
++obj-$(CONFIG_CMD_IMAGEENV)  += imageenv.o
+diff -Naur ./commands/version.c ../../b/barebox-2011.06.0/commands/version.c
+--- ./commands/version.c	2017-02-10 22:09:02.974646833 +0530
++++ ../../b/barebox-2011.06.0/commands/version.c	2017-02-16 16:22:24.483451945 +0530
+@@ -19,6 +19,9 @@
+  * along with this program; if not, write to the Free Software
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+  * MA 02111-1307 USA
++ 
++ * 16-02-2017: Abdul Moiz <abdul.moiz@nxp.com>
++ * Setting environment variable bootver to version_string
+  */
+ 
+ #include <common.h>
+@@ -27,6 +30,7 @@
+ static int do_version(struct command *cmdtp, int argc, char *argv[])
+ {
+ 	printf ("\n%s\n", version_string);
++	setenv("bootver",version_string);
+ 	return 0;
+ }
+ 
+diff -Naur ./commands/version_rv16x_26x.c ../../b/barebox-2011.06.0/commands/version_rv16x_26x.c
+--- ./commands/version_rv16x_26x.c	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/commands/version_rv16x_26x.c	2017-02-15 20:09:29.160994160 +0530
+@@ -0,0 +1,40 @@
++/*
++ * (C) Copyright 2000-2003
++ * Wolfgang Denk, DENX Software Engineering, wd@denx.de.
++ *
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of
++ * the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ * MA 02111-1307 USA
++ */
++
++#include <common.h>
++#include <command.h>
++
++const char version_string_rv16x_26x[] = "1.0.00.00";
++
++static int do_version_rv16x_26x(struct command *cmdtp, int argc, char *argv[])
++{
++	printf ("\n%s\n", version_string_rv16x_26x);
++	setenv("bootver_rv16x_26x",version_string_rv16x_26x);
++	return 0;
++}
++
++BAREBOX_CMD_START(version_rv16x_26x)
++	.cmd		= do_version_rv16x_26x,
++	.usage		= "print rv16x_26x barebox version",
++BAREBOX_CMD_END
++
+diff -Naur ./common/image.c ../../b/barebox-2011.06.0/common/image.c
+--- ./common/image.c	2017-02-10 22:09:02.966646833 +0530
++++ ../../b/barebox-2011.06.0/common/image.c	2017-02-16 16:24:23.891455978 +0530
+@@ -21,6 +21,9 @@
+  * along with this program; if not, write to the Free Software
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+  * MA 02111-1307 USA
++ 
++ * 16-02-2017: Abdul Moiz <abdul.moiz@nxp.com>
++ * Changes and checks done to support Dual image support
+  */
+ 
+ #ifdef __BAREBOX__
+@@ -324,7 +327,7 @@
+ struct image_handle *map_image(const char *filename, int verify)
+ {
+ 	int fd;
+-	uint32_t checksum, len;
++	uint32_t checksum, len = 0;
+ 	struct image_handle *handle = NULL;
+ 	image_header_t *header;
+ 	int type;
+@@ -332,8 +335,8 @@
+ 	img_hdr *ssboot_hdr;
+ 	uint ssboot_hdr_len = IMAGE_HEADER_SIZE;
+ 	void *image_data = NULL;
+-	int image_flags;
+-	uint image_len;
++	int image_flags = 0;
++	uint image_len = 0;
+ #endif
+ 
+ 	fd = open(filename, O_RDONLY);
+@@ -344,15 +347,33 @@
+ 
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
+ 	ssboot_hdr = xzalloc(sizeof(img_hdr));
++	if (ssboot_hdr == NULL)
++	{
++	  printf("xzalloc returned NULL: %s\n", errno_str());
++	  goto err_out;
++	}
++	memset (ssboot_hdr , 0x00, (sizeof(img_hdr)));
+ 	if (read(fd, ssboot_hdr, ssboot_hdr_len) < 0) {
+-		printf("could not read: %s\n", errno_str());
+-		goto err_out;
++	  printf("could not read: %s\n", errno_str());
++	  goto err_out;
++	}
++
++	image_len = ssboot_hdr->image_len;
++	if ( image_len >= ~0 )
++	{
++	  printf("INVALID image_len = 0x%0X OR Image file = %s is BLANK!\n", image_len, filename);
++	  goto err_out;
+ 	}
+ 
+-	image_len = ssboot_hdr->image_len ;
+ 	//printf("\nimage_len = %u \n",image_len);
+ 	image_data = xmalloc(ssboot_hdr_len + image_len + RSA_KEY_LENGTH_2K + AES_128_KEY_LENGTH + 1);
+-	image_flags = IH_MALLOC;
++	if (image_data == NULL)
++	{
++	  printf("xzalloc returned NULL: %s\n", errno_str());
++	  goto err_out;
++	}
++	memset (image_data, 0x00, (ssboot_hdr_len + image_len + RSA_KEY_LENGTH_2K + AES_128_KEY_LENGTH + 1));
++	image_flags |= IH_MALLOC;
+ 
+ 	memcpy(image_data,ssboot_hdr,ssboot_hdr_len);
+ 
+@@ -370,6 +391,12 @@
+ 	}
+ #endif
+ 	handle = xzalloc(sizeof(struct image_handle));
++	if (handle == NULL)
++	{
++	  printf("xzalloc returned NULL: %s\n", errno_str());
++	  goto err_out;
++	}
++	memset (handle , 0x00, (sizeof(struct image_handle)));
+ 	header = &handle->header;
+ 
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
+@@ -397,6 +424,7 @@
+ 
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
+ 	handle->data = (void *)((unsigned long)image_data + image_get_header_size());
++  handle->flags |= IH_MALLOC;
+ #else
+ 	handle->data = memmap(fd, PROT_READ);
+ 	if (handle->data == (void *)-1) {
+@@ -457,10 +485,11 @@
+ err_out:
+ 	close(fd);
+ #ifdef CONFIG_COMCERTO_SECUREBOOT
++	free (ssboot_hdr);
+ 	if(image_flags & IH_MALLOC)
+ 		free(image_data);
+ #endif
+-	if (handle->flags & IH_MALLOC)
++	if ((handle != NULL) && (handle->flags & IH_MALLOC))
+ 		free(handle->data);
+ 	free(handle);
+ 	return NULL;
+diff -Naur ./common/version.c ../../b/barebox-2011.06.0/common/version.c
+--- ./common/version.c	2017-02-10 22:09:02.966646833 +0530
++++ ../../b/barebox-2011.06.0/common/version.c	2017-02-16 16:25:58.683459179 +0530
+@@ -1,3 +1,6 @@
++/* 16-02-2017: Abdul Moiz <abdul.moiz@nxp.com>
++ * Print Frequency of Uloader and Barebox
++ */
+ #include <common.h>
+ #include <reloc.h>
+ #include <generated/utsrelease.h>
+@@ -13,6 +16,16 @@
+ void barebox_banner (void)
+ {
+ 	printf (RELOC("\n\n%s\n\n"), RELOC_VAR(version_string));
++#ifdef	CONFIG_COMCERTO_BOOTLOADER
+ 	printf(RELOC("Board: " CONFIG_BOARDINFO "\n"));
++#else
++#if   defined(CONFIG_M86260) || defined(CONFIG_M86261) || defined(CONFIG_M86262)
++	printf(RELOC("Board: " CONFIG_BOARDINFO "  650 MHz\n"));
++#elif   defined (CONFIG_M86291) || defined (CONFIG_M86292) || defined (CONFIG_M86293) || defined (CONFIG_M86294) || defined (CONFIG_M86295) || defined (CONFIG_M86296) || defined (CONFIG_M86297) || defined (CONFIG_M86298)
++	printf(RELOC("Board: " CONFIG_BOARDINFO "  900 MHz\n"));
++#else
++        printf(RELOC("Board: " CONFIG_BOARDINFO "\n"));
++#endif
++#endif
+ }
+ 
+diff -Naur ./defaultenv/bin/boot ../../b/barebox-2011.06.0/defaultenv/bin/boot
+--- ./defaultenv/bin/boot	2017-02-10 22:09:02.970646833 +0530
++++ ../../b/barebox-2011.06.0/defaultenv/bin/boot	2017-02-15 20:09:29.160994160 +0530
+@@ -2,6 +2,26 @@
+ 
+ . /env/config
+ 
++gpio_set_value $GPIO_LED_DIAG $OFF 
++
++echo "Setting env LAN, WAN..."
++boardinfo -m
++echo "done"
++echo -n "Exporting env LAN, WAN..."
++export LAN="$LAN" WAN="$WAN"
++echo "done"
++
++if [  "X$LAN" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN" != "XFF:FF:FF:FF:FF:FF" ]; then
++  echo "FOUND MACs from Boardinfo using same in bootargs"
++  export eth0_ethaddr="$WAN" eth1_ethaddr="$LAN"
++  echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr"
++  bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr,$eth1_ethaddr"
++elif [  "X$LAN" = "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN" = "XFF:FF:FF:FF:FF:FF" ]; then
++  echo -e "One or More MACs from Boardinfo are INVALID OR NOT Programmed!!!\nHalting Boot Up...done."
++  exit 1
++fi
++echo "done"
++
+ if [ x$1 = xnand ]; then
+ 	rootfs_loc=nand
+ 	kernel_loc=nand
+@@ -28,12 +48,58 @@
+ 	kernel_loc=tftp
+ fi
+ 
++echo -n "Setting active/inactive env..."
++imageenv -g
++echo "done"
++echo -n "Exporting env..."
++export active="$active" inactive="$inactive"
++echo "done"
++echo "active = $active inactive = $inactive"
++
++if [ x$1 = xactive ]; then
++  echo "Booting active $active ..."
++  if [ x$active = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$active = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  fi
++elif [ x$1 = xinactive ]; then
++  echo "Booting inactive $inactive ..."
++  if [ x$inactive = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$inactive = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  fi
++else
++  echo "Booting default active $active ..."
++  if [ x$active = ximage1 ]; then
++    kernel=kernel1
++    rootfs=rootfs1
++  elif [ x$active = ximage2 ]; then
++    kernel=kernel2
++    rootfs=rootfs2
++  else
++    kernel=kernel1
++    rootfs=rootfs1
++  fi
++fi
++
++if [ x$rootfs = xrootfs1 ]; then
++  rootfs_mtdblock_nand=$ROOTFS_PART1
++elif [ x$rootfs = xrootfs2 ]; then
++  rootfs_mtdblock_nand=$ROOTFS_PART2
++fi
++
+ if [ x$ip = xdhcp ]; then
+ 	bootargs="$bootargs ip=dhcp"
+ elif [ x$ip = xnone ]; then
+ 	bootargs="$bootargs ip=none"
+ else
+-	bootargs="$bootargs ip=$eth0.ipaddr::$eth0.gateway:$eth0.netmask:::"
++  bootargs="$bootargs ip=${eth0.ipaddr}::${eth0.gateway}:${eth0.netmask}:::"
+ fi
+ 
+ 
+@@ -61,9 +127,9 @@
+ 			ubiroot="rootfs"
+ 		fi
+ 		if [ x$rootfs_loc = xnand ]; then
+-			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock,4096"
++			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock ,4096"
+ 		else
+-			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock"
++			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock "
+ 		fi
+ 	else
+ 		bootargs="$bootargs root=/dev/mtdblock$rootfs_mtdblock"
+@@ -145,7 +211,7 @@
+ elif [ x$kernel_loc = xnor ]; then
+ 	kdev="/dev/nor0.kernel"
+ elif [ x$kernel_loc = xnand ]; then
+-	kdev="/dev/nand0.kernel.bb"
++  kdev="/dev/nand0.${kernel}.bb"
+ elif [ x$kernel_loc = xfastspi ]; then
+ 	kdev="/dev/spi1.kernel"
+ elif [ x$kernel_loc = xspi ]; then
+@@ -166,10 +232,47 @@
+ 	bootargs="$bootargs usb3_internal_clk=$usb3_internal_clk"
+ fi
+ 
++if [ -n $pci_data ]; then
++  bootargs="$bootargs $pci_data"
++fi
++
++version
++if [ -n $bootver ]; then
++  bootargs="$bootargs bareboxver="$bootver""
++fi
++
++version_rv16x_26x
++if [ -n $bootver_rv16x_26x ]; then
++  bootargs="$bootargs bareboxver_rv16x_26x="$bootver_rv16x_26x""
++fi
++
+ echo "booting kernel of type $kernelimage_type from $kdev"
+ 
+ if [ x$kernelimage_type = xuimage ]; then
+ 	bootm $kdev
++  if [ $? != 0 ]; then
++    echo "bootm Failed to boot $kdev "
++    if [ x$kernel = xkernel1 ]; then
++      kernel=kernel2
++      rootfs=$ROOTFS_PART2
++    elif [ x$kernel = xkernel2 ]; then
++      kernel=kernel1
++      rootfs=$ROOTFS_PART1
++    fi
++    kdev="/dev/nand0.${kernel}.bb"
++    echo "Checking $kdev ..."
++    imageenv -c $kdev
++    if [ $? = 0 ]; then
++      imageenv -s "$rootfs"
++      echo "Booting kernel $kdev with Rootfs part : $rootfs"
++      bootm $kdev
++    else
++      echo "bootm Failed to boot $kdev Too!"
++      echo "Please execute Recovery Procedure!"
++      erase /dev/nand0.env
++      exit 1
++    fi
++  fi
+ elif [ x$kernelimage_type = xmulti-uimage ]; then
+ #limited multi image support, assuming that kernel is image 0 and ramdisk is image 1
+ 	bootm -r @1 -L 0x1A00000 $kdev
+diff -Naur ./defaultenv/bin/erase_firmware ../../b/barebox-2011.06.0/defaultenv/bin/erase_firmware
+--- ./defaultenv/bin/erase_firmware	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/defaultenv/bin/erase_firmware	2017-02-15 20:09:29.160994160 +0530
+@@ -0,0 +1,27 @@
++#!/bin/sh
++
++. /env/config
++
++if [ x$1 = ximage1 ]; then
++  echo "Erasing Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++elif [ x$1 = ximage2 ]; then
++  echo "Erasing Firmware image2"
++  kernel=kernel2
++  rootfs=rootfs2
++else
++  echo "No Input Option >> Erasing Default Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++fi
++if [ ! -e "/dev/nand0.$kernel" -o ! -e "/dev/nand0.$rootfs" ]; then
++  echo "Partition /dev/nand0.$kernel OR /dev/nand0.$rootfs does not exist!"
++  exit 1
++fi
++echo "Erasing Kernel ..."
++erase /dev/nand0.$kernel
++echo "done."
++echo "Erasing Rootfs ..."
++erase /dev/nand0.$rootfs
++echo "done."
+diff -Naur ./defaultenv/bin/recover_fw ../../b/barebox-2011.06.0/defaultenv/bin/recover_fw
+--- ./defaultenv/bin/recover_fw	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/defaultenv/bin/recover_fw	2017-02-15 20:09:29.160994160 +0530
+@@ -0,0 +1,32 @@
++#!/bin/sh
++
++. /env/config
++RESPONSE=N
++readline "Do you want to update NAND Barebox [Y/y]? : " RESPONSE
++if [ x$RESPONSE = xY -o x$RESPONSE = xy ]; then
++  echo "RESPONSE=$RESPONSE >> Updating Barebox image $bareboximage ..."
++  . /env/bin/update -t barebox -d nand -m tftp -f $bareboximage
++  echo "done Barebox Update"
++else
++  echo "RESPONSE=$RESPONSE >> Barebox Updated Skipped in Recovery Procedure!"
++fi
++if [ x$1 = ximage1 ]; then
++  echo "Updating Firmware $1 ..."
++  kernel=kernel1
++  rootfs=rootfs1
++elif [ x$1 = ximage2 ]; then
++  echo "Updating Firmware $1 ..."
++  kernel=kernel2
++  rootfs=rootfs2
++else
++  echo "No input option >> Updating Default Firmware image1 ..."
++  kernel=kernel1
++  rootfs=rootfs1
++fi
++echo "Updating Kernel with Image : $kernelimage ..."
++. /env/bin/update -t $kernel -d nand -m tftp -f $kernelimage
++echo "done Kernel Update."
++echo "Updating Rootfs with Image : $rootfsimage ..."
++. /env/bin/update -t $rootfs -d nand -m tftp -f $rootfsimage
++echo "done Rootfs Update."
++echo "To set last updated image as default (active), Please set active/backup environment variables by editing and saving File: /env/config and reset board"
+diff -Naur ./defaultenv/bin/update ../../b/barebox-2011.06.0/defaultenv/bin/update
+--- ./defaultenv/bin/update	2017-02-10 22:09:02.970646833 +0530
++++ ../../b/barebox-2011.06.0/defaultenv/bin/update	2017-02-15 20:09:29.160994160 +0530
+@@ -29,9 +29,9 @@
+ fi
+ done
+ 
+-if [ x${type} = xkernel ]; then
++if [ x${type} = xkernel1 -o  x${type} = xkernel2 ]; then
+ 	image=$kernelimage
+-elif [ x${type} = xrootfs ]; then
++elif [ x${type} = xrootfs1 -o  x${type} = xrootfs2 ]; then
+ 	image=$rootfsimage
+ elif [ x${type} = xbarebox ]; then
+ 	image=$bareboximage
+@@ -46,6 +46,14 @@
+ 		image=bareboxenv.bin
+ 	fi
+ 	type=env
++elif [ x${type} = xmd5sum1 -o  x${type} = xmd5sum2 ]; then
++  image=$md5sumimage
++elif [ x${type} = xconfigcert ]; then
++  image=$imageconfig
++elif [ x${type} = xwebrootdb ]; then
++	image=$imageweb
++elif [ x${type} = xlicense ]; then
++	image=$imagelic
+ else
+ 	. /env/bin/_update_help
+ 	exit 1
+diff -Naur ./defaultenv/bin/update_firmware ../../b/barebox-2011.06.0/defaultenv/bin/update_firmware
+--- ./defaultenv/bin/update_firmware	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/defaultenv/bin/update_firmware	2017-02-15 20:09:29.160994160 +0530
+@@ -0,0 +1,30 @@
++#!/bin/sh
++
++. /env/config
++
++if [ x$1 = ximage1 ]; then
++  echo "Updating Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++  md5sum=md5sum1
++elif [ x$1 = ximage2 ]; then
++  echo "Updating Firmware image2"
++  kernel=kernel2
++  rootfs=rootfs2
++  md5sum=md5sum2
++else
++  echo "No Input Option >> Updating Default Firmware image1"
++  kernel=kernel1
++  rootfs=rootfs1
++  md5sum=md5sum1
++fi
++echo "Updating Kernel with Image : $kernelimage ..."
++update -t $kernel -d nand
++echo "done Kernel Update"
++echo "Updating Rootfs with Image : $rootfsimage ..."
++update -t $rootfs -d nand
++echo "done Rootfs Update"
++echo "Updating md5sum with Image : $md5sumimage ..."
++update -t $md5sum -d fastspi
++echo "done md5sum Update"
++echo "To set last updated image as default (active), Please set active/backup environment variables by editing and saving File: /env/config and reset board"
+diff -Naur ./defaultenv/bin/_update_help ../../b/barebox-2011.06.0/defaultenv/bin/_update_help
+--- ./defaultenv/bin/_update_help	2017-02-10 22:09:02.970646833 +0530
++++ ../../b/barebox-2011.06.0/defaultenv/bin/_update_help	2017-02-15 20:09:29.160994160 +0530
+@@ -1,14 +1,18 @@
+ #!/bin/sh
+ 
+-echo "usage: update -t <uloader|barebox|bareboxenv|kernel|rootfs> -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] -c"
++echo "usage: update -t <uloader | barebox | bareboxenv | kernel1 | kernel2 | rootfs1 | rootfs2> -d <nand | fastspi> [-m tftp|xmodem|ddr] [-f imagename |-a address] -c"
+ echo "update tools."
+ echo ""
+ echo "options"
+ echo " -c     to check the crc32 for the image and flashed one"
+ echo ""
+ echo "default mode is tftp"
+-echo "type update -t uloader -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update uloader into flash"
+-echo "type update -t barebox -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update barebox into flash"
+-echo "type update -t kernel -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update kernel into flash"
+-echo "type update -t rootfs -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update rootfs into flash"
+-echo "type update -t bareboxenv -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update bareboxenv into flash"
++echo "type update -t uloader -d fastspi [-m tftp|xmodem|ddr] [-f imagename|-a address] to update uloader into flash"
++echo "type update -t barebox -d nand [-m tftp|xmodem|ddr] [-f imagename|-a address] to update barebox into flash"
++echo "type update -t <kernel1 | kernel2> -d nand [-m tftp|xmodem|ddr] [-f imagename| -a address] to update kernel into flash"
++echo "type update -t <rootfs1 | rootfs2> -d nand [-m tftp|xmodem|ddr] [-f imagename| -a address] to update rootfs into flash"
++echo "type update_firmware <image1 | image2> to update kernel, rootfs on image1 OR image2"
++echo "type update -t configcert -d nand to update yaffs2 partition : config "
++echo "type update -t webrootdb -d nand to update yaffs2 partition : webrootdb"
++echo "type update -t license -d nand to update yaffs2 partition : license"
++echo "type update_yaffs2 to update all yaffs2 partitions config, webrootdb, license"
+diff -Naur ./defaultenv/bin/update_yaffs2 ../../b/barebox-2011.06.0/defaultenv/bin/update_yaffs2
+--- ./defaultenv/bin/update_yaffs2	1970-01-01 05:30:00.000000000 +0530
++++ ../../b/barebox-2011.06.0/defaultenv/bin/update_yaffs2	2017-02-15 20:09:29.160994160 +0530
+@@ -0,0 +1,13 @@
++#!/bin/sh
++
++. /env/config
++
++echo "Updating configcert with Image : $imageconfig ..."
++update -t configcert -d nand
++echo "done."
++echo "Updating webrootdb with Image : $imageweb ..."
++update -t webrootdb -d nand
++echo "done."
++echo "Updating license with Image : $imagelic ... "
++update -t license -d nand
++echo "done."

@@ -1,0 +1,61 @@
+#!/bin/sh
+. /lib/config/uci.sh
+
+errcode=1
+errstring="Invalid Arguments"
+
+interface=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "interface") {print $(I+1)};}'`
+version=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "ip-version") {print $(I+1)};}'`
+
+
+interface=$(echo $interface | awk '{print tolower($0)}' | sed s/'\.'/_/)
+
+if [ "$version" = "v6" ];then
+        iface=$(echo $interface | sed s/wan[1-9]*/\&6/g)
+else
+	iface="$interface"
+fi
+
+ubus list | sed -ne 's/^network\.interface\.//p' | grep $iface >/dev/null 2>&1
+
+errcode=$?
+
+if [ "$errcode" -ne 0 ];then
+        errstring="Interface not found"
+else
+	if [ "$version" = "v4" ];then
+		ifname=`uci get network.$iface.ifname`
+		pid=$(cat "/var/run/udhcpc-$ifname.pid")
+
+		#for renew
+		kill -s SIGUSR1 "$pid"
+	else
+		if [ "$(ifstatus $iface | grep "up" | grep "false")" != "" ];then
+			ifup $iface
+		else
+			ifname=`uci get network.$iface.ifname`
+			pid=$(ps -eaf | grep odhcp6c | grep $ifname | sed s/"^ *"//g | cut -f 1 -d ' ')
+
+			#for renew
+			for p in $pid
+			do
+				kill -s SIGUSR1 "$p"
+			done
+		fi
+	fi
+
+	errcode=$?
+
+	if [ "$errcode" -ne 0 ];then
+        	errstring="renew-ip failed"
+	else
+        	errstring="Success"
+	fi
+fi
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errstring\""
+	exit 1
+else
+	exit 0
+fi

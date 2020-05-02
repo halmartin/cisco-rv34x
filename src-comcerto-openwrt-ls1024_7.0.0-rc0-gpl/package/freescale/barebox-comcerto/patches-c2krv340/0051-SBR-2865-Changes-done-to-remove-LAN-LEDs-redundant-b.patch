@@ -1,0 +1,28 @@
+From 54539d3ef6406fefba2ff766c2612feef31651f9 Mon Sep 17 00:00:00 2001
+From: user <abdul.moiz@nxp.com>
+Date: Tue, 16 Aug 2016 19:09:54 +0530
+Subject: [PATCH 51/60] SBR-2865 Changes done to remove LAN LEDs redundant
+ blink during bootup
+
+Signed-off-by: user <abdul.moiz@nxp.com>
+---
+ arch/arm/boards/comcerto-rv340/c2k_rv340.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/c2k_rv340.c b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+index 06491e8..a168db3 100755
+--- a/arch/arm/boards/comcerto-rv340/c2k_rv340.c
++++ b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+@@ -253,7 +253,8 @@ static int c2000_device_init(void)
+ 	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_59, COMCERTO_GPIO_EXT_OUTPUT_REG);
+ 	/* GPIO Reset External Device */
+ 	udelay(100000);
+-	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_1, COMCERTO_GPIO_OUTPUT_REG);
++	//Commenting out below RTL8367 Reset to remove LAN LEDs redundant blink during bootup as it is not required
++	//writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_1, COMCERTO_GPIO_OUTPUT_REG);
+ 	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_2, COMCERTO_GPIO_OUTPUT_REG);
+ 	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_3, COMCERTO_GPIO_OUTPUT_REG);
+ 	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_47, COMCERTO_GPIO_EXT_OUTPUT_REG);
+-- 
+2.7.4
+

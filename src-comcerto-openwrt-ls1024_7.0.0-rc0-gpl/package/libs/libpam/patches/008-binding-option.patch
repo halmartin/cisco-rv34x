@@ -1,0 +1,18 @@
+--- a/libpam/pam_handlers.c	2015-10-09 16:52:32.353283228 +0530
++++ b/libpam/pam_handlers.c	2015-10-09 18:48:21.035159222 +0530
+@@ -185,7 +185,14 @@ static int _pam_parse_conf_file(pam_hand
+ 		D(("*PAM_F_SUBSTACK*"));
+ 		pam_include = 1;
+ 		substack = 1;
+-	    } else {
++	    }else if (!strcasecmp("binding", tok)) {
++        D(("*PAM_F_BINDING*"));
++        actions[PAM_SUCCESS] = _PAM_ACTION_DONE;
++        actions[PAM_AUTH_ERR] = _PAM_ACTION_DONE;
++        actions[PAM_USER_UNKNOWN] = _PAM_ACTION_DONE;
++        actions[PAM_NEW_AUTHTOK_REQD] = _PAM_ACTION_DONE;
++        _pam_set_default_control(actions, _PAM_ACTION_IGNORE);
++        }else {
+ 		D(("will need to parse %s", tok));
+ 		_pam_parse_control(actions, tok);
+ 		/* by default the default is to treat as failure */

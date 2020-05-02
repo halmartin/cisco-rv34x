@@ -1,0 +1,52 @@
+#!/bin/sh
+. /lib/config/uci.sh
+
+errcode=1
+errstring="Invalid Arguments"
+
+interface=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "interface") {print $(I+1)};}'`
+version=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "ip-version") {print $(I+1)};}'`
+
+interface=$(echo $interface | awk '{print tolower($0)}' | sed s/'\.'/_/)
+
+if [ "$version" = "v4" ];then
+        iface=$(echo $interface | sed s/wan[1-9]*/\&p/g)
+else
+		v4_interface=$(echo $interface | sed s/wan[1-9]*/\&p/g)
+        ip6_enable=`uci get network.$v4_interface.ipv6`
+        if [ "$ip6_enable" = "1" ];then
+                iface=$(echo $interface | sed s/wan[1-9]*/\&p/g)
+		else
+        	iface=$(echo $interface | sed s/wan[1-9]*/\&p/g | sed s/wan[1-9]*/\&6/g)
+		fi
+fi
+
+ubus list | sed -ne 's/^network\.interface\.//p' | grep $iface >/dev/null 2>&1
+
+errcode=$?
+
+if [ "$errcode" -ne 0 ];then
+        errstring="Interface not found"
+else
+	#uci set network.$iface.enable=1
+        #cp /tmp/.uci/network /tmp/networkconfig
+        #uci commit network
+	#ubus call network reload
+	ifup $iface
+	#/sbin/mtu-mac-enable reload
+                        
+	errcode=$?
+
+	if [ "$errcode" -ne 0 ];then
+        	errstring="Network reload Failed"
+	else
+        	errstring="Success"
+	fi
+fi
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errstring\""
+	exit 1
+else
+	exit 0
+fi

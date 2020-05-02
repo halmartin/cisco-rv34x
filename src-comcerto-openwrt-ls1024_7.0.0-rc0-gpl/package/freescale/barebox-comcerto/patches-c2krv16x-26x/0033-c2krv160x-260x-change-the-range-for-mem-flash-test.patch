@@ -1,0 +1,14 @@
+--- barebox-2011.06.0/commands/mem_flash_test.c.org	2017-12-27 10:42:06.897106268 +0800
++++ barebox-2011.06.0/commands/mem_flash_test.c	2017-12-27 10:42:28.305231137 +0800
+@@ -35,9 +35,9 @@
+ 
+ static int do_ddr_test(ulong _start, ulong _end, ulong pattern_unused)
+ {
+-    if((_start < 0x800000) || (_end > 0x3FFFFFC0) || (_start > _end))
++    if((_start < 0x1300000) || (_end > 0x3FFFFFC0) || (_start > _end))
+     {
+-        printf ("Addr Range: 0x800000 ~ 0x3FFFFFC0\n");
++        printf ("Addr Range: 0x1300000 ~ 0x3FFFFFC0\n");
+         return -1;
+     }
+     

@@ -1,0 +1,8 @@
+
+config upnpd 'config'
+	option enabled '0'
+	option download '1024'
+	option upload '512'
+	option upnp_lease_file '/var/upnp.leases'
+	option log_output '0'
+

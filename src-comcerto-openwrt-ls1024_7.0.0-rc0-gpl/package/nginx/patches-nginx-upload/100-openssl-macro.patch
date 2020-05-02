@@ -1,0 +1,54 @@
+--- a/nginx-upload-module-master/ngx_http_upload_module.c	2015-10-14 09:40:34.000000000 +0800
++++ b/nginx-upload-module-master/ngx_http_upload_module.c	2018-01-18 12:47:29.237029807 +0800
+@@ -11,24 +11,9 @@
+ #include <ngx_http.h>
+ #include <nginx.h>
+ 
+-#if (NGX_HAVE_OPENSSL_MD5_H)
+ #include <openssl/md5.h>
+-#else
+-#include <md5.h>
+-#endif
+-
+-#if (NGX_HAVE_OPENSSL_SHA1_H)
+ #include <openssl/sha.h>
+-#else
+-#include <sha.h>
+-#endif
+-
+ 
+-#if (NGX_OPENSSL_MD5)
+-#define  MD5Init    MD5_Init
+-#define  MD5Update  MD5_Update
+-#define  MD5Final   MD5_Final
+-#endif
+ 
+ #define MULTIPART_FORM_DATA_STRING              "multipart/form-data"
+ #define BOUNDARY_STRING                         "boundary="
+@@ -1807,7 +1792,7 @@
+         }
+ 
+         if(u->md5_ctx != NULL)
+-            MD5Init(&u->md5_ctx->md5);
++            MD5_Init(&u->md5_ctx->md5);
+ 
+         if(u->sha1_ctx != NULL)
+             SHA1_Init(&u->sha1_ctx->sha1);
+@@ -1897,7 +1882,7 @@
+         ngx_close_file(u->output_file.fd);
+ 
+         if(u->md5_ctx)
+-            MD5Final(u->md5_ctx->md5_digest, &u->md5_ctx->md5);
++            MD5_Final(u->md5_ctx->md5_digest, &u->md5_ctx->md5);
+ 
+         if(u->sha1_ctx)
+             SHA1_Final(u->sha1_ctx->sha1_digest, &u->sha1_ctx->sha1);
+@@ -2059,7 +2044,7 @@
+         }
+ 
+         if(u->md5_ctx)
+-            MD5Update(&u->md5_ctx->md5, buf, len);
++            MD5_Update(&u->md5_ctx->md5, buf, len);
+ 
+         if(u->sha1_ctx)
+             SHA1_Update(&u->sha1_ctx->sha1, buf, len);

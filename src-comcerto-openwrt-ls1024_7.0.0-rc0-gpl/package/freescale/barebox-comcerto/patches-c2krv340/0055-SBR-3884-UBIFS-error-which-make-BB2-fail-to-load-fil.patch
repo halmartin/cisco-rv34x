@@ -1,0 +1,407 @@
+From 9eed6c209074e6288eed115891796f683bd37302 Mon Sep 17 00:00:00 2001
+From: Sai Chaithanya <chaitanya.vinnakota@nxp.com>
+Date: Mon, 2 Jan 2017 21:28:03 +0530
+Subject: [PATCH 55/60] SBR-3884 UBIFS error which make BB2 fail to load
+ filesystem or wifi mod. Implemented image failover mechanism which is
+ triggered when BB2 is encountered with either UBIFS or ECC errors
+ continuously for 5 times
+
+To address the issues a new partition of size 64K is created in the SPI Flash. This partition maintains a counter which is set to 1 by default and incremented by barebox during every bootup.
+Upon successful boot i.e when the UBIFS errors and ECC error messages are not seen then counter is reset to 0 by the rootfs. In the event of any error occurrence,
+the counter is untouched and a reboot is initiated. ` Whenever barebox increments and finds that the counter reached 3 , then barebox boots up the inactive image and sets it as the new
+active image
+
+Corrected validation check for image fallback mechanism by reddi.m@nxp.com on 14/8/2018
+
+Signed-off-by: Sai Chaithanya <chaitanya.vinnakota@nxp.com>
+---
+ arch/arm/boards/comcerto-rv340/env/bin/boot        |  56 ++++++
+ arch/arm/boards/comcerto-rv340/env/config          |   7 +-
+ arch/arm/configs/comcerto-2k_rv340_defconfig       |   1 +
+ arch/arm/configs/comcerto-2k_rv340_diags_defconfig |   1 +
+ .../configs/comcerto-2k_rv340_uloader_defconfig    |   1 +
+ commands/Kconfig                                   |   8 +
+ commands/Makefile                                  |   5 +-
+ commands/boot_check.c                              | 192 +++++++++++++++++++++
+ 8 files changed, 267 insertions(+), 4 deletions(-)
+ create mode 100644 commands/boot_check.c
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/boot b/arch/arm/boards/comcerto-rv340/env/bin/boot
+index cfb132b..d262d54 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/boot
++++ b/arch/arm/boards/comcerto-rv340/env/bin/boot
+@@ -56,6 +56,9 @@ export active="$active" inactive="$inactive"
+ echo "done"
+ echo "active = $active inactive = $inactive"
+ 
++# calling boot_check with default value of boot_fail_check_max=3
++boot_check -c $boot_fail_check_max
++
+ if [ x$1 = xactive ]; then
+   echo "Booting active $active ..."
+   if [ x$active = ximage1 ]; then
+@@ -241,6 +244,8 @@ if [ -n $bootver_rv340 ]; then
+   bootargs="$bootargs bareboxver_rv340="$bootver_rv340""
+ fi
+ 
++bootargs="$bootargs boot_fail_flag="$boot_fail_value""
++
+ #POWER_LED ON
+ gpio_direction_output $GPIO_LED_POWER $ON
+ gpio_set_value $GPIO_LED_POWER $ON
+@@ -248,6 +253,57 @@ gpio_set_value $GPIO_LED_POWER $ON
+ echo "booting kernel of type $kernelimage_type from $kdev"
+ 
+ if [ x$kernelimage_type = xuimage ]; then
++	
++	if [ x$boot_fail_value = x1 ]; then
++		echo "Active image is corrupted. Switching to inactive image"
++		if [ x$kernel = xkernel1 ]; then
++      			kernel=kernel2
++      			rootfs=$ROOTFS_PART2
++    		elif [ x$kernel = xkernel2 ]; then
++      			kernel=kernel1
++      			rootfs=$ROOTFS_PART1
++    		fi
++    		kdev="/dev/nand0.${kernel}.bb"
++    		echo "Checking $kdev ..."
++		imageenv -c $kdev
++    		if [ $? = 0 ]; then
++      			imageenv -s "$rootfs"
++      			echo "Booting kernel $kdev with Rootfs part : $rootfs"
++      			bootm $kdev
++    		else
++      			echo "bootm Failed to boot $kdev Too!"
++      			echo "Please execute Recovery Procedure!"
++      			erase /dev/nand0.env
++			timeout -ps 5
++			      if [ $? != 0 ]; then
++				timeout -1s 5
++				if [ $? != 0 ]; then
++					timeout -2s 5
++					if [ $? != 0 ]; then
++						timeout -3s 5
++						if [ $? != 0 ]; then
++						        timeout -4s 5
++						        if [ $? != 0 ]; then
++						                timeout -5s 5
++						                if [ $? != 0 ]; then
++						                        timeout -6s 5
++						                        if [ $? != 0 ]; then
++						                                gpio_direction_output $GPIO_LED_DIAG $ON
++						                                gpio_set_value $GPIO_LED_DIAG $ON
++						                                login
++						                                . /env/bin/_update_help
++						                                exit 0
++						                        fi
++						                fi
++						        fi
++						fi
++					fi
++				fi
++			      fi
++		fi
++		exit 1
++	fi
++
+   bootm $kdev
+   if [ $? != 0 ]; then
+     echo "bootm Failed to boot $kdev "
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index 94dcbc0..e1a5108 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -44,6 +44,9 @@ imagelic=root_license.yaffs2
+ active=image1
+ inactive=image2
+ 
++# Boot fail count Maximum value
++boot_fail_check_max=5
++
+ # Rootfs Partition Identifiers
+ ROOTFS_PART1=4
+ ROOTFS_PART2=7
+@@ -55,7 +58,7 @@ ON=0
+ OFF=1
+ 
+ fast_spi_device="spi1.0"
+-fast_spi_parts="128k(uloader)ro,512k(barebox),128k(env),128k(boardinfo)ro,64k(md5sum1),64k(md5sum2)"
++fast_spi_parts="128k(uloader)ro,512k(barebox),128k(env),128k(boardinfo)ro,64k(md5sum1),64k(md5sum2),64k(boot_check)"
+ 
+ nand_device="comcertonand"
+ nand_parts="512k(barebox),512k(bareboxfact)ro,128k(env),8M(kernel1),92M(rootfs1),128k(reserved_dtb1),8M(kernel2),92M(rootfs2),128k(reserved_dtb2),2M(configcert),12M(avcsign),32M(webrootdb),2M(license)"
+@@ -68,4 +71,4 @@ loglevel=4
+ 
+ pci_data="pcie0_gen1_only=yes pcie1_gen1_only=no  pcie_external_clk=yes"
+ 
+-bootargs="loglevel=$loglevel, init=/etc/preinit"
++bootargs="console=ttyS0,115200n8, loglevel=$loglevel, panic=10"
+diff --git a/arch/arm/configs/comcerto-2k_rv340_defconfig b/arch/arm/configs/comcerto-2k_rv340_defconfig
+index da4878f..4695333 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_defconfig
+@@ -209,6 +209,7 @@ CONFIG_CMD_UPDATE_FAST_SPI=y
+ CONFIG_CMD_COPY=y
+ CONFIG_CMD_BOARDINFO=y
+ CONFIG_CMD_IMAGEENV=y
++CONFIG_CMD_BOOTCHECK=y
+ 
+ #
+ # console                       
+diff --git a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+index 0df31b0..3e49ae8 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+@@ -249,6 +249,7 @@ CONFIG_CMD_UPDATE_FAST_SPI=y
+ CONFIG_CMD_COPY=y
+ CONFIG_CMD_BOARDINFO=y
+ CONFIG_CMD_IMAGEENV=y
++CONFIG_CMD_BOOTCHECK=y
+ 
+ #
+ # console                       
+diff --git a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+index 3c53997..c0d7b6f 100644
+--- a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
++++ b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+@@ -195,6 +195,7 @@ CONFIG_COMMAND_SUPPORT=y
+ # CONFIG_CMD_COPY is not set
+ # CONFIG_CMD_BOARDINFO is not set
+ # CONFIG_CMD_IMAGEENV is not set
++# CONFIG_CMD_BOOTCHECK is not set
+ 
+ #
+ # console                       
+diff --git a/commands/Kconfig b/commands/Kconfig
+index 7ca0c59..6e985dd 100644
+--- a/commands/Kconfig
++++ b/commands/Kconfig
+@@ -183,6 +183,14 @@ config CMD_IMAGEENV
+ 	help
+ 	  This command reads and sets active<>inactive ID for board boot-up.
+ 
++config CMD_BOOTCHECK
++	bool
++	depends on MACH_COMCERTO_C2K_RV340
++	prompt "RV340 boot fail count check"
++	default n
++	help
++	  This command is used to check boot fail count and update.
++
+ endmenu
+ 
+ menu "console                       "
+diff --git a/commands/Makefile b/commands/Makefile
+index ef41e31..713d938 100755
+--- a/commands/Makefile
++++ b/commands/Makefile
+@@ -69,5 +69,6 @@ obj-$(CONFIG_CMD_PFE_DIAGS)	+= c2000_pfe_diags.o
+ obj-$(CONFIG_CMD_AR8328)	+= atheros.o
+ obj-$(CONFIG_CMD_COPY)		+= copy.o
+ obj-$(CONFIG_CMD_SATA)		+= sata.o
+-obj-$(CONFIG_CMD_BOARDINFO)  += boardinfo.o
+-obj-$(CONFIG_CMD_BOARDINFO)  += imageenv.o
++obj-$(CONFIG_CMD_BOARDINFO)  	+= boardinfo.o
++obj-$(CONFIG_CMD_IMAGEENV)  	+= imageenv.o
++obj-$(CONFIG_CMD_BOOTCHECK)  	+= boot_check.o
+diff --git a/commands/boot_check.c b/commands/boot_check.c
+new file mode 100644
+index 0000000..a8b5140
+--- /dev/null
++++ b/commands/boot_check.c
+@@ -0,0 +1,192 @@
++/*
++ * Copyright (c) 
++ * Freescale Semicondunctors Pvt. Ltd.
++ *
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#include <image.h>
++#include <common.h>
++#include <command.h>
++#include <fs.h>
++#include <fcntl.h>
++#include <linux/ctype.h>
++#include <linux/stat.h>
++#include <getopt.h>
++#include <errno.h>
++#include <xfuncs.h>
++#include <malloc.h>
++#include <environment.h>
++
++char *file_boot_check = "/dev/spi1.boot_check";
++const char boot_fail_string_1[] = "1";
++const char boot_fail_string_0[] = "0";
++
++static int command_boot_check(int argc, char *argv[])
++{
++	int ret,n_written;
++	int fd;
++	unsigned char boot_count,boot_count_fail_max;
++	char *buf_boorargs;
++	unsigned long start = 0, size = ~0;
++	struct stat s;
++
++  	if (stat(file_boot_check, &s)) {
++  		printf("stat %s: %s\n", file_boot_check, errno_str());
++		return COMMAND_ERROR;
++        }
++        size = s.st_size;
++
++	if (argc < 3){
++		printf("Insufficient argument/s!\n");
++		return COMMAND_ERROR_USAGE;
++        }
++
++	fd = open(file_boot_check, O_RDONLY);
++	if (fd < 0) {
++		printf("could not open the file %s\n",file_boot_check);
++		return COMMAND_ERROR;
++	}
++
++	boot_count_fail_max=simple_strtoul(argv[2], NULL, 0);
++	if(boot_count_fail_max < 3)
++		boot_count_fail_max = 3;
++	if(boot_count_fail_max > 254)
++		boot_count_fail_max = 254;
++
++	ret = read(fd, &boot_count, 1);
++	if(ret < 0)
++	{
++		printf("Reading from the file %s failed\n",file_boot_check);
++		close(fd);
++		return COMMAND_ERROR;
++	}
++
++	close(fd);
++
++	if(boot_count==0 || boot_count==0xFF)
++	{
++		boot_count=1;
++		setenv("boot_fail_value",boot_fail_string_0);
++	}
++	else if((boot_count > 0) && (boot_count < boot_count_fail_max))
++	{
++		boot_count++;
++		setenv("boot_fail_value",boot_fail_string_0);
++
++	}
++	else
++	{
++		boot_count=1;
++		setenv("boot_fail_value",boot_fail_string_1);
++	}
++	
++	fd = open(file_boot_check, O_WRONLY);
++	if (fd < 0) {
++		printf("could not open the file %s\n",file_boot_check);
++		return COMMAND_ERROR;
++	}
++
++	if (erase(fd, size, start)) {
++		printf("erase of file %s failed\n",file_boot_check);
++		close(fd);
++		return COMMAND_ERROR;
++	}
++
++	if ( (n_written = write(fd, &boot_count, 1)) < 0 )
++	{
++		printf("write of file %s failed\n",file_boot_check);
++		close(fd);
++		return COMMAND_ERROR;
++	}
++
++	close(fd);
++	return COMMAND_SUCCESS;
++}
++
++static int command_boot_check_set(int argc, char *argv[])
++{
++	int ret, n_written;
++	int fd;
++	unsigned char boot_count;
++	unsigned long start = 0, size = ~0;
++	struct stat s;
++
++	if (argc < 3){
++		printf("Insufficient argument/s!\n");
++		return COMMAND_ERROR_USAGE;
++	}
++
++        if (stat(file_boot_check, &s)) {
++                printf("stat %s: %s\n", file_boot_check, errno_str());
++                return COMMAND_ERROR;
++        }
++        size = s.st_size;
++
++	fd = open(file_boot_check, O_WRONLY);
++	if (fd < 0) {
++		printf("could not open the file %s\n",file_boot_check);
++		return COMMAND_ERROR;
++	}
++
++	boot_count=simple_strtoul(argv[2], NULL, 0);
++	if(boot_count < 1)
++		boot_count = 1;
++	if(boot_count > 255)
++		boot_count = 255;
++
++	if (erase(fd, size, start)) {
++		printf("erase of file %s failed\n",file_boot_check);
++		close(fd);
++		return COMMAND_ERROR;
++	}
++
++	if ( (n_written = write(fd, &boot_count, 1)) < 0 )
++	{
++		printf("write of file %s failed\n",file_boot_check);
++		close(fd);
++		return COMMAND_ERROR;
++	}
++
++	close(fd);
++	return COMMAND_SUCCESS;
++}
++
++
++static const __maybe_unused char cmd_boot_check_help[] =
++"Usage: boot_check [OPTIONS]\n"
++"\n"
++"options:\n"
++" -c  <value>  (range 3 to 255)  Check and Update boot count value\n"
++" -s  <value>  (range 1 to 255)  Set boot count value\n"
++;
++
++static int do_boot_check(struct command *cmdtp, int argc, char *argv[])
++{
++	if (strcmp(argv[1], "-c") == 0)
++		return command_boot_check(argc, argv);
++  	else if (strcmp(argv[1], "-s") == 0)
++		return command_boot_check_set(argc, argv);
++	else
++		return COMMAND_ERROR_USAGE;
++}
++
++BAREBOX_CMD_START(boot_check)
++	.cmd	= do_boot_check,
++	.usage	= "Check and update / Set boot count value",
++	BAREBOX_CMD_HELP(cmd_boot_check_help)
++BAREBOX_CMD_END
+-- 
+2.7.4
+

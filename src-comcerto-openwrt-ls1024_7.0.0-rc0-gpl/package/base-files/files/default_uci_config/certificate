@@ -1,0 +1,14 @@
+
+config generated_certificate 'Default'
+	option type '0'
+	option cert_name 'Default'
+	option organization_name 'Cisco Systems, Inc.'
+	option organization_unit_name 'Cisco Small Business'
+	option common_name '00:88:77:66:54:55'
+	option key_encryption '2048'
+	option signed_by '1'
+	option signed_by_str 'Self Signed'
+	option subject 'CN=00:88:77:66:54:55,OU=Cisco Small Business,O=Cisco Systems\, Inc.'
+	option duration 'From 2012-07-12 To 2042-07-05'
+	option useby 'WebServer'
+

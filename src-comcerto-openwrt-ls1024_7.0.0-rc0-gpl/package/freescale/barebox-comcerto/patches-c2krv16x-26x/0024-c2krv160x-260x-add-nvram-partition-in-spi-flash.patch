@@ -1,0 +1,13 @@
+# 03-03-2017: harry.lin <harry.lin@deltaww.com>
+# Add nvram partition in SPI FLASH
+--- barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/config.org	2017-02-17 10:06:13.119421993 +0800
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/env/config	2017-02-17 10:09:00.150671031 +0800
+@@ -54,7 +54,7 @@
+ OFF=0
+ 
+ fast_spi_device="spi1.0"
+-fast_spi_parts="128k(uloader)ro,512k(barebox)ro,128k(env),128k(boardinfo)ro,64k(md5sum1),64k(md5sum2)"
++fast_spi_parts="128k(uloader)ro,512k(barebox)ro,128k(env),128k(boardinfo)ro,64k(md5sum1),64k(md5sum2),64k(nvram)"
+ 
+ nand_device="comcertonand"
+ nand_parts="1024k(barebox),1024k(bareboxfact)ro,1024k(env),8M(kernel1),92M(rootfs1),1024k(reserved_dtb1),8M(kernel2),92M(rootfs2),1024k(reserved_dtb2),2M(configcert),12M(reserved),32M(webrootdb),2M(license)"

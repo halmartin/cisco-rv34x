@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+
+export UWSGI_PLUGIN_DIR=/usr/lib/uwsgi/plugins
+
+start() {
+	uwsgi -m --ini /etc/uwsgi/jsonrpc.ini &
+	uwsgi -m --ini /etc/uwsgi/blockpage.ini &
+	uwsgi -m --ini /etc/uwsgi/upload.ini &
+}
+
+stop() {
+	killall -9 uwsgi
+}
+

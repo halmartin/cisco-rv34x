@@ -1,0 +1,27 @@
+diff -aurN a/interface-ip.c b/interface-ip.c
+--- a/interface-ip.c	2016-06-30 20:13:27.089398266 +0530
++++ b/interface-ip.c	2016-06-30 20:13:34.805398396 +0530
+@@ -282,6 +282,7 @@
+ 	struct device_route *route;
+ 	int af = v6 ? AF_INET6 : AF_INET;
+ 	bool is_proto_route = !!iface;
++	bool have_gw = false;
+ 
+ 	blobmsg_parse(route_attr, __ROUTE_MAX, tb, blobmsg_data(attr), blobmsg_data_len(attr));
+ 
+@@ -326,6 +327,15 @@
+ 
+ 	if ((cur = tb[ROUTE_METRIC]) != NULL) {
+ 		route->metric = blobmsg_get_u32(cur);
++		if ( route->metric == 256 && v6 ) {
++			have_gw = route->nexthop.in6.s6_addr32[0] ||
++				route->nexthop.in6.s6_addr32[1] ||
++				route->nexthop.in6.s6_addr32[2] ||
++				route->nexthop.in6.s6_addr32[3];
++			if ( !have_gw ) {
++				route->metric = 257;
++			}
++		}
+ 		route->flags |= DEVROUTE_METRIC;
+ 	} else
+ 		route->metric = iface->metric;

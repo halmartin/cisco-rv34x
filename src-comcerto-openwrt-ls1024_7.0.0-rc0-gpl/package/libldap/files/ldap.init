@@ -1,0 +1,50 @@
+#!/bin/sh /etc/rc.common
+. /lib/functions.sh
+
+START=99
+
+CONFIGFILE=/tmp/etc/ldap.conf
+
+ETC_CONFIGFILE=/etc/ldap.conf
+
+configure() {
+        local cfg="$1"
+        local enable
+        local primary_ipaddr
+        local primary_port
+        local basedn
+
+        config_get enable "$cfg" enable
+        if [ $enable -eq 1 ]
+              then
+
+               config_get primary_ipaddr "$cfg" primary_ipaddr
+               config_get primary_port "$cfg" primary_port
+               config_get basedn "$cfg" basedn
+               echo "BASE  $basedn" > $CONFIGFILE
+               echo "URI   ldap://$primary_ipaddr:$primary_port" >> $CONFIGFILE
+		ln -s $CONFIGFILE $ETC_CONFIGFILE
+        fi
+
+}
+boot () {
+
+	if [ ! -L $ETC_CONFIGFILE ]; then
+		rm -f $ETC_CONFIGFILE
+	fi
+
+	start
+}
+
+start() {
+        rm -rf $CONFIGFILE
+        touch $CONFIGFILE
+        config_load ldap
+        config_foreach configure ldap
+}
+
+stop() {
+        rm -rf $ETC_CONFIGFILE
+        rm -rf $CONFIGFILE
+        touch $CONFIGFILE
+}

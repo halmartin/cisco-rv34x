@@ -1,0 +1,13 @@
+# 2017-05-25: harry.lin <harry.lin@deltaww.com>
+# Adjust reflash cycle and increase DDR operation temp.
+--- barebox-2011.06.0/arch/arm/mach-comcerto/include/mach/ddr.h.org	2017-05-25 11:20:14.447546928 +0800
++++ barebox-2011.06.0/arch/arm/mach-comcerto/include/mach/ddr.h	2017-05-25 11:25:08.750671549 +0800
+@@ -625,7 +625,7 @@
+ #define DDRC_CTL_DDR3_012_VAL_CFG2  0x00011B03LL
+ #define DDRC_CTL_DDR3_013_VAL_CFG2  0x00000009LL
+ #define DDRC_CTL_DDR3_014_VAL_CFG2  0x00A00100LL  //0x00560100LL
+-#define DDRC_CTL_DDR3_015_VAL_CFG2  0x00001034LL
++#define DDRC_CTL_DDR3_015_VAL_CFG2  0x00000815LL
+ #define DDRC_CTL_DDR3_016_VAL_CFG2  0x000D0004LL
+ #define DDRC_CTL_DDR3_017_VAL_CFG2  0x00060002LL
+ #define DDRC_CTL_DDR3_018_VAL_CFG2  0x00A60200LL  //0x005B0200LL

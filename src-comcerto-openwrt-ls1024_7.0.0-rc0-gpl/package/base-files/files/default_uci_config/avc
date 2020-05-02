@@ -1,0 +1,5 @@
+
+config avc 'avc'
+	option log_level '6'
+	option enable 'false'
+

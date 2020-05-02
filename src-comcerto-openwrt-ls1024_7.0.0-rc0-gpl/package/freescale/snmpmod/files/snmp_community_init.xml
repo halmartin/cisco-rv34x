@@ -1,0 +1,29 @@
+<config xmlns="http://tail-f.com/ns/config/1.0">
+  <SNMP-COMMUNITY-MIB xmlns="http://tail-f.com/ns/mibs/SNMP-COMMUNITY-MIB/200308060000Z">
+    <snmpCommunityTable>
+
+    <!--
+        Define a single community 'public'.  See vacm_init.xml for
+        how the security name 'public' gets full access.
+    -->
+
+    <snmpCommunityEntry>
+      <snmpCommunityIndex>public</snmpCommunityIndex>
+      <snmpCommunityName>public</snmpCommunityName>
+      <snmpCommunitySecurityName>public</snmpCommunitySecurityName>
+      <snmpCommunityContextEngineID>80:00:61:81:05:01</snmpCommunityContextEngineID>
+    </snmpCommunityEntry>
+
+      <snmpCommunityEntry>
+        <snmpCommunityIndex>private</snmpCommunityIndex>
+        <snmpCommunityName>private</snmpCommunityName>
+        <snmpCommunitySecurityName>private</snmpCommunitySecurityName>
+        <snmpCommunityContextEngineID>80:00:61:81:05:01</snmpCommunityContextEngineID>
+        <snmpCommunityContextName/>
+        <snmpCommunityTransportTag/>
+        <snmpCommunityStorageType>permanent</snmpCommunityStorageType>
+      </snmpCommunityEntry>
+
+    </snmpCommunityTable>
+  </SNMP-COMMUNITY-MIB>
+</config>

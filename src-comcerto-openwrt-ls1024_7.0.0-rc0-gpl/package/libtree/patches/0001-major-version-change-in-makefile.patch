@@ -1,0 +1,13 @@
+diff --git a/Makefile b/Makefile
+index c87cc26..c1e40bb 100644
+--- a/Makefile
++++ b/Makefile
+@@ -3,7 +3,7 @@
+ #
+ MAKEFLAGS	+= --no-builtin-variables --no-print-directory
+ 
+-MAJOR_VERSION	= 0
++MAJOR_VERSION	= 1
+ MINOR_VERSION	= 0
+ 
+ TOPDIR		= $(CURDIR)

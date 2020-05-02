@@ -1,0 +1,26 @@
+From 86c3a9994cb25009f9699cdf5a307825ec04300f Mon Sep 17 00:00:00 2001
+From: user <abdul.moiz@nxp.com>
+Date: Fri, 5 Aug 2016 19:14:55 +0530
+Subject: [PATCH 49/60] SBR-92 Making CMD_VERSION_RV340 applicable for only
+ cisco RV34X boards
+
+Signed-off-by: user <abdul.moiz@nxp.com>
+---
+ commands/Kconfig | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/commands/Kconfig b/commands/Kconfig
+index 6a5a7bb..7ca0c59 100644
+--- a/commands/Kconfig
++++ b/commands/Kconfig
+@@ -371,6 +371,7 @@ config CMD_VERSION
+ 
+ config CMD_VERSION_RV340
+         tristate
++        depends on MACH_COMCERTO_C2K_RV340
+         default y
+         prompt "rv340 version"
+ 
+-- 
+2.7.4
+

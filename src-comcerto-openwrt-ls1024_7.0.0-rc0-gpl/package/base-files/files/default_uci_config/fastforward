@@ -1,0 +1,98 @@
+# Don't Fast Forward FTP traffic
+config fastforward ftp
+	option proto		tcp
+	option port		21
+config fastforward sip
+        option proto            udp
+        option port             5060
+config fastforward pptp
+        option proto            tcp
+        option port             1723
+
+config global_options
+	option mark qosconnmark
+
+config wifi_fastforward
+	option ifname wwan0
+	option direct_path_rx 0
+	option no_l2_interface 0
+
+config wifi_fastforward
+	option ifname wwan1
+	option direct_path_rx 0
+	option no_l2_interface 0
+
+config wifi_fastforward
+	option ifname 3g-usb1
+	option direct_path_rx 0
+	option no_l2_interface 1
+
+config wifi_fastforward
+	option ifname 3g-usb2
+	option direct_path_rx 0
+	option no_l2_interface 1
+
+#config logging
+#	option file	/var/log/cmm.log
+#	option command	0
+#	option error	1
+#       option warning	1
+#	option info	1
+#WiFi fastforward configuration
+#direct_path_rx-This option/optimization is implmented for atheros/QCA driver.
+#               For other devices/drivers this option should be disabled.
+config wifi_fastforward
+        option ifname   wl0
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl1
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl0.1
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl0.2
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl0.3
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl1.1
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl1.2
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1
+
+config wifi_fastforward
+        option ifname   wl1.3
+        option direct_path_rx 1
+        option direct_path_tx 1
+        option custom_skb 1
+        option brcm_pktc 1

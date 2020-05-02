@@ -1,0 +1,32 @@
+From 5a6a48909487f7abb3d31deb9302bff2b11ebcb3 Mon Sep 17 00:00:00 2001
+From: user <abdul.moiz@nxp.com>
+Date: Fri, 10 Jun 2016 17:09:49 +0530
+Subject: [PATCH 46/60] Print ARM clock frequency in uloader based on SKU part
+ no Signed-off-by: user <abdul.moiz@nxp.com>
+
+---
+ common/version.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/common/version.c b/common/version.c
+index 1d449e9..94954b4 100644
+--- a/common/version.c
++++ b/common/version.c
+@@ -13,6 +13,14 @@ const char version_string[] =
+ void barebox_banner (void)
+ {
+ 	printf (RELOC("\n\n%s\n\n"), RELOC_VAR(version_string));
++#ifdef	CONFIG_COMCERTO_BOOTLOADER
+ 	printf(RELOC("Board: " CONFIG_BOARDINFO "\n"));
++#else
++#ifdef CONFIG_M86201
++	printf(RELOC("Board: " CONFIG_BOARDINFO "  1200 MHz\n"));
++#else
++	printf(RELOC("Board: " CONFIG_BOARDINFO "  900 MHz\n"));
++#endif
++#endif
+ }
+ 
+-- 
+2.7.4
+

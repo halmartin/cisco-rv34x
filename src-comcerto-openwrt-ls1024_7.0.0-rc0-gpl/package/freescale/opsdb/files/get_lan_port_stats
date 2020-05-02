@@ -1,0 +1,239 @@
+#!/bin/sh
+
+LANPORT_STATS_FILE="/tmp/stats/lanport_stats"
+TMP_STATS_FILE="/tmp/stats/tmp_stats_port"
+
+pid="$1"
+index="$2"
+
+rm -f $LANPORT_STATS_FILE
+touch $LANPORT_STATS_FILE
+
+case $pid in
+	*260*)
+		ports="0 1 2 3 4 5 6 7"
+	;;
+	*160*)
+		ports="0 1 2 3"
+	;;
+       *345*)
+                ports="0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15"
+
+                for j in $ports
+                do
+                rm -f "$TMP_STATS_FILE$j"
+                touch "$TMP_STATS_FILE$j"
+                rtkssdk_diag -S 1 -p $j -g 1
+                done
+        ;;
+        *340*)
+                ports="1 2 3 4"
+        ;;
+
+esac
+
+for i in $ports 
+do
+	LANPORT=$i
+	j=$i
+
+	case $pid in
+                *340*)
+                        x=$(rtkssdk port_stats -p $i -g 1)
+                ;;
+                *345*)
+                        STATS_FILE="$TMP_STATS_FILE$i"
+                        x=$(cat $STATS_FILE)
+                ;;
+		*160* | *260*)
+
+			/usr/sbin/bcmssdk -S 1 -p $i -g 1
+                        sleep 0.2
+			STATS_FILE="$TMP_STATS_FILE$i"
+			x=$(cat $STATS_FILE)
+		;;
+
+		
+        esac
+
+
+	local oIFS="$IFS"; IFS=","
+	set $x
+	IFS="$oIFS"
+	d=$1;f=$2;DUPLEX=$3;AUTO_NEG=$4;
+	In_Ucast=$5;In_Bcast=$6;In_Mcast=$7;In_Octets=$8;In_Error=$9;
+	Out_Ucast=$10;Out_Bcast=$11;Out_Mcast=$12;Out_Octets=$13;Out_Error=$14;
+
+	case $pid in
+                *340* | *345*)
+			PORT_ACTIVITY=$(uci get switch.lan$j.status)
+			lldpport=lan$i
+			lldp_status=`uci get lldpd.config.$lldpport`
+		;;
+		*160* | *260*)
+                        PORT_ACTIVITY=$(uci get switch.lan$((++j)).status)
+			lldpport=lan$((++j))
+			lldp_status=`uci get lldpd.config.$lldpport`
+                ;;
+	esac
+
+	# (LINK_STATS: Disabled=2, Connected=1, Not Connected=0)
+	case $PORT_ACTIVITY in
+		enable)
+			PORT_ACTIVITY=0
+			#administrative status up
+			admin_status=1
+			case $d in
+				1)
+					LINK_STATUS=1
+					#operational status up
+					oper_status=1
+					SPEED=$f
+					case "$SPEED" in
+						0) SPEED=10 ;;
+						1) SPEED=100 ;;
+						2) SPEED=1000 ;;
+						3) SPEED=2500 ;;
+					esac
+				;;
+				0)
+					LINK_STATUS=0
+					#operational status down
+					oper_status=2
+				        SPEED=0
+				;;
+			esac
+		;;
+		*)
+			PORT_ACTIVITY=1
+			LINK_STATUS=2
+			#administrative status down
+			admin_status=2
+			# operational status unknown
+			oper_status=4
+			SPEED=0
+		;;
+	esac
+
+	case $pid in
+        *340*)
+                case $LANPORT in
+                        1)
+                                LANPORT="LAN4"
+                        ;;
+                        2)
+                                LANPORT="LAN3"
+                        ;;
+                        3)
+                                LANPORT="LAN2"
+                        ;;
+                        4)
+                                LANPORT="LAN1"
+                        ;;
+                esac
+        ;;
+
+       *345*)
+                case $LANPORT in
+                        0)
+                                LANPORT="LAN9"
+                        ;;
+                        1)
+                                LANPORT="LAN1"
+                        ;;
+                        2)
+                                LANPORT="LAN10"
+                        ;;
+                        3)
+                                LANPORT="LAN2"
+                        ;;
+                        4)
+                                LANPORT="LAN11"
+                        ;;
+                        5)
+                                LANPORT="LAN3"
+                        ;;
+                        6)
+                                LANPORT="LAN12"
+                        ;;
+                        7)
+                                LANPORT="LAN4"
+                        ;;
+                        8)
+                                LANPORT="LAN13"
+                        ;;
+                        9)
+                                LANPORT="LAN5"
+                        ;;
+                        10)
+                                LANPORT="LAN14"
+                        ;;
+                       11)
+                                LANPORT="LAN6"
+                        ;;
+                        12)
+                                LANPORT="LAN15"
+                        ;;
+                        13)
+                                LANPORT="LAN7"
+                        ;;
+                        14)
+                                LANPORT="LAN16"
+                        ;;
+                        15)
+                                LANPORT="LAN8"
+                        ;;
+                esac
+        ;;
+
+	*160*) 
+		case $LANPORT in
+			0)
+				LANPORT="LAN4"
+			;;
+			1)
+				LANPORT="LAN3"
+			;;
+			2)
+				LANPORT="LAN2"
+			;;
+			3)
+				LANPORT="LAN1"
+			;;
+		esac
+	;;
+	*260*)
+		case $LANPORT in
+			0)
+				LANPORT="LAN1"
+			;;
+			1)
+				LANPORT="LAN2"
+			;;
+			2)
+				LANPORT="LAN3"
+			;;
+			3)
+				LANPORT="LAN4"
+			;;
+			4)
+				LANPORT="LAN5"
+			;;
+			5)
+				LANPORT="LAN6"
+			;;
+			6)
+				LANPORT="LAN7"
+			;;
+			7)
+				LANPORT="LAN8"
+			;;
+		esac
+	;;
+	esac
+
+	echo $LANPORT,$LINK_STATUS,$PORT_ACTIVITY,$SPEED,$DUPLEX,$AUTO_NEG,$In_Ucast,$In_Bcast,$In_Mcast,$In_Octets,$In_Error,$Out_Ucast,$Out_Bcast,$Out_Mcast,$Out_Octets,$Out_Error,$lldp_status,$index,$admin_status,$oper_status,>> $LANPORT_STATS_FILE
+	index=$((index+1))
+done
+
+exit $index

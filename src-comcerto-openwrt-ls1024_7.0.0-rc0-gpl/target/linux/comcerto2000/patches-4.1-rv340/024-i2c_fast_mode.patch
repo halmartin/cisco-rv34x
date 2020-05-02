@@ -1,0 +1,13 @@
+# 2017-02-21: Rajeshkumar K <rajeshkumar.k@nxp.com>
+# Changes to set default I2c mode as fast mode to avoid the noise in the I2c bus.
+--- linux-4.1.8/drivers/i2c/busses/i2c-comcerto.c
++++ linux-4.1.8/drivers/i2c/busses/i2c-comcerto.c
+@@ -48,7 +48,7 @@
+ module_param(force_poll, bool, S_IRUGO);
+ MODULE_PARM_DESC(force_poll, "Force polling mode: 0=interrupt mode, polling mode otherwise");
+ 
+-static int speed = 0;
++static int speed = 1;
+ module_param(speed, int, S_IRUGO);
+ MODULE_PARM_DESC(speed, "I2C speed: 0=standard, 1=fast, 2=high speed");
+ 

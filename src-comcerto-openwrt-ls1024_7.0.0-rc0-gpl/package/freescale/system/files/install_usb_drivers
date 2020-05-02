@@ -1,0 +1,33 @@
+#!/bin/sh                                                  
+                               
+DRIVER_FILE=`basename $1`       
+DRIVER_FILE_DIR=`dirname $1`          
+DOWN_DIR="/tmp/"                                                                  
+INSTALL_STATUS=0                                                           
+ASDSTATUS="/tmp/asdclientstatus"
+                                                                                                      
+if [ "$DRIVER_FILE_DIR" != "." ];then                                 
+        #Absolute path
+        if [ "$DRIVER_FILE_DIR" != "/tmp" ];then                                                                        
+        	`cp -f $1 $DOWN_DIR`>/dev/null 2>&1                                
+        fi
+fi                                                                    
+
+DRIVER_DIR="/tmp/driver"                                                               
+mkdir -p $DRIVER_DIR                                                                           
+                                                                   
+# Extract the file
+tar -xzf $DOWN_DIR$DRIVER_FILE -C $DRIVER_DIR                      
+if [ "$?" -eq 0 ];then    
+	# Install the driver
+	`/${DRIVER_DIR}/sbin/usb-modem install` >/dev/null 2>&1
+	INSTALL_STATUS="$?"	
+else                                                          
+        INSTALL_STATUS=1                                      
+fi                                                                                
+                                                                                  
+rm -rf "$DOWN_DIR/$DRIVER_FILE"                                                        
+rm -rf "$DRIVER_DIR"                                                  
+
+echo $INSTALL_STATUS > $ASDSTATUS                                                               
+exit $INSTALL_STATUS       

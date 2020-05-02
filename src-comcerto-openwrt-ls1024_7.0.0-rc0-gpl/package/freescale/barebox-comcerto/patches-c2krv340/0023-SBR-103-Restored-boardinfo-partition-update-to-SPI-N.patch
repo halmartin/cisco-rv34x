@@ -1,0 +1,147 @@
+From 9e8dbdbc207215296826073c9702277b51705643 Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Fri, 16 Oct 2015 14:14:18 +0530
+Subject: [PATCH 23/60] SBR-103 Restored boardinfo partition update to SPI NOR
+ Flash, added logic to halt boot if boardinfo is empty
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/env/bin/boot | 49 ++++++++++++++---------------
+ arch/arm/boards/comcerto-rv340/env/config   | 12 +++----
+ commands/boardinfo.c                        |  2 +-
+ 3 files changed, 31 insertions(+), 32 deletions(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/boot b/arch/arm/boards/comcerto-rv340/env/bin/boot
+index 4cc7914..d907883 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/boot
++++ b/arch/arm/boards/comcerto-rv340/env/bin/boot
+@@ -2,6 +2,24 @@
+ 
+ . /env/config
+ 
++echo "Setting env LAN, WAN1, WAN2..."
++boardinfo -m
++echo "done"
++echo -n "Exporting env LAN, WAN1, WAN2..."
++export LAN="$LAN" WAN1="$WAN1" WAN2="$WAN2"
++echo "done"
++
++if [  "X$LAN" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN1" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN2" != "XFF:FF:FF:FF:FF:FF" ]; then
++  echo "FOUND MACs from Boardinfo using same in bootargs"
++  export eth0_ethaddr="$WAN2" eth1_ethaddr="$WAN1" eth2_ethaddr="$LAN"
++  echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr, eth2mac = $eth2_ethaddr"
++  bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr,$eth2_ethaddr"
++elif [  "X$LAN" = "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN1" = "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN2" = "XFF:FF:FF:FF:FF:FF" ]; then
++  echo -e "One or More MACs from Boardinfo are INVALID OR NOT Programmed!!!\nHalting Boot Up...done."
++	exit 1
++fi
++echo "done"
++
+ if [ x$1 = xnand ]; then
+ 	rootfs_loc=nand
+ 	kernel_loc=nand
+@@ -28,13 +46,13 @@ elif [ x$1 = xtftp ]; then
+ 	kernel_loc=tftp
+ fi
+ 
+-echo "Setting active/inactive env..."
++echo -n "Setting active/inactive env..."
+ imageenv
+ echo "done"
+-echo "Exporting env..."
+-echo "active = $active inactive = $inactive"
++echo -n "Exporting env..."
+ export active="$active" inactive="$inactive"
+ echo "done"
++echo "active = $active inactive = $inactive"
+ 
+ if [ x$1 = xactive ]; then
+   echo "Booting active $active ..."
+@@ -69,36 +87,17 @@ else
+ fi
+ 
+ if [ x$rootfs = xrootfs1 ]; then
+-  rootfs_mtdblock_nand=5
++  rootfs_mtdblock_nand=4
+ elif [ x$rootfs = xrootfs2 ]; then
+-  rootfs_mtdblock_nand=8
++  rootfs_mtdblock_nand=7
+ fi
+ 
+-echo "Setting env LAN, WAN1, WAN2..."
+-boardinfo -m
+-echo "done"
+-echo "Exporting env LAN, WAN1, WAN2..."
+-export LAN="$LAN" WAN1="$WAN1" WAN2="$WAN2"
+-echo "done"
+-
+-if [  "X$LAN" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN1" != "XFF:FF:FF:FF:FF:FF" ] && [ "X$WAN2" != "XFF:FF:FF:FF:FF:FF" ]; then
+-  echo "FOUND MACs from Boardinfo using same in bootargs"
+-  export eth0_ethaddr="$WAN2" eth1_ethaddr="$WAN1" eth2_ethaddr="$LAN"
+-  echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr, eth2mac = $eth2_ethaddr"
+-  bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr,$eth2_ethaddr"
+-elif [ "X$eth0_ethaddr" != "X" ] && [ "X$eth1_ethaddr" != "X" ] && [ "X$eth2_ethaddr" != "X" ]; then
+-  echo "One or More MACs from Boardinfo are INVALID!!! Using defaults from /env/config ..."
+-  echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr, eth2mac = $eth2_ethaddr"
+-  bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr,$eth2_ethaddr"
+-fi
+-echo "done"
+-
+ if [ x$ip = xdhcp ]; then
+ 	bootargs="$bootargs ip=dhcp"
+ elif [ x$ip = xnone ]; then
+ 	bootargs="$bootargs ip=none"
+ else
+-	bootargs="$bootargs ip=$eth0_ipaddr::$eth0_gateway:$eth0_netmask:::"
++	bootargs="$bootargs ip=${eth0.ipaddr}::${eth0.gateway}:${eth0.netmask}:::"
+ fi
+ 
+ if [ x$rootfs_loc = xnet ]; then
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index f5fb2ea..b64eab0 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -5,10 +5,10 @@
+ ip=none
+ 
+ # or set your networking parameters here
+-eth0_ipaddr=192.168.1.1
+-eth0_netmask=255.255.255.0
+-eth0_serverip=192.168.1.101
+-eth0_gateway=192.168.1.254
++#eth0.ipaddr=192.168.1.1
++#eth0.netmask=255.255.255.0
++#eth0.serverip=192.168.1.101
++#eth0.gateway=192.168.1.254
+ eth0_ethaddr="00:0A:0B:0C:0D:0E"
+ eth1_ethaddr="00:1A:1B:1C:1D:1E"
+ eth2_ethaddr="00:2A:2B:2C:2D:2E"
+@@ -35,10 +35,10 @@ active=image1
+ inactive=image2
+ 
+ fast_spi_device="spi1.0"
+-fast_spi_parts="128k(uloader)ro,512k(barebox),128k(env),128k(board-info)ro"
++fast_spi_parts="128k(uloader)ro,512k(barebox),128k(env),128k(boardinfo)ro"
+ 
+ nand_device="comcertonand"
+-nand_parts="512k(barebox),512k(bareboxfact)ro,128k(env),128k(boardinfo)ro,8M(kernel1),72M(rootfs1),128k(reserved_dtb1)ro,8M(kernel2),72M(rootfs2),128k(reserved_dtb2)ro,2M(configcert),12M(avcsign),32M(webrootdb),1M(license)"
++nand_parts="512k(barebox),512k(bareboxfact)ro,128k(env),8M(kernel1),72M(rootfs1),128k(reserved_dtb1),8M(kernel2),72M(rootfs2),128k(reserved_dtb2),2M(configcert),12M(avcsign),32M(webrootdb),1M(license)"
+ 
+ autoboot_timeout=3
+ 
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+index 4dc1ac9..c7a9719 100644
+--- a/commands/boardinfo.c
++++ b/commands/boardinfo.c
+@@ -68,7 +68,7 @@ typedef struct c2krv340_board_info {
+ }  __attribute__ ((__packed__)) c2krv340;
+ 
+ char *help_string = "Check Usage: boardinfo <Enter>\n";
+-char *filename = "/dev/nand0.boardinfo";
++char *filename = "/dev/spi1.boardinfo";
+ 
+ static int command_boardinfo_mac(int argc, char *argv[])
+ {
+-- 
+2.7.4
+

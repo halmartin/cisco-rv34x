@@ -1,0 +1,466 @@
+diff --git a/drivers/leds/trigger/Kconfig b/drivers/leds/trigger/Kconfig
+index e5dd7c3..c63d07f 100644
+--- a/drivers/leds/trigger/Kconfig
++++ b/drivers/leds/trigger/Kconfig
+@@ -115,4 +115,11 @@ config LEDS_TRIGGER_NETDEV
+ 	  This allows LEDs to be controlled by network device activity.
+ 	  If unsure, say Y.
+ 
++config LEDS_TRIGGER_USBDEV
++	tristate "LED USB device Trigger"
++	depends on USB && LEDS_TRIGGERS
++	help
++	  This allows LEDs to be controlled by the presence/activity of
++	  an USB device. If unsure, say N.
++
+ endif # LEDS_TRIGGERS
+diff --git a/drivers/leds/trigger/Makefile b/drivers/leds/trigger/Makefile
+index 17c9937..42c4385 100644
+--- a/drivers/leds/trigger/Makefile
++++ b/drivers/leds/trigger/Makefile
+@@ -9,3 +9,4 @@ obj-$(CONFIG_LEDS_TRIGGER_DEFAULT_ON)	+= ledtrig-default-on.o
+ obj-$(CONFIG_LEDS_TRIGGER_TRANSIENT)	+= ledtrig-transient.o
+ obj-$(CONFIG_LEDS_TRIGGER_CAMERA)	+= ledtrig-camera.o
+ obj-$(CONFIG_LEDS_TRIGGER_NETDEV)	+= ledtrig-netdev.o
++obj-$(CONFIG_LEDS_TRIGGER_USBDEV)	+= ledtrig-usbdev.o
+diff --git a/drivers/leds/trigger/ledtrig-usbdev.c b/drivers/leds/trigger/ledtrig-usbdev.c
+new file mode 100644
+index 0000000..93653eb
+--- /dev/null
++++ b/drivers/leds/trigger/ledtrig-usbdev.c
+@@ -0,0 +1,347 @@
++/*
++ * LED USB device Trigger
++ *
++ * Toggles the LED to reflect the presence and activity of an USB device
++ * Copyright (C) Gabor Juhos <juhosg@openwrt.org>
++ *
++ * derived from ledtrig-netdev.c:
++ *	Copyright 2007 Oliver Jowett <oliver@opencloud.com>
++ *
++ * ledtrig-netdev.c derived from ledtrig-timer.c:
++ *	Copyright 2005-2006 Openedhand Ltd.
++ *	Author: Richard Purdie <rpurdie@openedhand.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++ */
++
++#include <linux/module.h>
++#include <linux/jiffies.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/list.h>
++#include <linux/spinlock.h>
++#include <linux/device.h>
++#include <linux/timer.h>
++#include <linux/ctype.h>
++#include <linux/slab.h>
++#include <linux/leds.h>
++#include <linux/usb.h>
++
++#include "../leds.h"
++
++#define DEV_BUS_ID_SIZE		32
++
++/*
++ * Configurable sysfs attributes:
++ *
++ * device_name - name of the USB device to monitor
++ * activity_interval - duration of LED blink, in milliseconds
++ */
++
++struct usbdev_trig_data {
++	rwlock_t lock;
++
++	struct timer_list timer;
++	struct notifier_block notifier;
++
++	struct led_classdev *led_cdev;
++	struct usb_device *usb_dev;
++
++	char device_name[DEV_BUS_ID_SIZE];
++	unsigned interval;
++	int last_urbnum;
++};
++
++static void usbdev_trig_update_state(struct usbdev_trig_data *td)
++{
++	if (td->usb_dev)
++		led_set_brightness(td->led_cdev, LED_FULL);
++	else
++		led_set_brightness(td->led_cdev, LED_OFF);
++
++	if (td->interval && td->usb_dev)
++		mod_timer(&td->timer, jiffies + td->interval);
++	else
++		del_timer(&td->timer);
++}
++
++static ssize_t usbdev_trig_name_show(struct device *dev,
++				     struct device_attribute *attr,
++				     char *buf)
++{
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	struct usbdev_trig_data *td = led_cdev->trigger_data;
++
++	read_lock(&td->lock);
++	sprintf(buf, "%s\n", td->device_name);
++	read_unlock(&td->lock);
++
++	return strlen(buf) + 1;
++}
++
++static ssize_t usbdev_trig_name_store(struct device *dev,
++				      struct device_attribute *attr,
++				      const char *buf,
++				      size_t size)
++{
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	struct usbdev_trig_data *td = led_cdev->trigger_data;
++
++	if (size < 0 || size >= DEV_BUS_ID_SIZE)
++		return -EINVAL;
++
++	write_lock(&td->lock);
++
++	strcpy(td->device_name, buf);
++	if (size > 0 && td->device_name[size - 1] == '\n')
++		td->device_name[size - 1] = 0;
++
++	if (td->device_name[0] != 0) {
++		struct usb_device *usb_dev;
++
++		/* check for existing device to update from */
++		usb_dev = usb_find_device_by_name(td->device_name);
++		if (usb_dev) {
++			if (td->usb_dev)
++				usb_put_dev(td->usb_dev);
++
++			td->usb_dev = usb_dev;
++			td->last_urbnum = atomic_read(&usb_dev->urbnum);
++		}
++
++		/* updates LEDs, may start timers */
++		usbdev_trig_update_state(td);
++	}
++
++	write_unlock(&td->lock);
++	return size;
++}
++
++static DEVICE_ATTR(device_name, 0644, usbdev_trig_name_show,
++		   usbdev_trig_name_store);
++
++static ssize_t usbdev_trig_interval_show(struct device *dev,
++				 	 struct device_attribute *attr,
++					 char *buf)
++{
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	struct usbdev_trig_data *td = led_cdev->trigger_data;
++
++	read_lock(&td->lock);
++	sprintf(buf, "%u\n", jiffies_to_msecs(td->interval));
++	read_unlock(&td->lock);
++
++	return strlen(buf) + 1;
++}
++
++static ssize_t usbdev_trig_interval_store(struct device *dev,
++					  struct device_attribute *attr,
++					  const char *buf,
++					  size_t size)
++{
++	struct led_classdev *led_cdev = dev_get_drvdata(dev);
++	struct usbdev_trig_data *td = led_cdev->trigger_data;
++	int ret = -EINVAL;
++	char *after;
++	unsigned long value = simple_strtoul(buf, &after, 10);
++	size_t count = after - buf;
++
++	if (*after && isspace(*after))
++		count++;
++
++	if (count == size && value <= 10000) {
++		write_lock(&td->lock);
++		td->interval = msecs_to_jiffies(value);
++		usbdev_trig_update_state(td); /* resets timer */
++		write_unlock(&td->lock);
++		ret = count;
++	}
++
++	return ret;
++}
++
++static DEVICE_ATTR(activity_interval, 0644, usbdev_trig_interval_show,
++		   usbdev_trig_interval_store);
++
++static int usbdev_trig_notify(struct notifier_block *nb,
++			      unsigned long evt,
++			      void *data)
++{
++	struct usb_device *usb_dev;
++	struct usbdev_trig_data *td;
++
++	if (evt != USB_DEVICE_ADD && evt != USB_DEVICE_REMOVE)
++		return NOTIFY_DONE;
++
++	usb_dev = data;
++	td = container_of(nb, struct usbdev_trig_data, notifier);
++
++	write_lock(&td->lock);
++
++	if (strcmp(dev_name(&usb_dev->dev), td->device_name))
++		goto done;
++
++	if (evt == USB_DEVICE_ADD) {
++		usb_get_dev(usb_dev);
++		if (td->usb_dev != NULL)
++			usb_put_dev(td->usb_dev);
++		td->usb_dev = usb_dev;
++		td->last_urbnum = atomic_read(&usb_dev->urbnum);
++	} else if (evt == USB_DEVICE_REMOVE) {
++		if (td->usb_dev != NULL) {
++			usb_put_dev(td->usb_dev);
++			td->usb_dev = NULL;
++		}
++	}
++
++	usbdev_trig_update_state(td);
++
++done:
++	write_unlock(&td->lock);
++	return NOTIFY_DONE;
++}
++
++/* here's the real work! */
++static void usbdev_trig_timer(unsigned long arg)
++{
++	struct usbdev_trig_data *td = (struct usbdev_trig_data *)arg;
++	int new_urbnum;
++
++	write_lock(&td->lock);
++
++	if (!td->usb_dev || td->interval == 0) {
++		/*
++		 * we don't need to do timer work, just reflect device presence
++		 */
++		if (td->usb_dev)
++			led_set_brightness(td->led_cdev, LED_FULL);
++		else
++			led_set_brightness(td->led_cdev, LED_OFF);
++
++		goto no_restart;
++	}
++
++	if (td->interval)
++		new_urbnum = atomic_read(&td->usb_dev->urbnum);
++	else
++		new_urbnum = 0;
++
++	if (td->usb_dev) {
++		/*
++		 * Base state is ON (device is present). If there's no device,
++		 * we don't get this far and the LED is off.
++		 * OFF -> ON always
++		 * ON -> OFF on activity
++		 */
++		if (td->led_cdev->brightness == LED_OFF)
++			led_set_brightness(td->led_cdev, LED_FULL);
++		else if (td->last_urbnum != new_urbnum)
++			led_set_brightness(td->led_cdev, LED_OFF);
++	} else {
++		/*
++		 * base state is OFF
++		 * ON -> OFF always
++		 * OFF -> ON on activity
++		 */
++		if (td->led_cdev->brightness == LED_FULL)
++			led_set_brightness(td->led_cdev, LED_OFF);
++		else if (td->last_urbnum != new_urbnum)
++			led_set_brightness(td->led_cdev, LED_FULL);
++	}
++
++	td->last_urbnum = new_urbnum;
++	mod_timer(&td->timer, jiffies + td->interval);
++
++no_restart:
++	write_unlock(&td->lock);
++}
++
++static void usbdev_trig_activate(struct led_classdev *led_cdev)
++{
++	struct usbdev_trig_data *td;
++	int rc;
++
++	td = kzalloc(sizeof(struct usbdev_trig_data), GFP_KERNEL);
++	if (!td)
++		return;
++
++	rwlock_init(&td->lock);
++
++	td->notifier.notifier_call = usbdev_trig_notify;
++	td->notifier.priority = 10;
++
++	setup_timer(&td->timer, usbdev_trig_timer, (unsigned long) td);
++
++	td->led_cdev = led_cdev;
++	td->interval = msecs_to_jiffies(50);
++
++	led_cdev->trigger_data = td;
++
++	rc = device_create_file(led_cdev->dev, &dev_attr_device_name);
++	if (rc)
++		goto err_out;
++
++	rc = device_create_file(led_cdev->dev, &dev_attr_activity_interval);
++	if (rc)
++		goto err_out_device_name;
++
++	usb_register_notify(&td->notifier);
++	return;
++
++err_out_device_name:
++	device_remove_file(led_cdev->dev, &dev_attr_device_name);
++err_out:
++	led_cdev->trigger_data = NULL;
++	kfree(td);
++}
++
++static void usbdev_trig_deactivate(struct led_classdev *led_cdev)
++{
++	struct usbdev_trig_data *td = led_cdev->trigger_data;
++
++	if (td) {
++		usb_unregister_notify(&td->notifier);
++
++		device_remove_file(led_cdev->dev, &dev_attr_device_name);
++		device_remove_file(led_cdev->dev, &dev_attr_activity_interval);
++
++		write_lock(&td->lock);
++
++		if (td->usb_dev) {
++			usb_put_dev(td->usb_dev);
++			td->usb_dev = NULL;
++		}
++
++		write_unlock(&td->lock);
++
++		del_timer_sync(&td->timer);
++
++		kfree(td);
++	}
++}
++
++static struct led_trigger usbdev_led_trigger = {
++	.name		= "usbdev",
++	.activate	= usbdev_trig_activate,
++	.deactivate	= usbdev_trig_deactivate,
++};
++
++static int __init usbdev_trig_init(void)
++{
++	return led_trigger_register(&usbdev_led_trigger);
++}
++
++static void __exit usbdev_trig_exit(void)
++{
++	led_trigger_unregister(&usbdev_led_trigger);
++}
++
++module_init(usbdev_trig_init);
++module_exit(usbdev_trig_exit);
++
++MODULE_AUTHOR("Gabor Juhos <juhosg@openwrt.org>");
++MODULE_DESCRIPTION("USB device LED trigger");
++MODULE_LICENSE("GPL v2");
+diff --git a/drivers/usb/core/usb.c b/drivers/usb/core/usb.c
+index 72b96d3..350e4f3 100644
+--- a/drivers/usb/core/usb.c
++++ b/drivers/usb/core/usb.c
+@@ -707,6 +707,71 @@ int __usb_get_extra_descriptor(char *buffer, unsigned size,
+ }
+ EXPORT_SYMBOL_GPL(__usb_get_extra_descriptor);
+ 
++static struct usb_device *match_device_name(struct usb_device *dev,
++					    const char *name)
++{
++	struct usb_device *ret_dev = NULL;
++	struct usb_device *childdev = NULL;
++	int child;
++
++	dev_dbg(&dev->dev, "check for name %s ...\n", name);
++
++	/* see if this device matches */
++	if (strcmp(dev_name(&dev->dev), name) == 0 ) {
++		dev_dbg(&dev->dev, "matched this device!\n");
++		ret_dev = usb_get_dev(dev);
++		goto exit;
++	}
++	/* look through all of the children of this device */
++	usb_hub_for_each_child(dev, child, childdev) {
++		if (childdev) {
++			usb_lock_device(childdev);
++			ret_dev = match_device_name(childdev, name);
++			usb_unlock_device(childdev);
++			if (ret_dev)
++				goto exit;
++		}
++	}
++exit:
++	return ret_dev;
++}
++
++/**
++ * usb_find_device_by_name - find a specific usb device in the system
++ * @name: the name of the device to find
++ *
++ * Returns a pointer to a struct usb_device if such a specified usb
++ * device is present in the system currently.  The usage count of the
++ * device will be incremented if a device is found.  Make sure to call
++ * usb_put_dev() when the caller is finished with the device.
++ *
++ * If a device with the specified bus id is not found, NULL is returned.
++ */
++struct usb_device *usb_find_device_by_name(const char *name)
++{
++	struct list_head *buslist;
++	struct usb_bus *bus;
++	struct usb_device *dev = NULL;
++
++	mutex_lock(&usb_bus_list_lock);
++	for (buslist = usb_bus_list.next;
++	     buslist != &usb_bus_list;
++	     buslist = buslist->next) {
++		bus = container_of(buslist, struct usb_bus, bus_list);
++		if (!bus->root_hub)
++			continue;
++		usb_lock_device(bus->root_hub);
++		dev = match_device_name(bus->root_hub, name);
++		usb_unlock_device(bus->root_hub);
++		if (dev)
++			goto exit;
++	}
++exit:
++	mutex_unlock(&usb_bus_list_lock);
++	return dev;
++}
++EXPORT_SYMBOL_GPL(usb_find_device_by_name);
++
+ /**
+  * usb_alloc_coherent - allocate dma-consistent buffer for URB_NO_xxx_DMA_MAP
+  * @dev: device the buffer will be used with
+diff --git a/include/linux/usb.h b/include/linux/usb.h
+index 447fe29..c5172aa 100644
+--- a/include/linux/usb.h
++++ b/include/linux/usb.h
+@@ -721,6 +721,7 @@ static inline bool usb_device_no_sg_constraint(struct usb_device *udev)
+ 	return udev && udev->bus && udev->bus->no_sg_constraint;
+ }
+ 
++extern struct usb_device *usb_find_device_by_name(const char *name);
+ 
+ /*-------------------------------------------------------------------------*/
+ 

@@ -1,0 +1,162 @@
+#!/bin/sh
+
+IF_SSID_STAT_FILE="/tmp/stats/if_ssid_stats_$1"
+
+cat /dev/null > ${IF_SSID_STAT_FILE}
+
+. /lib/functions.sh
+scan_wifi() {
+	local cfgfile="$1"
+	DEVICES=
+	wl0_VIFS=
+	wl1_VIFS=
+	config_cb() {
+		local type="$1"
+		local section="$2"
+		# section start
+		case "$type" in
+			wifi-device)
+				append DEVICES "$section"
+				#config_set "$section" vifs ""
+				config_set "$section" ht_capab ""
+			;;
+		esac
+		# section end
+		config_get TYPE "$CONFIG_SECTION" TYPE
+		case "$TYPE" in
+		wifi-iface)
+			config_get device "$CONFIG_SECTION" device
+			eval append ${device}_VIFS "$CONFIG_SECTION"
+			eval vifs="\${${device}_VIFS}"
+			config_set "$device" vifs "$vifs"
+			;;
+		esac
+	}
+	config_load "${cfgfile:-wireless}"
+}
+
+include /lib/wifi
+scan_wifi
+
+board="$(/usr/bin/board_check.sh)"
+
+vap_idx=1
+need_vap_idx="${1#*_}"
+need_vap_name="${1%_*}"
+end_flag=0
+
+if [ "$board" = "RV340W" ]; then
+	radio1="WLAN1"
+	vap1="VAP1"
+	radio2="WLAN2"
+	vap2="VAP2"
+else
+	radio1="WLAN0"
+	vap1="VAP0"
+	radio2="WLAN1"
+	vap2="VAP1"
+fi
+
+while read line;do
+	_ssid="$(echo $line | awk '{$NF=""}1' | awk '{$NF=""}1' | sed 's/.\{1\}$//')"
+	_radio="$(echo $line | awk '{print $(NF-1)}')"
+	
+	if [ "$need_vap_name" = "$vap1" ];then
+		[ "$_radio" = "$radio1" -o "$_radio" = "BOTH" ] && {
+			[ "$need_vap_idx" = "$vap_idx" ] || {
+				vap_idx=$(( $vap_idx + 1 ))
+				continue
+			}
+			if [ "$board" = "RV160W" ];then
+				config_get vifs	"wl1" vifs
+			else
+				config_get vifs	"wl0" vifs
+			fi
+
+			for vif in $vifs; do
+				config_get ssid "$vif" ssid
+				if [ "$ssid" = "$_ssid" ];then
+					config_get device "$vif" ifname
+					end_flag=1
+					break;
+				fi
+			done
+		}
+	elif [ "$need_vap_name" = "$vap2" ];then
+		[ "$_radio" = "$radio2" -o "$_radio" = "BOTH" ] && {
+			[ "$need_vap_idx" = "$vap_idx" ] || {
+				vap_idx=$(( $vap_idx + 1 ))
+				continue
+			}
+			if [ "$board" = "RV160W" ];then
+				config_get vifs	"wl0" vifs
+			else
+				config_get vifs	"wl1" vifs
+			fi
+			for vif in $vifs; do
+				config_get ssid "$vif" ssid
+				if [ "$ssid" = "$_ssid" ];then
+					config_get device "$vif" ifname
+					end_flag=1
+					break;
+				fi
+			done
+		}
+	fi
+
+	[ "$end_flag" = "1" ] && break
+done < /tmp/wifi_status_result
+
+[ -n "$device" ] || return
+
+assoclist="$(wl -i $device assoclist | cut -d' ' -f2)"
+
+for sta in $assoclist; do
+	if [ "$device" = "wl0" -o "$device" = "wl1" ]; then
+		VLAN_ID="$(uci show | grep "$device""_vlanid" | sed 's/.*=//')"
+	else
+		STR="_ifname="$device
+		IF_NAME="$(uci show | grep nvram | grep $STR | awk -F'nvram.' '{ print $2 }' | sed 's?_[^_]*$??')"
+		VLAN_ID="$(uci show | grep "$IF_NAME""_vlanid" | sed 's/.*=//')"
+	fi
+	BR_VLAN="br-vlan"$VLAN_ID
+	IP="$(grep -i $sta /proc/net/arp | grep -w $BR_VLAN | cut -d' ' -f1)"
+	STA="$(echo $sta | tr '[A-Z]' '[a-z]')"
+
+	sta_idx="$(wl -i $device dump scb | grep -i $sta | cut -d' ' -f3)"
+	sta_idx_next=`expr $sta_idx + 1`
+	scb_info="$(wl -i $device dump scb | sed -n '/'"$STA"'/,/^  ['"$sta_idx_next"'|0]  /p')"
+
+	if [ "$(echo "$scb_info" | grep rspec | cut -d' ' -f4)" = "cck" ]; then
+		OPERATING_STANDARD=1
+	elif [ "$(echo "$scb_info" | grep rspec | cut -d' ' -f4)" = "ofdm" ]; then
+		if [ "$(wl -i $device band)" = "a" ];then
+			OPERATING_STANDARD=0
+		else
+			OPERATING_STANDARD=2
+		fi
+	elif [ "$(echo "$scb_info" | grep rspec | cut -d' ' -f4)" = "ht" ]; then
+		OPERATING_STANDARD=3
+	else
+		OPERATING_STANDARD=4
+	fi
+
+	[ -n "$(wl -i $device autho_sta_list | grep $sta)" ] && AUTH_STATE=1 || AUTH_STATE=0
+	LAST_DATA_DOWNLINK="$(wl -i $device bss_peer_info | grep $sta | cut -d' ' -f7)"
+	LAST_DATA_UPLINK="$(wl -i $device bss_peer_info | grep $sta | cut -d' ' -f10)"
+	SIGNAL_STRENGTH="$(wl -i $device rssi $sta)"
+	TRANSMIT_RATE="$(echo "$scb_info" | grep 'Rate =' | cut -d' ' -f3 | head -n1 | sed 's/kbps//')"
+	ACTIVE=1
+	NOISE="$(wl -i $device noise)"	
+
+	HOST_NAME="$(arp -a | grep -iv "<incomplete>" | grep -w $BR_VLAN | sed 's/  */ /g' | grep $STA | cut -d' ' -f1)"
+	[ "$HOST_NAME" = "?" -o -z "$HOST_NAME" ] && HOST_NAME="-"
+	sta_data=$(wl -i $device sta_info $sta | grep -E "in network|tx pkts retries:|tx total pkts:|tx total bytes:|rx data pkts:|rx data bytes:" | sed -e 's/[a-z] [a-z]//g'|cut -d' ' -f3)
+	STA_INFO=$(echo $sta_data | sed -e 's/ /,/g')
+
+	echo "$STA,${OPERATING_STANDARD},$HOST_NAME,$IP,$AUTH_STATE,$LAST_DATA_DOWNLINK,$LAST_DATA_UPLINK,$SIGNAL_STRENGTH,$TRANSMIT_RATE,"\
+"$ACTIVE,$NOISE,$STA_INFO" >> $IF_SSID_STAT_FILE
+done
+
+
+

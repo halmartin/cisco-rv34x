@@ -1,0 +1,100 @@
+diff -rauN a/pam_ldap.c b/pam_ldap.c
+--- a/pam_ldap.c	2016-06-30 15:18:42.323088739 +0530
++++ b/pam_ldap.c	2016-06-30 15:23:39.111096757 +0530
+@@ -2673,6 +2673,7 @@
+ }
+ 
+ static char *_pam_ldap_attrs[] = {
++  "memberOf",
+   "host",
+   "authorizedService",
+   "shadowExpire",
+@@ -2690,10 +2691,13 @@
+ _get_user_info (pam_ldap_session_t * session, const char *user)
+ {
+   char filter[LDAP_FILT_MAXSIZ], escapedUser[LDAP_FILT_MAXSIZ];
+-  int rc;
++  int rc, i;
+   LDAPMessage *res, *msg;
++  BerElement *ber;
+   pam_ssd_t *ssd, ssdummy;
+-  char *group;
++  char *group, **values, *attribute;
++
++
+   rc = _connect_anonymously (session);
+   if (rc != PAM_SUCCESS)
+     return rc;
+@@ -2807,6 +2811,7 @@
+    * it might be better to do a compare later, that way we can
+    * avoid fetching any attributes at all
+    */
++  _get_string_values (session->ld, msg, "memberOf", &session->conf->groupdn);
+   _get_string_values (session->ld, msg, "host", &session->info->hosts_allow);
+   _get_string_values (session->ld, msg, "authorizedService",
+ 		      &session->info->services_allow);
+@@ -2874,8 +2879,11 @@
+       syslog (LOG_ERR, "pam_ldap: ldap_search_s %s", ldap_err2string (rc));
+       return PAM_USER_UNKNOWN;
+     }
+-  
+-  for ( msg = ldap_first_entry( session->ld, res ); msg != NULL;
++
++  if (ldap_count_entries(session->ld, res) > 0)
++  {
++ /* For open ldap */ 
++   for ( msg = ldap_first_entry( session->ld, res ); msg != NULL;
+                msg = ldap_next_entry( session->ld, msg ) ) {
+ 
+        session->info->groupdn = ldap_get_dn( session->ld, msg );
+@@ -2883,9 +2891,48 @@
+        group = strtok(group,"=");
+        group = strtok(NULL,"\0");
+        session->info->group = strdup(group);       
+-    }   
+-  ldap_msgfree (res);
++     }
++    ldap_msgfree (res);
++    return PAM_SUCCESS;
++  }
++  else {
++ /* For windows ldap server */
++
++      snprintf (filter, sizeof filter, "(%s=%s)",
++		session->conf->userattr, escapedUser);
++
++  rc = ldap_search_s (session->ld, ssd->base, ssd->scope,
++                      filter, _pam_ldap_attrs, 0, &res);
+ 
++  if (rc != LDAP_SUCCESS &&
++      rc != LDAP_TIMELIMIT_EXCEEDED && rc != LDAP_SIZELIMIT_EXCEEDED)
++    {
++      syslog (LOG_ERR, "pam_ldap: ldap_search_s %s", ldap_err2string (rc));
++      return PAM_USER_UNKNOWN;
++    }
++  for ( msg = ldap_first_entry( session->ld, res ); msg != NULL;
++               msg = ldap_next_entry( session->ld, msg ) ) {
++
++       for (attribute = ldap_first_attribute(session->ld, msg, &ber); 
++            attribute != NULL;
++            attribute = ldap_next_attribute(session->ld, msg, ber))
++        {
++		if (((values = ldap_get_values(session->ld, msg, attribute)) != NULL) && 
++                             (strcmp(attribute, "memberOf")==0)) {
++			for (i = 0; values[i] != NULL; i++) {
++       				session->info->groupdn = values[i];
++			       group = strtok(session->info->groupdn,",");
++			       group = strtok(group,"=");
++			       group = strtok(NULL,"\0");
++			       session->info->group = strdup(group);       
++			}
++                   ldap_value_free(values);
++		}
++            ldap_memfree(attribute);
++        }
++    }
++   ldap_msgfree (res);
++  }
+   return PAM_SUCCESS;
+ }
+ 

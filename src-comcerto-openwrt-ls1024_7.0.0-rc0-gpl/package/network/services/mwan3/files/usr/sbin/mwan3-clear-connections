@@ -1,0 +1,25 @@
+#!/bin/sh
+#This script is to clear connections if the interface UP is a Primary/Next primary interface.
+
+#TODO: Don't clear all the connections. Exclude connections which are interface bound, IPSec, PPTP and L2TP etc.
+
+INTERFACE=$1
+
+offline=$(mwan3 interfaces | grep offline | cut -f 2 -d ' ' | awk 1 ORS=' ')
+offline=`echo $offline | sed 's/ /|/g'`
+
+enb_int=$(uci show mwan3 | grep -E ".enabled=1" | cut -f 2 -d . | grep -Ewv "$offline")
+enb_int=`echo $enb_int | sed 's/ /|/g'`
+
+mem_int=$(uci show mwan3 | grep -E "_mem\.interface" | grep -E "$enb_int" | cut -f 2 -d . | awk 1 ORS=' ')
+mem_int=`echo $mem_int | sed 's/ /|/g'`
+
+low_met=$(uci show mwan3 | grep -E "_mem\.metric" | grep -E "$mem_int" | cut -f 2 -d = | sort | head -n 1)
+TEMP_INTERFACE=$(echo $INTERFACE | sed 's/p//g')
+iface=$(uci show mwan3 | grep -E "_mem\.interface" | grep -E "$TEMP_INTERFACE"_mem | cut -f 2 -d .)
+metric=$(uci get mwan3.$iface.metric)
+
+if [ "$low_met" == "$metric" ]; then
+	logger -t mwan3 " Primary/Next Primary interface $INTERFACE, is UP"
+	/usr/bin/clearconnection_v4.sh 2>&- >&-
+fi

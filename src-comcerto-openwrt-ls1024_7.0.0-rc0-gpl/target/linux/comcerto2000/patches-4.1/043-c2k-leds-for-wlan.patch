@@ -1,0 +1,330 @@
+diff --git a/arch/arm/mach-comcerto/board-c2krv16x-26x.c b/arch/arm/mach-comcerto/board-c2krv16x-26x.c
+index de3a68d..099a777 100644
+--- a/arch/arm/mach-comcerto/board-c2krv16x-26x.c
++++ b/arch/arm/mach-comcerto/board-c2krv16x-26x.c
+@@ -75,6 +75,117 @@
+ extern void comcerto_timer_init(void);
+ extern struct smp_operations comcerto_smp_ops;
+ 
++static struct c2k_led_platdata c2krv16x_26x_led1_data = {
++	.name		= "radio0",
++	.gpio		= WLAN2G_GLED_GPIO_NUM,
++	.def_trigger = "netdev",
++};
++
++static struct c2k_led_platdata c2krv16x_26x_led1_1_data = {
++	.name		= "radio0_1",
++	.gpio		= WLAN2G_GLED_GPIO_NUM,
++	.def_trigger = "netdev",
++};
++
++static struct c2k_led_platdata c2krv16x_26x_led1_2_data = {
++	.name		= "radio0_2",
++	.gpio		= WLAN2G_GLED_GPIO_NUM,
++	.def_trigger = "netdev",
++};
++
++static struct c2k_led_platdata c2krv16x_26x_led1_3_data = {
++	.name		= "radio0_3",
++	.gpio		= WLAN2G_GLED_GPIO_NUM,
++	.def_trigger = "netdev",
++};
++
++static struct platform_device c2krv16x_26x_led1_device = {
++	.name			= "leds-c2k",
++	.id			= 1,
++	.dev		= {
++		.platform_data	= &c2krv16x_26x_led1_data,
++	},
++};
++
++static struct platform_device c2krv16x_26x_led1_1_device = {
++	.name			= "leds-c2k",
++	.id			= 2,
++	.dev		= {
++		.platform_data	= &c2krv16x_26x_led1_1_data,
++	},
++};
++
++static struct platform_device c2krv16x_26x_led1_2_device = {
++	.name			= "leds-c2k",
++	.id			= 3,
++	.dev		= {
++		.platform_data	= &c2krv16x_26x_led1_2_data,
++	},
++};
++
++static struct platform_device c2krv16x_26x_led1_3_device = {
++	.name			= "leds-c2k",
++	.id			= 4,
++	.dev		= {
++		.platform_data	= &c2krv16x_26x_led1_3_data,
++	},
++};
++
++static struct c2k_led_platdata c2krv16x_26x_led2_data = {
++	.name		= "radio1",
++	.gpio		= WLAN5G_GLED_GPIO_NUM,
++	.def_trigger = "netdev",
++};
++
++static struct c2k_led_platdata c2krv16x_26x_led2_1_data = {
++	.name		= "radio1_1",
++	.gpio		= WLAN5G_GLED_GPIO_NUM,
++	.def_trigger = "netdev",
++};
++
++static struct c2k_led_platdata c2krv16x_26x_led2_2_data = {
++	.name		= "radio1_2",
++	.gpio		= WLAN5G_GLED_GPIO_NUM,
++	.def_trigger = "netdev",
++};
++
++static struct c2k_led_platdata c2krv16x_26x_led2_3_data = {
++	.name		= "radio1_3",
++	.gpio		= WLAN5G_GLED_GPIO_NUM,
++	.def_trigger = "netdev",
++};
++
++static struct platform_device c2krv16x_26x_led2_device = {
++	.name			= "leds-c2k",
++	.id			= 5,
++	.dev		= {
++		.platform_data	= &c2krv16x_26x_led2_data,
++	},
++};
++
++static struct platform_device c2krv16x_26x_led2_1_device = {
++	.name			= "leds-c2k",
++	.id			= 6,
++	.dev		= {
++		.platform_data	= &c2krv16x_26x_led2_1_data,
++	},
++};
++
++static struct platform_device c2krv16x_26x_led2_2_device = {
++	.name			= "leds-c2k",
++	.id			= 7,
++	.dev		= {
++		.platform_data	= &c2krv16x_26x_led2_2_data,
++	},
++};
++
++static struct platform_device c2krv16x_26x_led2_3_device = {
++	.name			= "leds-c2k",
++	.id			= 8,
++	.dev		= {
++		.platform_data	= &c2krv16x_26x_led2_3_data,
++	},
++};
+ 
+ extern void platform_reserve(void);
+ extern void device_map_io (void);
+@@ -829,6 +940,14 @@ static struct platform_device *comcerto_devices[] __initdata = {
+ 	&comcerto_elp_device,
+ #endif
+ 	&leds_gpio,
++	&c2krv16x_26x_led1_device,
++	&c2krv16x_26x_led1_1_device,
++	&c2krv16x_26x_led1_2_device,
++	&c2krv16x_26x_led1_3_device,
++	&c2krv16x_26x_led2_device,
++	&c2krv16x_26x_led2_1_device,
++	&c2krv16x_26x_led2_2_device,
++	&c2krv16x_26x_led2_3_device,
+ };
+ 
+ 
+diff --git a/arch/arm/mach-comcerto/include/mach/comcerto-common.h b/arch/arm/mach-comcerto/include/mach/comcerto-common.h
+index 6a14993..b07dd39 100644
+--- a/arch/arm/mach-comcerto/include/mach/comcerto-common.h
++++ b/arch/arm/mach-comcerto/include/mach/comcerto-common.h
+@@ -136,6 +136,14 @@ struct comcerto_pfe_platform_data
+ 	struct comcerto_mdio_platform_data comcerto_mdio_pdata[3];
+ };
+ 
++struct c2k_led_platdata {
++	unsigned int		 gpio;
++	unsigned int		 flags;
++
++	char			*name;
++	char			*def_trigger;
++};
++
+ struct comcerto_tdm_data {
+ 	u8 fsoutput; /* Generic Pad Control and Version ID Register[2] */
+ 	u8 fspolarity; /*  28 FSYNC_FALL(RISE)_EDGE */
+@@ -152,6 +160,8 @@ struct comcerto_tdm_data {
+ #endif
+ };
+ 
++extern struct spinlock c2k_gpio_lock;
++
+ /* L210 cache controller value
+     // Configure Aux:
+     //   [11:9]=[8:6]=[2:0]=001 RAM LAT = 2 cycles
+diff --git a/drivers/gpio/gpio-c2k.c b/drivers/gpio/gpio-c2k.c
+index dbc9912..d79c5ce 100644
+--- a/drivers/gpio/gpio-c2k.c
++++ b/drivers/gpio/gpio-c2k.c
+@@ -8,7 +8,7 @@
+ #include <mach/gpio.h>
+ 
+ #define DRV_NAME "c2k-gpio"
+-static DEFINE_SPINLOCK(c2k_gpio_lock);
++DEFINE_SPINLOCK(c2k_gpio_lock);
+ 
+ static struct c2k_gpio_chip {
+ 	struct gpio_chip chip;
+diff --git a/drivers/leds/Kconfig b/drivers/leds/Kconfig
+index 966b960..a00fb60 100644
+--- a/drivers/leds/Kconfig
++++ b/drivers/leds/Kconfig
+@@ -190,6 +190,14 @@ config LEDS_GPIO
+ 	  defined as platform devices and/or OpenFirmware platform devices.
+ 	  The code to use these bindings can be selected below.
+ 
++config LEDS_C2K
++	tristate "LED C2K Trigger"
++	depends on LEDS_CLASS
++	select LEDS_TRIGGERS
++	help
++	  This allows C2K LEDs to be initialised in the ON state.
++	  If unsure, say Y.
++
+ config LEDS_LP3944
+ 	tristate "LED Support for N.S. LP3944 (Fun Light) I2C chip"
+ 	depends on LEDS_CLASS
+diff --git a/drivers/leds/Makefile b/drivers/leds/Makefile
+index bf46093..466db64 100644
+--- a/drivers/leds/Makefile
++++ b/drivers/leds/Makefile
+@@ -59,6 +59,7 @@ obj-$(CONFIG_LEDS_SYSCON)		+= leds-syscon.o
+ obj-$(CONFIG_LEDS_VERSATILE)		+= leds-versatile.o
+ obj-$(CONFIG_LEDS_MENF21BMC)		+= leds-menf21bmc.o
+ obj-$(CONFIG_LEDS_PM8941_WLED)		+= leds-pm8941-wled.o
++obj-$(CONFIG_LEDS_C2K)	+= leds-c2k.o
+ 
+ # LED SPI Drivers
+ obj-$(CONFIG_LEDS_DAC124S085)		+= leds-dac124s085.o
+diff --git a/drivers/leds/leds-c2k.c b/drivers/leds/leds-c2k.c
+new file mode 100644
+index 0000000..6b2ba53
+--- /dev/null
++++ b/drivers/leds/leds-c2k.c
+@@ -0,0 +1,115 @@
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/leds.h>
++#include <linux/gpio.h>
++#include <linux/slab.h>
++#include <linux/module.h>
++#include <mach/comcerto-common.h>
++#include <linux/spinlock.h>
++#include <asm/io.h>
++#include <mach/gpio.h>
++
++#include <mach/hardware.h>
++
++struct c2k_gpio_led {
++	struct led_classdev		 cdev;
++	struct c2k_led_platdata	*pdata;
++};
++
++static void c2k_led_set(struct led_classdev *led_cdev,
++			    enum led_brightness value)
++{
++	struct c2k_gpio_led *led = container_of(led_cdev, struct c2k_gpio_led, cdev);
++	struct c2k_led_platdata *pd = led->pdata;
++	int offset = pd->gpio;
++
++	u32 data;
++	unsigned long flags;
++
++	spin_lock_irqsave(&c2k_gpio_lock, flags);
++	if (offset < 32) {
++		data = __raw_readl(COMCERTO_GPIO_OUTPUT_REG);
++		if (value)
++			data &= ~(1 << offset);
++		else
++			data |= (1 << offset);
++		__raw_writel(data, COMCERTO_GPIO_OUTPUT_REG);
++	} else {
++		data = __raw_readl(COMCERTO_GPIO_63_32_PIN_OUTPUT);
++		if (value)
++			data &= ~(1 << (offset - 32));
++		else
++			data |= (1 << (offset - 32));
++		__raw_writel(data, COMCERTO_GPIO_63_32_PIN_OUTPUT);
++	}
++	spin_unlock_irqrestore(&c2k_gpio_lock, flags);
++}
++
++static int c2k_led_remove(struct platform_device *dev)
++{
++	struct c2k_gpio_led *led = platform_get_drvdata(dev);
++
++	led_classdev_unregister(&led->cdev);
++	kfree(led);
++
++	return 0;
++}
++
++static int c2k_led_probe(struct platform_device *dev)
++{
++	struct c2k_led_platdata *pdata = dev->dev.platform_data;
++	struct c2k_gpio_led *led;
++	int ret;
++
++	led = kzalloc(sizeof(struct c2k_gpio_led), GFP_KERNEL);
++	if (led == NULL) {
++		dev_err(&dev->dev, "No memory for device\n");
++		return -ENOMEM;
++	}
++
++	platform_set_drvdata(dev, led);
++
++	led->cdev.brightness_set = c2k_led_set;
++	led->cdev.default_trigger = pdata->def_trigger;
++	led->cdev.name = pdata->name;
++	led->cdev.flags |= LED_CORE_SUSPENDRESUME;
++
++	led->pdata = pdata;
++
++	ret = led_classdev_register(&dev->dev, &led->cdev);
++	if (ret < 0) {
++		dev_err(&dev->dev, "led_classdev_register failed\n");
++		kfree(led);
++		return ret;
++	}
++
++	return 0;
++}
++
++static struct platform_driver c2k_led_driver = {
++	.probe		= c2k_led_probe,
++	.remove		= c2k_led_remove,
++	.driver		= {
++		.name		= "leds-c2k",
++		.owner		= THIS_MODULE,
++	},
++};
++
++static int __init c2k_led_init(void)
++{
++	return platform_driver_register(&c2k_led_driver);
++}
++
++static void __exit c2k_led_exit(void)
++{
++	platform_driver_unregister(&c2k_led_driver);
++}
++
++module_init(c2k_led_init);
++module_exit(c2k_led_exit);
++
++MODULE_AUTHOR("Yonghua Cao <yonghua.cao@nxp.com>");
++MODULE_DESCRIPTION("COMCERTO 2000 GPIO driver");
++MODULE_LICENSE("GPL");
++MODULE_ALIAS("platform:leds-c2k");

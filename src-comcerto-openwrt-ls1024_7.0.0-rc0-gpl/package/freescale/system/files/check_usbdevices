@@ -1,0 +1,13 @@
+#!/bin/sh
+
+usbdevice="$1"
+# let 3g/4g/storage device settle down
+sleep 15
+
+tmp=`/usr/bin/usb | grep "$usbdevice" | grep other` >/dev/null 2>&1
+
+[ -n "$tmp" ] && {
+	device=$(echo $usbdevice | awk '{print tolower($0)}')
+	rv340_led.sh $device off
+	logger -t system -p local0.error "$device: Unrecognized USB device"
+}

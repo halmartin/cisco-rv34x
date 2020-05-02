@@ -1,0 +1,28 @@
+diff -rauN a/net/xfrm/xfrm_input.c b/net/xfrm/xfrm_input.c
+--- a/net/xfrm/xfrm_input.c	2017-10-26 12:43:11.987310560 +0530
++++ b/net/xfrm/xfrm_input.c	2017-10-26 12:31:01.983310647 +0530
+@@ -207,16 +207,20 @@
+ 	family = XFRM_SPI_SKB_CB(skb)->family;
+ 
+ 	/* if tunnel is present override skb->mark value with tunnel i_key */
+-	if (XFRM_TUNNEL_SKB_CB(skb)->tunnel.ip4) {
++	//if (XFRM_TUNNEL_SKB_CB(skb)->tunnel.ip4) {
+ 		switch (family) {
+ 		case AF_INET:
++	             if (XFRM_TUNNEL_SKB_CB(skb)->tunnel.ip4) {
+ 			mark = be32_to_cpu(XFRM_TUNNEL_SKB_CB(skb)->tunnel.ip4->parms.i_key);
+-			break;
++                     }
++		     break;
+ 		case AF_INET6:
++	             if (XFRM_TUNNEL_SKB_CB(skb)->tunnel.ip6) {
+ 			mark = be32_to_cpu(XFRM_TUNNEL_SKB_CB(skb)->tunnel.ip6->parms.i_key);
+-			break;
++                     }
++                     break;
+ 		}
+-	}
++	//}
+ 
+ 	/* Allocate new secpath or COW existing one. */
+ 	if (!skb->sp || atomic_read(&skb->sp->refcnt) != 1) {

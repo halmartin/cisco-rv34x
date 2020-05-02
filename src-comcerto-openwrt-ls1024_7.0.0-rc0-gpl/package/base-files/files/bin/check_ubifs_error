@@ -1,0 +1,24 @@
+#!/bin/sh
+
+while [ 1 ]
+do
+ ERROR_STRING=" UBIFS error "
+ ERR=`dmesg | grep -m 1 "UBIFS error" | cut -d ':' -f 1 | cut -d ']' -f 2 | cut -d '(' -f 1 `
+ 
+# ECC_ERROR_STRING=" ECC correction failed "
+# ECC_ERR=`dmesg | grep -m 1 "ECC correction failed" | cut -d ']'  -f 2 | cut -c-23`
+
+ if [ "$ERR" = "$ERROR_STRING" ]; then
+  ERR=`dmesg | grep "UBIFS error"`
+  logger -t system -p local0.notice "$ERR detected ! rebooting"
+  sync
+  reboot
+# elif [ "$ECC_ERR" = "$ECC_ERROR_STRING" ]; then
+#  ECC_ERR=`dmesg | grep "ECC correction failed"`
+#  logger -t system -p local0.notice "$ERR detected ! rebooting"
+#  sync
+#  reboot
+ fi
+ sleep 5
+done
+

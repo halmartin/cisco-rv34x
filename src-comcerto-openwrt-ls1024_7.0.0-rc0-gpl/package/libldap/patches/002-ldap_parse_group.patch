@@ -1,0 +1,16 @@
+--- a/pam_ldap.c	2015-07-03 17:43:40.343787318 +0530
++++ b/pam_ldap.c	2015-07-13 16:36:24.729661892 +0530
+@@ -3492,6 +3492,13 @@ pam_sm_authenticate (pam_handle_t * pamh
+                                   _cleanup_data);
+               rc = pam_set_item (pamh, PAM_USER, (void *) session->info->username);
+             }
++       if (rc == PAM_SUCCESS && session->info->group != NULL)
++          {
++              (void) pam_set_data (pamh, "groupattr",
++                                    (void *) strdup (session->info->group),
++                                              _cleanup_data);
++          }
++
+ 	  return rc;
+ 	}
+     }

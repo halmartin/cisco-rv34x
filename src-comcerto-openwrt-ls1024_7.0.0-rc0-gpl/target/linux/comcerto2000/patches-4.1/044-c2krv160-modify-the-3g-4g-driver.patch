@@ -1,0 +1,50 @@
+# 2017-03-13: li.zhang <li.zhang@deltaww.com>
+# modify the 3g/4g drivers(temporary)
+
+--- linux-4.1.8/drivers/usb/class/cdc-wdm.c.bak	2017-03-23 15:08:08.477550799 +0800
++++ linux-4.1.8/drivers/usb/class/cdc-wdm.c	2017-03-24 19:48:39.740671152 +0800
+@@ -662,30 +662,6 @@
+ 
+ static int wdm_release(struct inode *inode, struct file *file)
+ {
+-	struct wdm_device *desc = file->private_data;
+-
+-	mutex_lock(&wdm_mutex);
+-
+-	/* using write lock to protect desc->count */
+-	mutex_lock(&desc->wlock);
+-	desc->count--;
+-	mutex_unlock(&desc->wlock);
+-
+-	if (!desc->count) {
+-		if (!test_bit(WDM_DISCONNECTING, &desc->flags)) {
+-			dev_dbg(&desc->intf->dev, "wdm_release: cleanup");
+-			kill_urbs(desc);
+-			spin_lock_irq(&desc->iuspin);
+-			desc->resp_count = 0;
+-			spin_unlock_irq(&desc->iuspin);
+-			desc->manage_power(desc->intf, 0);
+-		} else {
+-			/* must avoid dev_printk here as desc->intf is invalid */
+-			pr_debug(KBUILD_MODNAME " %s: device gone - cleaning up\n", __func__);
+-			cleanup(desc);
+-		}
+-	}
+-	mutex_unlock(&wdm_mutex);
+ 	return 0;
+ }
+ 
+--- linux-4.1.8/drivers/usb/serial/usb-serial.c.bak	2017-03-23 15:09:14.208797485 +0800
++++ linux-4.1.8/drivers/usb/serial/usb-serial.c	2017-03-23 15:09:48.117951373 +0800
+@@ -279,11 +279,6 @@
+ 
+ static void serial_close(struct tty_struct *tty, struct file *filp)
+ {
+-	struct usb_serial_port *port = tty->driver_data;
+-
+-	dev_dbg(tty->dev, "%s\n", __func__);
+-
+-	tty_port_close(&port->port, tty, filp);
+ }
+ 
+ /**

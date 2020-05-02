@@ -1,0 +1,16 @@
+#!/bin/sh
+count=1
+logThreashold=`uci get syslog.email.log_number_threshold`
+
+while read line;do
+	process_count=`ps | grep /usr/bin/sendmaillog | grep -v "grep /usr/bin/sendmaillog" | wc -l`
+	process_count=$((process_count+1))
+	head -n $logThreashold /var/log/SendEmailLogs > /var/log/SendEmailLogs${process_count}
+	#awk -v logCount=$logThreashold '1; NR == logCount { exit }' /var/log/SendEmailLogs > /var/log/SendEmailLogs${process_count}
+	cp -f /var/log/SendEmailLogs /var/log/tmpLogs
+	sed -i "1,${logThreashold}d" /var/log/tmpLogs
+	echo "" > /var/log/SendEmailLogs
+	cat /var/log/tmpLogs > /var/log/SendEmailLogs
+	/usr/bin/sendmaillog "/var/log/SendEmailLogs${process_count}" &
+	[ "$count" = 1 ] && exit 0
+done

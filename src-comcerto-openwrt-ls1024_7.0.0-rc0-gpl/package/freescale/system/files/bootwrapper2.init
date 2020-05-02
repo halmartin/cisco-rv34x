@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+START=89
+STOP=10
+start() {
+	/etc/init.d/webfilter start &
+}
+
+stop() {
+	/etc/init.d/webfilter stop
+}

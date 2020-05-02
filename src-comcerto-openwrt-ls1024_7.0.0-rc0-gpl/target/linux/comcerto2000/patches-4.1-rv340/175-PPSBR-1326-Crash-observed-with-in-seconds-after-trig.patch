@@ -1,0 +1,37 @@
+From 873ff169552609aeb67e15691b757f4a142046ad Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Wed, 27 Dec 2017 19:11:38 +0530
+Subject: [PATCH] PPSBR-1326 Crash observed with in seconds after triggering
+ the ISICV6 traffic from LAN host
+
+Avoided crash with a memset
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ net/ipv6/udp.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/net/ipv6/udp.c b/net/ipv6/udp.c
+index 86451bd..a69fa11 100644
+--- a/net/ipv6/udp.c
++++ b/net/ipv6/udp.c
+@@ -14,6 +14,7 @@
+  *					a single port at the same time.
+  *      Kazunori MIYAZAWA @USAGI:       change process style to use ip6_append_data
+  *      YOSHIFUJI Hideaki @USAGI:	convert /proc/net/udp6 to seq_file.
++ *	Kalyani Chowdhury	:	memset to avoid crash
+  *
+  *	This program is free software; you can redistribute it and/or
+  *      modify it under the terms of the GNU General Public License
+@@ -677,6 +678,8 @@ int udpv6_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
+ 		 * <0 if skb should be resubmitted as proto -N
+ 		 */
+ 
++		memset(skb->cb, 0, sizeof(skb->cb));  
++
+ 		/* if we're overly short, let UDP handle it */
+ 		if (skb->len > sizeof(struct udphdr) &&
+ 		    up->encap_rcv != NULL) {
+-- 
+1.9.1
+

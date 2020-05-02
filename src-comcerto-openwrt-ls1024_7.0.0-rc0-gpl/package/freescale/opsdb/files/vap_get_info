@@ -1,0 +1,149 @@
+#!/bin/sh
+
+. /lib/functions.sh
+scan_wifi() {
+	local cfgfile="$1"
+	DEVICES=
+	wl0_VIFS=
+	wl1_VIFS=
+	config_cb() {
+		local type="$1"
+		local section="$2"
+		# section start
+		case "$type" in
+			wifi-device)
+				append DEVICES "$section"
+				#config_set "$section" vifs ""
+				config_set "$section" ht_capab ""
+			;;
+		esac
+		# section end
+		config_get TYPE "$CONFIG_SECTION" TYPE
+		case "$TYPE" in
+		wifi-iface)
+			config_get device "$CONFIG_SECTION" device
+			eval append ${device}_VIFS "$CONFIG_SECTION"
+			eval vifs="\${${device}_VIFS}"
+			config_set "$device" vifs "$vifs"
+			;;
+		esac
+	}
+	config_load "${cfgfile:-wireless}"
+}
+
+include /lib/wifi
+scan_wifi
+
+board="$(/usr/bin/board_check.sh)"
+
+if [ "$board" = "RV340W" ]; then
+        radio1="WLAN1"
+        vap1="VAP1"
+        radio2="WLAN2"
+        vap2="VAP2"
+else
+        radio1="WLAN0"
+        vap1="VAP0"
+        radio2="WLAN1"
+        vap2="VAP1"
+fi
+
+vap_idx=1
+need_vap_idx="${1#*_}"
+need_vap_name="${1%_*}"
+end_flag=0
+while read line; do
+	_ssid="$(echo $line | awk '{$NF=""}1' | awk '{$NF=""}1' | sed 's/.\{1\}$//')"
+	_radio="$(echo $line | awk '{print $(NF-1)}')"
+
+	if [ "$need_vap_name" = "$vap1" ];then
+		[ "$_radio" = "$radio1" -o "$_radio" = "BOTH" ] && {
+			[ "$need_vap_idx" = "$vap_idx" ] || {
+				vap_idx=$(( $vap_idx + 1 ))
+				continue
+			}
+			if [ "$board" = "RV160W" ];then
+				config_get vifs "wl1" vifs
+			else
+				config_get vifs "wl0" vifs
+			fi
+
+			for vif in $vifs; do
+				config_get ssid "$vif" ssid
+				if [ "$ssid" = "$_ssid" ];then
+					config_get device "$vif" ifname
+					IFNAME="$device"
+					RADIO="$radio1"
+					SSID="$ssid"
+					end_flag=1
+					break;
+				fi
+			done
+		}
+	elif [ "$need_vap_name" = "$vap2" ];then
+		[ "$_radio" = "$radio2" -o "$_radio" = "BOTH" ] && {
+			[ "$need_vap_idx" = "$vap_idx" ] || {
+				vap_idx=$(( $vap_idx + 1 ))
+				continue
+			}
+			if [ "$board" = "RV160W" ];then
+				config_get vifs	"wl0" vifs
+			else
+				config_get vifs	"wl1" vifs
+			fi
+			for vif in $vifs; do
+				config_get ssid "$vif" ssid
+				if [ "$ssid" = "$_ssid" ];then
+					config_get device "$vif" ifname
+					IFNAME="$device"
+					RADIO="$radio2"
+					end_flag=1
+					break;
+				fi
+			done
+		}
+	else
+		return
+	fi
+
+	[ "$end_flag" = "1" ] && break
+done < /tmp/wifi_status_result
+
+case "$2" in
+"ssid") 
+	RESULT="$ssid"
+	;;
+"bssid")
+	RESULT="$(wl -i $IFNAME bssid)"
+	;;
+"radio")
+	RESULT="$RADIO"
+	;;
+"wps_appin")
+	b="$IFNAME""_wps_aplockdown_forceon" 
+	RESULT="$(nvram get "$b" 2>/dev/null)"
+	;;
+"wps_mode")
+	RESULT="$(nvram get ${IFNAME}_wps_mode 2>/dev/null)"
+	if [ "$RESULT" = "enabled" ];then
+		RESULT=1
+	else
+		RESULT=0
+	fi
+	;;
+"brief_info")
+	wps_enabled="$(nvram get ${IFNAME}_wps_mode 2>/dev/null)"
+	if [ "$wps_enabled" = "enabled" ];then
+                wps_enabled=1
+        else
+                wps_enabled=0
+        fi
+
+	RESULT="$ssid,$(wl -i $IFNAME bssid),$RADIO,$(wl -i $IFNAME assoclist | wc -l),$wps_enabled"
+	;;
+*)
+	exit
+	;;
+esac
+
+echo "$RESULT"

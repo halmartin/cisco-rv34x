@@ -1,0 +1,3 @@
+CHANGES:
+1. dhcp.conf : LAN DHCP server configuration showing as enabled.
+2. dnsmasq.init : dnsmasq init script file updated to support DHCP server configuration on vap interfaces.

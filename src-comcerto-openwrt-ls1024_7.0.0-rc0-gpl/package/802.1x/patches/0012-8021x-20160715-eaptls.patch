@@ -1,0 +1,32 @@
+--- a/src/source/ieee802_1x.c	2016-07-15 15:19:35.323386885 +0530
++++ b/src/source/ieee802_1x.c	2016-07-15 15:21:26.873733208 +0530
+@@ -670,6 +670,7 @@
+ static void handle_eap_response(struct sta_info *sta, struct eap_hdr *eap, u8 *data, size_t len)
+ {
+ 	u8 type;
++	struct eap_hdr *last_eap_hdr;
+ 
+ 	assert(sta->eapol_sm != NULL);
+         
+@@ -690,9 +691,19 @@
+ 	}
+ 
+ 	if (sta->last_eap_supp != NULL)
++	{
++		last_eap_hdr = (struct eap_hdr *)sta->last_eap_supp;
++		if ((eap->identifier == last_eap_hdr->identifier) &&
++		    (eap->length == last_eap_hdr->length))
++		{
++			DBGPRINT(RT_DEBUG_INFO,"Already Received Response with this EAP Identifier, (last Id (%d), current Id(%d)\n",
++				   last_eap_hdr->identifier, eap->identifier);
++			return;
++		}
+ 		free(sta->last_eap_supp);
+-	       sta->last_eap_supp_len = sizeof(*eap) + len;
+-	       sta->last_eap_supp = (u8 *) malloc(sta->last_eap_supp_len);
++	}
++	sta->last_eap_supp_len = sizeof(*eap) + len;
++	sta->last_eap_supp = (u8 *) malloc(sta->last_eap_supp_len);
+ 	if (sta->last_eap_supp == NULL)
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Could not alloc memory for last EAP Response\n");

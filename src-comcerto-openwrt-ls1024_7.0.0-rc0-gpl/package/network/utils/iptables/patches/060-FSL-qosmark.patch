@@ -1,0 +1,1412 @@
+diff -arupN iptables-1.4.21-orig/extensions/libxt_CT.c iptables-1.4.21/extensions/libxt_CT.c
+--- iptables-1.4.21-orig/extensions/libxt_CT.c	2017-02-13 04:15:59.970841095 -0600
++++ iptables-1.4.21/extensions/libxt_CT.c	2017-02-13 04:32:58.542888212 -0600
+@@ -1,5 +1,9 @@
+ /*
+  * Copyright (c) 2010-2013 Patrick McHardy <kaber@trash.net>
++ *
++ * Changes:
++ *	13/02/2017	NXP	QOSCONNMARK support is added.
++ *
+  */
+ 
+ #include <stdio.h>
+@@ -86,6 +90,7 @@ static const struct event_tbl ct_event_t
+ 	{ "mark",		IPCT_MARK },
+ 	{ "natseqinfo",		IPCT_NATSEQADJ },
+ 	{ "secmark",		IPCT_SECMARK },
++	{ "qosconnmark",	IPCT_QOSCONNMARK },
+ };
+ 
+ static const struct event_tbl exp_event_tbl[] = {
+diff -arupN iptables-1.4.21-orig/extensions/libxt_CT.c.orig iptables-1.4.21/extensions/libxt_CT.c.orig
+--- iptables-1.4.21-orig/extensions/libxt_CT.c.orig	1969-12-31 18:00:00.000000000 -0600
++++ iptables-1.4.21/extensions/libxt_CT.c.orig	2013-11-22 05:18:13.000000000 -0600
+@@ -0,0 +1,374 @@
++/*
++ * Copyright (c) 2010-2013 Patrick McHardy <kaber@trash.net>
++ */
++
++#include <stdio.h>
++#include <string.h>
++#include <xtables.h>
++#include <linux/netfilter/nf_conntrack_common.h>
++#include <linux/netfilter/xt_CT.h>
++
++static void ct_help(void)
++{
++	printf(
++"CT target options:\n"
++" --notrack			Don't track connection\n"
++" --helper name			Use conntrack helper 'name' for connection\n"
++" --ctevents event[,event...]	Generate specified conntrack events for connection\n"
++" --expevents event[,event...]	Generate specified expectation events for connection\n"
++" --zone ID			Assign/Lookup connection in zone ID\n"
++	);
++}
++
++static void ct_help_v1(void)
++{
++	printf(
++"CT target options:\n"
++" --notrack			Don't track connection\n"
++" --helper name			Use conntrack helper 'name' for connection\n"
++" --timeout name 		Use timeout policy 'name' for connection\n"
++" --ctevents event[,event...]	Generate specified conntrack events for connection\n"
++" --expevents event[,event...]	Generate specified expectation events for connection\n"
++" --zone ID			Assign/Lookup connection in zone ID\n"
++	);
++}
++
++enum {
++	O_NOTRACK = 0,
++	O_HELPER,
++	O_TIMEOUT,
++	O_CTEVENTS,
++	O_EXPEVENTS,
++	O_ZONE,
++};
++
++#define s struct xt_ct_target_info
++static const struct xt_option_entry ct_opts[] = {
++	{.name = "notrack", .id = O_NOTRACK, .type = XTTYPE_NONE},
++	{.name = "helper", .id = O_HELPER, .type = XTTYPE_STRING,
++	 .flags = XTOPT_PUT, XTOPT_POINTER(s, helper)},
++	{.name = "ctevents", .id = O_CTEVENTS, .type = XTTYPE_STRING},
++	{.name = "expevents", .id = O_EXPEVENTS, .type = XTTYPE_STRING},
++	{.name = "zone", .id = O_ZONE, .type = XTTYPE_UINT16,
++	 .flags = XTOPT_PUT, XTOPT_POINTER(s, zone)},
++	XTOPT_TABLEEND,
++};
++#undef s
++
++#define s struct xt_ct_target_info_v1
++static const struct xt_option_entry ct_opts_v1[] = {
++	{.name = "notrack", .id = O_NOTRACK, .type = XTTYPE_NONE},
++	{.name = "helper", .id = O_HELPER, .type = XTTYPE_STRING,
++	 .flags = XTOPT_PUT, XTOPT_POINTER(s, helper)},
++	{.name = "timeout", .id = O_TIMEOUT, .type = XTTYPE_STRING,
++	 .flags = XTOPT_PUT, XTOPT_POINTER(s, timeout)},
++	{.name = "ctevents", .id = O_CTEVENTS, .type = XTTYPE_STRING},
++	{.name = "expevents", .id = O_EXPEVENTS, .type = XTTYPE_STRING},
++	{.name = "zone", .id = O_ZONE, .type = XTTYPE_UINT16,
++	 .flags = XTOPT_PUT, XTOPT_POINTER(s, zone)},
++	XTOPT_TABLEEND,
++};
++#undef s
++
++struct event_tbl {
++	const char	*name;
++	unsigned int	event;
++};
++
++static const struct event_tbl ct_event_tbl[] = {
++	{ "new",		IPCT_NEW },
++	{ "related",		IPCT_RELATED },
++	{ "destroy",		IPCT_DESTROY },
++	{ "reply",		IPCT_REPLY },
++	{ "assured",		IPCT_ASSURED },
++	{ "protoinfo",		IPCT_PROTOINFO },
++	{ "helper",		IPCT_HELPER },
++	{ "mark",		IPCT_MARK },
++	{ "natseqinfo",		IPCT_NATSEQADJ },
++	{ "secmark",		IPCT_SECMARK },
++};
++
++static const struct event_tbl exp_event_tbl[] = {
++	{ "new",		IPEXP_NEW },
++};
++
++static uint32_t ct_parse_events(const struct event_tbl *tbl, unsigned int size,
++				const char *events)
++{
++	char str[strlen(events) + 1], *e = str, *t;
++	unsigned int mask = 0, i;
++
++	strcpy(str, events);
++	while ((t = strsep(&e, ","))) {
++		for (i = 0; i < size; i++) {
++			if (strcmp(t, tbl[i].name))
++				continue;
++			mask |= 1 << tbl[i].event;
++			break;
++		}
++
++		if (i == size)
++			xtables_error(PARAMETER_PROBLEM, "Unknown event type \"%s\"", t);
++	}
++
++	return mask;
++}
++
++static void ct_print_events(const char *pfx, const struct event_tbl *tbl,
++			    unsigned int size, uint32_t mask)
++{
++	const char *sep = "";
++	unsigned int i;
++
++	printf(" %s ", pfx);
++	for (i = 0; i < size; i++) {
++		if (mask & (1 << tbl[i].event)) {
++			printf("%s%s", sep, tbl[i].name);
++			sep = ",";
++		}
++	}
++}
++
++static void ct_parse(struct xt_option_call *cb)
++{
++	struct xt_ct_target_info *info = cb->data;
++
++	xtables_option_parse(cb);
++	switch (cb->entry->id) {
++	case O_NOTRACK:
++		info->flags |= XT_CT_NOTRACK;
++		break;
++	case O_CTEVENTS:
++		info->ct_events = ct_parse_events(ct_event_tbl, ARRAY_SIZE(ct_event_tbl), cb->arg);
++		break;
++	case O_EXPEVENTS:
++		info->exp_events = ct_parse_events(exp_event_tbl, ARRAY_SIZE(exp_event_tbl), cb->arg);
++		break;
++	}
++}
++
++static void ct_parse_v1(struct xt_option_call *cb)
++{
++	struct xt_ct_target_info_v1 *info = cb->data;
++
++	xtables_option_parse(cb);
++	switch (cb->entry->id) {
++	case O_NOTRACK:
++		info->flags |= XT_CT_NOTRACK;
++		break;
++	case O_CTEVENTS:
++		info->ct_events = ct_parse_events(ct_event_tbl,
++						  ARRAY_SIZE(ct_event_tbl),
++						  cb->arg);
++		break;
++	case O_EXPEVENTS:
++		info->exp_events = ct_parse_events(exp_event_tbl,
++						   ARRAY_SIZE(exp_event_tbl),
++						   cb->arg);
++		break;
++	}
++}
++
++static void ct_print(const void *ip, const struct xt_entry_target *target, int numeric)
++{
++	const struct xt_ct_target_info *info =
++		(const struct xt_ct_target_info *)target->data;
++
++	printf(" CT");
++	if (info->flags & XT_CT_NOTRACK)
++		printf(" notrack");
++	if (info->helper[0])
++		printf(" helper %s", info->helper);
++	if (info->ct_events)
++		ct_print_events("ctevents", ct_event_tbl,
++				ARRAY_SIZE(ct_event_tbl), info->ct_events);
++	if (info->exp_events)
++		ct_print_events("expevents", exp_event_tbl,
++				ARRAY_SIZE(exp_event_tbl), info->exp_events);
++	if (info->zone)
++		printf("zone %u ", info->zone);
++}
++
++static void
++ct_print_v1(const void *ip, const struct xt_entry_target *target, int numeric)
++{
++	const struct xt_ct_target_info_v1 *info =
++		(const struct xt_ct_target_info_v1 *)target->data;
++
++	if (info->flags & XT_CT_NOTRACK_ALIAS) {
++		printf (" NOTRACK");
++		return;
++	}
++	printf(" CT");
++	if (info->flags & XT_CT_NOTRACK)
++		printf(" notrack");
++	if (info->helper[0])
++		printf(" helper %s", info->helper);
++	if (info->timeout[0])
++		printf(" timeout %s", info->timeout);
++	if (info->ct_events)
++		ct_print_events("ctevents", ct_event_tbl,
++				ARRAY_SIZE(ct_event_tbl), info->ct_events);
++	if (info->exp_events)
++		ct_print_events("expevents", exp_event_tbl,
++				ARRAY_SIZE(exp_event_tbl), info->exp_events);
++	if (info->zone)
++		printf("zone %u ", info->zone);
++}
++
++static void ct_save(const void *ip, const struct xt_entry_target *target)
++{
++	const struct xt_ct_target_info *info =
++		(const struct xt_ct_target_info *)target->data;
++
++	if (info->flags & XT_CT_NOTRACK_ALIAS)
++		return;
++	if (info->flags & XT_CT_NOTRACK)
++		printf(" --notrack");
++	if (info->helper[0])
++		printf(" --helper %s", info->helper);
++	if (info->ct_events)
++		ct_print_events("--ctevents", ct_event_tbl,
++				ARRAY_SIZE(ct_event_tbl), info->ct_events);
++	if (info->exp_events)
++		ct_print_events("--expevents", exp_event_tbl,
++				ARRAY_SIZE(exp_event_tbl), info->exp_events);
++	if (info->zone)
++		printf(" --zone %u", info->zone);
++}
++
++static void ct_save_v1(const void *ip, const struct xt_entry_target *target)
++{
++	const struct xt_ct_target_info_v1 *info =
++		(const struct xt_ct_target_info_v1 *)target->data;
++
++	if (info->flags & XT_CT_NOTRACK_ALIAS)
++		return;
++	if (info->flags & XT_CT_NOTRACK)
++		printf(" --notrack");
++	if (info->helper[0])
++		printf(" --helper %s", info->helper);
++	if (info->timeout[0])
++		printf(" --timeout %s", info->timeout);
++	if (info->ct_events)
++		ct_print_events("--ctevents", ct_event_tbl,
++				ARRAY_SIZE(ct_event_tbl), info->ct_events);
++	if (info->exp_events)
++		ct_print_events("--expevents", exp_event_tbl,
++				ARRAY_SIZE(exp_event_tbl), info->exp_events);
++	if (info->zone)
++		printf(" --zone %u", info->zone);
++}
++
++static const char *
++ct_print_name_alias(const struct xt_entry_target *target)
++{
++	struct xt_ct_target_info *info = (void *)target->data;
++
++	return info->flags & XT_CT_NOTRACK_ALIAS ? "NOTRACK" : "CT";
++}
++
++static void notrack_ct0_tg_init(struct xt_entry_target *target)
++{
++	struct xt_ct_target_info *info = (void *)target->data;
++
++	info->flags = XT_CT_NOTRACK;
++}
++
++static void notrack_ct1_tg_init(struct xt_entry_target *target)
++{
++	struct xt_ct_target_info_v1 *info = (void *)target->data;
++
++	info->flags = XT_CT_NOTRACK;
++}
++
++static void notrack_ct2_tg_init(struct xt_entry_target *target)
++{
++	struct xt_ct_target_info_v1 *info = (void *)target->data;
++
++	info->flags = XT_CT_NOTRACK | XT_CT_NOTRACK_ALIAS;
++}
++
++static struct xtables_target ct_target_reg[] = {
++	{
++		.family		= NFPROTO_UNSPEC,
++		.name		= "CT",
++		.version	= XTABLES_VERSION,
++		.size		= XT_ALIGN(sizeof(struct xt_ct_target_info)),
++		.userspacesize	= offsetof(struct xt_ct_target_info, ct),
++		.help		= ct_help,
++		.print		= ct_print,
++		.save		= ct_save,
++		.x6_parse	= ct_parse,
++		.x6_options	= ct_opts,
++	},
++	{
++		.family		= NFPROTO_UNSPEC,
++		.name		= "CT",
++		.revision	= 1,
++		.version	= XTABLES_VERSION,
++		.size		= XT_ALIGN(sizeof(struct xt_ct_target_info_v1)),
++		.userspacesize	= offsetof(struct xt_ct_target_info_v1, ct),
++		.help		= ct_help_v1,
++		.print		= ct_print_v1,
++		.save		= ct_save_v1,
++		.x6_parse	= ct_parse_v1,
++		.x6_options	= ct_opts_v1,
++	},
++	{
++		.family		= NFPROTO_UNSPEC,
++		.name		= "CT",
++		.revision	= 2,
++		.version	= XTABLES_VERSION,
++		.size		= XT_ALIGN(sizeof(struct xt_ct_target_info_v1)),
++		.userspacesize	= offsetof(struct xt_ct_target_info_v1, ct),
++		.help		= ct_help_v1,
++		.print		= ct_print_v1,
++		.save		= ct_save_v1,
++		.alias		= ct_print_name_alias,
++		.x6_parse	= ct_parse_v1,
++		.x6_options	= ct_opts_v1,
++	},
++	{
++		.family        = NFPROTO_UNSPEC,
++		.name          = "NOTRACK",
++		.real_name     = "CT",
++		.revision      = 0,
++		.version       = XTABLES_VERSION,
++		.size          = XT_ALIGN(sizeof(struct xt_ct_target_info)),
++		.userspacesize = offsetof(struct xt_ct_target_info, ct),
++		.init          = notrack_ct0_tg_init,
++	},
++	{
++		.family        = NFPROTO_UNSPEC,
++		.name          = "NOTRACK",
++		.real_name     = "CT",
++		.revision      = 1,
++		.version       = XTABLES_VERSION,
++		.size          = XT_ALIGN(sizeof(struct xt_ct_target_info_v1)),
++		.userspacesize = offsetof(struct xt_ct_target_info_v1, ct),
++		.init          = notrack_ct1_tg_init,
++	},
++	{
++		.family        = NFPROTO_UNSPEC,
++		.name          = "NOTRACK",
++		.real_name     = "CT",
++		.revision      = 2,
++		.ext_flags     = XTABLES_EXT_ALIAS,
++		.version       = XTABLES_VERSION,
++		.size          = XT_ALIGN(sizeof(struct xt_ct_target_info_v1)),
++		.userspacesize = offsetof(struct xt_ct_target_info_v1, ct),
++		.init          = notrack_ct2_tg_init,
++	},
++	{
++		.family        = NFPROTO_UNSPEC,
++		.name          = "NOTRACK",
++		.revision      = 0,
++		.version       = XTABLES_VERSION,
++	},
++};
++
++void _init(void)
++{
++	xtables_register_targets(ct_target_reg, ARRAY_SIZE(ct_target_reg));
++}
+diff -arupN iptables-1.4.21-orig/extensions/libxt_qosconnmark.c iptables-1.4.21/extensions/libxt_qosconnmark.c
+--- iptables-1.4.21-orig/extensions/libxt_qosconnmark.c	1969-12-31 18:00:00.000000000 -0600
++++ iptables-1.4.21/extensions/libxt_qosconnmark.c	2017-02-13 04:19:47.450851618 -0600
+@@ -0,0 +1,162 @@
++/* Shared library add-on to iptables to add connmark matching support.
++ *
++ * (C) 2002,2004 MARA Systems AB <http://www.marasystems.com>
++ * by Henrik Nordstrom <hno@marasystems.com>
++ *
++ * Version 1.1
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++#include <stdbool.h>
++#include <stdio.h>
++#include <errno.h>
++#include <inttypes.h>
++#include <netdb.h>
++#include <string.h>
++#include <stdlib.h>
++#include <getopt.h>
++
++#include <xtables.h>
++#include <linux/netfilter/xt_qosconnmark.h>
++
++enum {
++	F_MARK    = 1 << 0,
++	F_SR_MARK = 1 << 1,
++};
++
++
++static int parse64(const char *s, char **end, u_int64_t *value)
++{
++	u_int64_t v;
++	char *my_end;
++
++	errno = 0;
++	v = (u_int64_t)strtoull(s, &my_end, 0);
++
++	if (my_end == s)
++		return false;
++	if (end != NULL)
++		*end = my_end;
++
++	if (errno != ERANGE) {
++		if (value != NULL)
++			*value = v;
++		if (end == NULL)
++			return *my_end == '\0';
++		return true;
++	}
++
++	return false;
++}
++
++static void qosconnmark_mt_help(void)
++{
++	printf(
++"qosconnmark match options:\n"
++"[!] --mark value[/mask]    Match qosconnmark value with optional mask\n");
++}
++
++static const struct option qosconnmark_mt_opts[] = {
++	{.name = "mark", .has_arg = true, .val = '1'},
++	XT_GETOPT_TABLEEND,
++};
++
++static int
++qosconnmark_mt_parse(int c, char **argv, int invert, unsigned int *flags,
++                  const void *entry, struct xt_entry_match **match)
++{
++	struct xt_qosconnmark_mtinfo1 *info = (void *)(*match)->data;
++	u_int64_t mark, mask = UINT64_MAX;
++	char *end;
++
++	switch (c) {
++	case '1': /* --mark */
++		xtables_param_act(XTF_ONLY_ONCE, "qosconnmark", "--mark", *flags & F_MARK);
++		if (!parse64(optarg, &end, &mark))
++			xtables_param_act(XTF_BAD_VALUE, "qosconnmark", "--mark", optarg);
++		if (*end == '/')
++			if (!parse64(end + 1, &end, &mask))
++				xtables_param_act(XTF_BAD_VALUE, "qosconnmark", "--mark", optarg);
++		if (*end != '\0')
++			xtables_param_act(XTF_BAD_VALUE, "qosconnmark", "--mark", optarg);
++
++		if (invert)
++			info->invert = true;
++		info->mark = mark;
++		info->mask = mask;
++		*flags    |= F_MARK;
++		return true;
++	}
++	return false;
++}
++
++static void print_mark(u_int64_t mark, u_int64_t mask)
++{
++	if (mask != UINT64_MAX)
++		printf("0x%" PRIx64 "/0x%" PRIx64 " ", mark, mask);
++	else
++		printf("0x%" PRIx64 " ", mark);
++}
++
++static void qosconnmark_mt_check(unsigned int flags)
++{
++	if (flags == 0)
++		xtables_error(PARAMETER_PROBLEM,
++		           "qosconnmark: The --mark option is required");
++}
++
++static void
++qosconnmark_mt_print(const void *ip, const struct xt_entry_match *match, int numeric)
++{
++	const struct xt_qosconnmark_mtinfo1 *info = (const void *)match->data;
++
++	printf("qosconnmark match ");
++	if (info->invert)
++		printf("!");
++	print_mark(info->mark, info->mask);
++}
++
++static void
++qosconnmark_mt_save(const void *ip, const struct xt_entry_match *match)
++{
++	const struct xt_qosconnmark_mtinfo1 *info = (const void *)match->data;
++
++	if (info->invert)
++		printf("! ");
++
++	printf("--mark ");
++	print_mark(info->mark, info->mask);
++}
++
++static struct xtables_match qosconnmark_match = {
++	.version       = XTABLES_VERSION,
++	.name          = "qosconnmark",
++	.revision      = 1,
++	.family        = NFPROTO_UNSPEC,
++	.size          = XT_ALIGN(sizeof(struct xt_qosconnmark_mtinfo1)),
++	.userspacesize = XT_ALIGN(sizeof(struct xt_qosconnmark_mtinfo1)),
++	.help          = qosconnmark_mt_help,
++	.parse         = qosconnmark_mt_parse,
++	.final_check   = qosconnmark_mt_check,
++	.print         = qosconnmark_mt_print,
++	.save          = qosconnmark_mt_save,
++	.extra_opts    = qosconnmark_mt_opts,
++};
++
++void _init(void)
++{
++	xtables_register_match(&qosconnmark_match);
++}
++
+diff -arupN iptables-1.4.21-orig/extensions/libxt_QOSCONNMARK.c iptables-1.4.21/extensions/libxt_QOSCONNMARK.c
+--- iptables-1.4.21-orig/extensions/libxt_QOSCONNMARK.c	1969-12-31 18:00:00.000000000 -0600
++++ iptables-1.4.21/extensions/libxt_QOSCONNMARK.c	2017-02-13 04:19:47.450851618 -0600
+@@ -0,0 +1,307 @@
++/* Shared library add-on to iptables to add connmark matching support.
++ *
++ * (C) 2002,2004 MARA Systems AB <http://www.marasystems.com>
++ * by Henrik Nordstrom <hno@marasystems.com>
++ *
++ * Version 1.1
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++#include <stdbool.h>
++#include <stdio.h>
++#include <errno.h>
++#include <inttypes.h>
++#include <netdb.h>
++#include <string.h>
++#include <stdlib.h>
++#include <getopt.h>
++
++#include <xtables.h>
++#include <linux/netfilter/x_tables.h>
++#include <linux/netfilter/xt_QOSCONNMARK.h>
++
++enum {
++	F_MARK    = 1 << 0,
++	F_SR_MARK = 1 << 1,
++};
++
++
++static int parse64(const char *s, char **end, u_int64_t *value)
++{
++	u_int64_t v;
++	char *my_end;
++
++	errno = 0;
++	v = (u_int64_t)strtoull(s, &my_end, 0);
++
++	if (my_end == s)
++		return false;
++	if (end != NULL)
++		*end = my_end;
++
++	if (errno != ERANGE) {
++		if (value != NULL)
++			*value = v;
++		if (end == NULL)
++			return *my_end == '\0';
++		return true;
++	}
++
++	return false;
++}
++
++static void qosconnmark_tg_help(void)
++{
++	printf(
++"QOSCONNMARK target options:\n"
++"  --set-xmark value[/ctmask]    Zero mask bits and XOR qosconnmark with value\n"
++"  --save-mark [--ctmask mask] [--nfmask mask]\n"
++"                                Copy qosconnmark to qosmark using masks\n"
++"  --restore-mark [--ctmask mask] [--nfmask mask]\n"
++"                                Copy qosmark to qosconnmark using masks\n"
++"  --set-mark value[/mask]       Set qosconntrack mark value\n"
++"  --save-mark [--mask mask]     Save the packet qosmark in the connection\n"
++"  --restore-mark [--mask mask]  Restore saved qosmark value\n"
++"  --and-mark value              Binary AND the qosconnmark with bits\n"
++"  --or-mark value               Binary OR  the qosconnmark with bits\n"
++"  --xor-mark value              Binary XOR the qosconnmark with bits\n"
++);
++}
++
++static const struct option qosconnmark_tg_opts[] = {
++	{.name = "set-xmark",     .has_arg = true,  .val = '='},
++	{.name = "set-mark",      .has_arg = true,  .val = '-'},
++	{.name = "and-mark",      .has_arg = true,  .val = '&'},
++	{.name = "or-mark",       .has_arg = true,  .val = '|'},
++	{.name = "xor-mark",      .has_arg = true,  .val = '^'},
++	{.name = "save-mark",     .has_arg = false, .val = 'S'},
++	{.name = "restore-mark",  .has_arg = false, .val = 'R'},
++	{.name = "ctmask",        .has_arg = true,  .val = 'c'},
++	{.name = "nfmask",        .has_arg = true,  .val = 'n'},
++	{.name = "mask",          .has_arg = true,  .val = 'm'},
++	XT_GETOPT_TABLEEND,
++};
++
++static void qosconnmark_tg_init(struct xt_entry_target *target)
++{
++	struct xt_qosconnmark_tginfo1 *info = (void *)target->data;
++
++	/*
++	 * Need these defaults for --save-mark/--restore-mark if no
++	 * --ctmark or --nfmask is given.
++	 */
++	info->ctmask = UINT64_MAX;
++	info->nfmask = UINT64_MAX;
++}
++
++static int qosconnmark_tg_parse(int c, char **argv, int invert,
++                             unsigned int *flags, const void *entry,
++                             struct xt_entry_target **target)
++{
++	struct xt_qosconnmark_tginfo1 *info = (void *)(*target)->data;
++	u_int64_t value, mask = UINT64_MAX;
++	char *end;
++
++	switch (c) {
++	case '=': /* --set-xmark */
++	case '-': /* --set-mark */
++		xtables_param_act(XTF_ONE_ACTION, "QOSCONNMARK", *flags & F_MARK);
++		if (!parse64(optarg, &end, &value))
++			xtables_param_act(XTF_BAD_VALUE, "QOSCONNMARK", "--set-xmark/--set-mark", optarg);
++		if (*end == '/')
++			if (!parse64(end + 1, &end, &mask))
++				xtables_param_act(XTF_BAD_VALUE, "QOSCONNMARK", "--set-xmark/--set-mark", optarg);
++		if (*end != '\0')
++			xtables_param_act(XTF_BAD_VALUE, "QOSCONNMARK", "--set-xmark/--set-mark", optarg);
++		info->mode   = XT_QOSCONNMARK_SET;
++		info->mark = value;
++		info->ctmask = mask;
++		if (c == '-')
++			info->ctmask |= value;
++		*flags |= F_MARK;
++		return true;
++
++	case '&': /* --and-mark */
++		xtables_param_act(XTF_ONE_ACTION, "QOSCONNMARK", *flags & F_MARK);
++		if (!parse64(optarg, NULL, &mask))
++			xtables_param_act(XTF_BAD_VALUE, "QOSCONNMARK", "--and-mark", optarg);
++		info->mode   = XT_QOSCONNMARK_SET;
++		info->mark = 0;
++		info->ctmask = ~mask;
++		*flags      |= F_MARK;
++		return true;
++
++	case '|': /* --or-mark */
++		xtables_param_act(XTF_ONE_ACTION, "QOSCONNMARK", *flags & F_MARK);
++		if (!parse64(optarg, NULL, &value))
++			xtables_param_act(XTF_BAD_VALUE, "QOSCONNMARK", "--or-mark", optarg);
++		info->mode   = XT_QOSCONNMARK_SET;
++		info->mark = value;
++		info->ctmask = value;
++		*flags      |= F_MARK;
++		return true;
++
++	case '^': /* --xor-mark */
++		xtables_param_act(XTF_ONE_ACTION, "QOSCONNMARK", *flags & F_MARK);
++		if (!parse64(optarg, NULL, &value))
++			xtables_param_act(XTF_BAD_VALUE, "QOSCONNMARK", "--xor-mark", optarg);
++		info->mode   = XT_QOSCONNMARK_SET;
++		info->mark = value;
++		info->ctmask = 0;
++		*flags      |= F_MARK;
++		return true;
++
++	case 'S': /* --save-mark */
++		xtables_param_act(XTF_ONE_ACTION, "QOSCONNMARK", *flags & F_MARK);
++		info->mode = XT_QOSCONNMARK_SAVE_QOSMARK;
++		*flags |= F_MARK | F_SR_MARK;
++		return true;
++
++	case 'R': /* --restore-mark */
++		xtables_param_act(XTF_ONE_ACTION, "QOSCONNMARK", *flags & F_MARK);
++		info->mode = XT_QOSCONNMARK_RESTORE_QOSMARK;
++		*flags |= F_MARK | F_SR_MARK;
++		return true;
++
++	case 'n': /* --nfmask */
++		if (!(*flags & F_SR_MARK))
++			xtables_error(PARAMETER_PROBLEM, "QOSCONNMARK: --save-mark "
++			           "or --restore-mark is required for "
++			           "--nfmask");
++		if (!parse64(optarg, NULL, &value))
++			xtables_param_act(XTF_BAD_VALUE, "QOSCONNMARK", "--nfmask", optarg);
++		info->nfmask = value;
++		return true;
++
++	case 'c': /* --ctmask */
++		if (!(*flags & F_SR_MARK))
++			xtables_error(PARAMETER_PROBLEM, "QOSCONNMARK: --save-mark "
++			           "or --restore-mark is required for "
++			           "--ctmask");
++		if (!parse64(optarg, NULL, &value))
++			xtables_param_act(XTF_BAD_VALUE, "QOSCONNMARK", "--ctmask", optarg);
++		info->ctmask = value;
++		return true;
++
++	case 'm': /* --mask */
++		if (!(*flags & F_SR_MARK))
++			xtables_error(PARAMETER_PROBLEM, "QOSCONNMARK: --save-mark "
++			           "or --restore-mark is required for "
++			           "--mask");
++		if (!parse64(optarg, NULL, &value))
++			xtables_param_act(XTF_BAD_VALUE, "QOSCONNMARK", "--mask", optarg);
++		info->nfmask = info->ctmask = value;
++		return true;
++	}
++
++	return false;
++}
++
++static void qosconnmark_tg_check(unsigned int flags)
++{
++	if (!flags)
++		xtables_error(PARAMETER_PROBLEM,
++		           "QOSCONNMARK target: No operation specified");
++}
++
++static void
++qosconnmark_tg_print(const void *ip, const struct xt_entry_target *target,
++                  int numeric)
++{
++	const struct xt_qosconnmark_tginfo1 *info = (const void *)target->data;
++
++	switch (info->mode) {
++	case XT_QOSCONNMARK_SET:
++		if (info->mark == 0)
++			printf("QOSCONNMARK and 0x%" PRIx64 " ", (u_int64_t)~info->ctmask);
++		else if (info->mark == info->ctmask)
++			printf("QOSCONNMARK or 0x%" PRIx64 " ", info->mark);
++		else if (info->ctmask == 0)
++			printf("QOSCONNMARK xor 0x%" PRIx64 " ", info->mark);
++		else if (info->ctmask == UINT64_MAX)
++			printf("QOSCONNMARK set 0x%" PRIx64 " ", info->mark);
++		else
++			printf("QOSCONNMARK xset 0x%" PRIx64 "/0x%" PRIx64 " ",
++			       info->mark, info->ctmask);
++		break;
++	case XT_QOSCONNMARK_SAVE_QOSMARK:
++		if (info->nfmask == UINT64_MAX && info->ctmask == UINT64_MAX)
++			printf("QOSCONNMARK save ");
++		else if (info->nfmask == info->ctmask)
++			printf("QOSCONNMARK save mask 0x%" PRIx64 " ", info->nfmask);
++		else
++			printf("QOSCONNMARK save nfmask 0x%" PRIx64 " ctmask ~0x%" PRIx64 " ",
++			       info->nfmask, info->ctmask);
++		break;
++	case XT_QOSCONNMARK_RESTORE_QOSMARK:
++		if (info->ctmask == UINT64_MAX && info->nfmask == UINT64_MAX)
++			printf("QOSCONNMARK restore ");
++		else if (info->ctmask == info->nfmask)
++			printf("QOSCONNMARK restore mask 0x%" PRIx64 " ", info->ctmask);
++		else
++			printf("QOSCONNMARK restore ctmask 0x%" PRIx64 " nfmask ~0x%" PRIx64 " ",
++			       info->ctmask, info->nfmask);
++		break;
++
++	default:
++		printf("ERROR: UNKNOWN QOSCONNMARK MODE");
++		break;
++	}
++}
++
++static void
++qosconnmark_tg_save(const void *ip, const struct xt_entry_target *target)
++{
++	const struct xt_qosconnmark_tginfo1 *info = (const void *)target->data;
++
++	switch (info->mode) {
++	case XT_QOSCONNMARK_SET:
++		printf("--set-xmark 0x%" PRIx64 "/0x%" PRIx64 " ", info->mark, info->ctmask);
++		break;
++	case XT_QOSCONNMARK_SAVE_QOSMARK:
++		printf("--save-mark --nfmask 0x%" PRIx64 " --ctmask 0x%x ",
++		       info->nfmask, info->ctmask);
++		break;
++	case XT_QOSCONNMARK_RESTORE_QOSMARK:
++		printf("--restore-mark --nfmask 0x%" PRIx64 " --ctmask 0x%" PRIx64 " ",
++		       info->nfmask, info->ctmask);
++		break;
++	default:
++		printf("ERROR: UNKNOWN QOSCONNMARK MODE");
++		break;
++	}
++}
++
++static struct xtables_target qosconnmark_target = {
++	.version       = XTABLES_VERSION,
++	.name          = "QOSCONNMARK",
++	.revision      = 1,
++	.family        = NFPROTO_UNSPEC,
++	.size          = XT_ALIGN(sizeof(struct xt_qosconnmark_tginfo1)),
++	.userspacesize = XT_ALIGN(sizeof(struct xt_qosconnmark_tginfo1)),
++	.help          = qosconnmark_tg_help,
++	.init          = qosconnmark_tg_init,
++	.parse         = qosconnmark_tg_parse,
++	.final_check   = qosconnmark_tg_check,
++	.print         = qosconnmark_tg_print,
++	.save          = qosconnmark_tg_save,
++	.extra_opts    = qosconnmark_tg_opts,
++};
++
++void _init(void)
++{
++	xtables_register_target(&qosconnmark_target);
++}
++
+diff -arupN iptables-1.4.21-orig/extensions/libxt_qosmark.c iptables-1.4.21/extensions/libxt_qosmark.c
+--- iptables-1.4.21-orig/extensions/libxt_qosmark.c	1969-12-31 18:00:00.000000000 -0600
++++ iptables-1.4.21/extensions/libxt_qosmark.c	2017-02-13 04:26:27.814870138 -0600
+@@ -0,0 +1,138 @@
++/* Shared library add-on to iptables to add NFMARK matching support. */
++#include <stdbool.h>
++#include <stdio.h>
++#include <errno.h>
++#include <inttypes.h>
++#include <netdb.h>
++#include <string.h>
++#include <stdlib.h>
++#include <getopt.h>
++
++#include <xtables.h>
++#include <linux/netfilter/xt_qosmark.h>
++
++enum {
++	F_MARK = 1 << 0,
++};
++
++static int parse64(const char *s, char **end, u_int64_t *value)
++{
++	u_int64_t v;
++	char *my_end;
++
++	errno = 0;
++	v = (u_int64_t)strtoull(s, &my_end, 0);
++
++	if (my_end == s)
++		return false;
++	if (end != NULL)
++		*end = my_end;
++
++	if (errno != ERANGE) {
++		if (value != NULL)
++			*value = v;
++		if (end == NULL)
++			return *my_end == '\0';
++		return true;
++	}
++
++	return false;
++}
++
++static void qosmark_mt_help(void)
++{
++	printf(
++"qosmark match options:\n"
++"[!] --mark value[/mask]    Match qosmark value with optional mask\n");
++}
++
++static const struct option qosmark_mt_opts[] = {
++	{.name = "qosmark", .has_arg = true, .val = '1'},
++	XT_GETOPT_TABLEEND,
++};
++
++static int qosmark_mt_parse(int c, char **argv, int invert, unsigned int *flags,
++                         const void *entry, struct xt_entry_match **match)
++{
++	struct xt_qosmark_mtinfo1 *info = (void *)(*match)->data;
++	u_int64_t mark, mask = UINT64_MAX;
++	char *end;
++
++	switch (c) {
++	case '1': /* --mark */
++		xtables_param_act(XTF_ONLY_ONCE, "qosmark", "--mark", *flags & F_MARK);
++		if (!parse64(optarg, &end, &mark))
++			xtables_param_act(XTF_BAD_VALUE, "qosmark", "--mark", optarg);
++		if (*end == '/')
++			if (!parse64(end + 1, &end, &mask))
++				xtables_param_act(XTF_BAD_VALUE, "qosmark", "--mark", optarg);
++		if (*end != '\0')
++			xtables_param_act(XTF_BAD_VALUE, "qosmark", "--mark", optarg);
++
++		if (invert)
++			info->invert = true;
++		info->mark = mark;
++		info->mask = mask;
++		*flags    |= F_MARK;
++		return true;
++	}
++	return false;
++}
++
++static void print_mark(unsigned int mark, unsigned int mask)
++{
++	if (mask != UINT64_MAX)
++		printf("0x%" PRIx64 "/0x%" PRIx64 " ", mark, mask);
++	else
++		printf("0x%" PRIx64 " ", mark);
++}
++
++static void qosmark_mt_check(unsigned int flags)
++{
++	if (flags == 0)
++		xtables_error(PARAMETER_PROBLEM,
++			   "qosmark match: The --mark option is required");
++}
++
++static void
++qosmark_mt_print(const void *ip, const struct xt_entry_match *match, int numeric)
++{
++	const struct xt_qosmark_mtinfo1 *info = (const void *)match->data;
++
++	printf("qosmark match ");
++	if (info->invert)
++		printf("!");
++	print_mark(info->mark, info->mask);
++}
++
++static void qosmark_mt_save(const void *ip, const struct xt_entry_match *match)
++{
++	const struct xt_qosmark_mtinfo1 *info = (const void *)match->data;
++
++	if (info->invert)
++		printf("! ");
++
++	printf("--mark ");
++	print_mark(info->mark, info->mask);
++}
++
++static struct xtables_match qosmark_match = {
++	.version       = XTABLES_VERSION,
++	.name          = "qosmark",
++	.revision      = 1,
++	.family        = NFPROTO_UNSPEC,
++	.size          = XT_ALIGN(sizeof(struct xt_qosmark_mtinfo1)),
++	.userspacesize = XT_ALIGN(sizeof(struct xt_qosmark_mtinfo1)),
++	.help          = qosmark_mt_help,
++	.parse         = qosmark_mt_parse,
++	.final_check   = qosmark_mt_check,
++	.print         = qosmark_mt_print,
++	.save          = qosmark_mt_save,
++	.extra_opts    = qosmark_mt_opts,
++};
++
++void _init(void)
++{
++	xtables_register_match(&qosmark_match);
++}
++
+diff -arupN iptables-1.4.21-orig/extensions/libxt_QOSMARK.c iptables-1.4.21/extensions/libxt_QOSMARK.c
+--- iptables-1.4.21-orig/extensions/libxt_QOSMARK.c	1969-12-31 18:00:00.000000000 -0600
++++ iptables-1.4.21/extensions/libxt_QOSMARK.c	2017-02-13 04:19:47.450851618 -0600
+@@ -0,0 +1,175 @@
++/* Shared library add-on to iptables to add NFMARK matching support. */
++#include <stdbool.h>
++#include <stdio.h>
++#include <errno.h>
++#include <inttypes.h>
++#include <netdb.h>
++#include <string.h>
++#include <stdlib.h>
++#include <getopt.h>
++
++#include <xtables.h>
++#include <linux/netfilter/x_tables.h>
++#include <linux/netfilter/xt_QOSMARK.h>
++
++enum {
++	F_MARK = 1 << 0,
++};
++
++static int parse64(const char *s, char **end, u_int64_t *value)
++{
++	u_int64_t v;
++	char *my_end;
++
++	errno = 0;
++	v = (u_int64_t)strtoull(s, &my_end, 0);
++
++	if (my_end == s)
++		return false;
++	if (end != NULL)
++		*end = my_end;
++
++	if (errno != ERANGE) {
++		if (value != NULL)
++			*value = v;
++		if (end == NULL)
++			return *my_end == '\0';
++		return true;
++	}
++
++	return false;
++}
++
++static void qosmark_tg_help(void)
++{
++	printf(
++"QOSMARK target options:\n"
++"  --set-xmark value[/mask]  Clear bits in mask and XOR value into qosmark\n"
++"  --set-mark value[/mask]   Clear bits in mask and OR value into qosmark\n"
++"  --and-mark bits           Binary AND the qosmark with bits\n"
++"  --or-mark bits            Binary OR the qosmark with bits\n"
++"  --xor-mask bits           Binary XOR the qosmark with bits\n"
++"\n");
++}
++
++static const struct option qosmark_tg_opts[] = {
++	{.name = "set-xmark", .has_arg = true, .val = 'X'},
++	{.name = "set-mark",  .has_arg = true, .val = '='},
++	{.name = "and-mark",  .has_arg = true, .val = '&'},
++	{.name = "or-mark",   .has_arg = true, .val = '|'},
++	{.name = "xor-mark",  .has_arg = true, .val = '^'},
++	XT_GETOPT_TABLEEND,
++};
++
++static int qosmark_tg_parse(int c, char **argv, int invert, unsigned int *flags,
++                         const void *entry, struct xt_entry_target **target)
++{
++	struct xt_qosmark_tginfo2 *info = (void *)(*target)->data;
++	u_int64_t value, mask = UINT64_MAX;
++	char *end;
++
++	switch (c) {
++	case 'X': /* --set-xmark */
++	case '=': /* --set-mark */
++		xtables_param_act(XTF_ONE_ACTION, "QOSMARK", *flags & F_MARK);
++		xtables_param_act(XTF_NO_INVERT, "QOSMARK", "--set-xmark/--set-mark", invert);
++		if (!parse64(optarg, &end, &value))
++			xtables_param_act(XTF_BAD_VALUE, "QOSMARK", "--set-xmark/--set-mark", optarg);
++		if (*end == '/')
++			if (!parse64(end + 1, &end, &mask))
++				xtables_param_act(XTF_BAD_VALUE, "QOSMARK", "--set-xmark/--set-mark", optarg);
++		if (*end != '\0')
++			xtables_param_act(XTF_BAD_VALUE, "QOSMARK", "--set-xmark/--set-mark", optarg);
++		info->mark = value;
++		info->mask = mask;
++
++		if (c == '=')
++			info->mask = value | mask;
++		break;
++
++	case '&': /* --and-mark */
++		xtables_param_act(XTF_ONE_ACTION, "QOSMARK", *flags & F_MARK);
++		xtables_param_act(XTF_NO_INVERT, "QOSMARK", "--and-mark", invert);
++		if (!parse64(optarg, NULL, &mask))
++			xtables_param_act(XTF_BAD_VALUE, "QOSMARK", "--and-mark", optarg);
++		info->mark = 0;
++		info->mask = ~mask;
++		break;
++
++	case '|': /* --or-mark */
++		xtables_param_act(XTF_ONE_ACTION, "QOSMARK", *flags & F_MARK);
++		xtables_param_act(XTF_NO_INVERT, "QOSMARK", "--or-mark", invert);
++		if (!parse64(optarg, NULL, &value))
++			xtables_param_act(XTF_BAD_VALUE, "QOSMARK", "--or-mark", optarg);
++		info->mark = value;
++		info->mask = value;
++		break;
++
++	case '^': /* --xor-mark */
++		xtables_param_act(XTF_ONE_ACTION, "QOSMARK", *flags & F_MARK);
++		xtables_param_act(XTF_NO_INVERT, "QOSMARK", "--xor-mark", invert);
++		if (!parse64(optarg, NULL, &value))
++			xtables_param_act(XTF_BAD_VALUE, "QOSMARK", "--xor-mark", optarg);
++		info->mark = value;
++		info->mask = 0;
++		break;
++
++	default:
++		return false;
++	}
++
++	*flags |= F_MARK;
++	return true;
++}
++
++static void qosmark_tg_check(unsigned int flags)
++{
++	if (flags == 0)
++		xtables_error(PARAMETER_PROBLEM, "QOSMARK: One of the --set-xmark, "
++		           "--{and,or,xor,set}-mark options is required");
++}
++
++static void qosmark_tg_print(const void *ip, const struct xt_entry_target *target,
++                          int numeric)
++{
++	const struct xt_qosmark_tginfo2 *info = (const void *)target->data;
++
++	if (info->mark == 0)
++		printf("QOSMARK and 0x%" PRIx64 " ", (unsigned int)(u_int64_t)~info->mask);
++	else if (info->mark == info->mask)
++		printf("QOSMARK or 0x%" PRIx64 " ", info->mark);
++	else if (info->mask == 0)
++		printf("QOSMARK xor 0x%" PRIx64 " ", info->mark);
++	else if (info->mask == UINT64_MAX)
++		printf("QOSMARK set 0x%" PRIx64 " ", info->mark);
++	else
++		printf("QOSMARK xset 0x%" PRIx64 "/0x%" PRIx64 " ", info->mark, info->mask);
++}
++
++static void qosmark_tg_save(const void *ip, const struct xt_entry_target *target)
++{
++	const struct xt_qosmark_tginfo2 *info = (const void *)target->data;
++
++	printf("--set-xmark 0x%" PRIx64 "/0x%" PRIx64 " ", info->mark, info->mask);
++}
++
++static struct xtables_target qosmark_target = {
++	.version       = XTABLES_VERSION,
++	.name          = "QOSMARK",
++	.revision      = 2,
++	.family        = NFPROTO_UNSPEC,
++	.size          = XT_ALIGN(sizeof(struct xt_qosmark_tginfo2)),
++	.userspacesize = XT_ALIGN(sizeof(struct xt_qosmark_tginfo2)),
++	.help          = qosmark_tg_help,
++	.parse         = qosmark_tg_parse,
++	.final_check   = qosmark_tg_check,
++	.print         = qosmark_tg_print,
++	.save          = qosmark_tg_save,
++	.extra_opts    = qosmark_tg_opts,
++};
++
++void _init(void)
++{
++	xtables_register_target(&qosmark_target);
++}
++
+diff -arupN iptables-1.4.21-orig/include/linux/netfilter/nf_conntrack_common.h iptables-1.4.21/include/linux/netfilter/nf_conntrack_common.h
+--- iptables-1.4.21-orig/include/linux/netfilter/nf_conntrack_common.h	2017-02-13 04:16:00.058841099 -0600
++++ iptables-1.4.21/include/linux/netfilter/nf_conntrack_common.h	2017-02-13 04:34:04.446891261 -0600
+@@ -1,5 +1,12 @@
+ #ifndef _NF_CONNTRACK_COMMON_H
+ #define _NF_CONNTRACK_COMMON_H
++
++/*
++ *
++ * Changes:
++ *	13/02/2017	NXP	Added support for qosconnmark
++ */
++
+ /* Connection state tracking for netfilter.  This is separated from,
+    but required by, the NAT layer; it can also be used by an iptables
+    extension. */
+@@ -97,6 +104,7 @@ enum ip_conntrack_events {
+ 	IPCT_MARK,		/* new mark has been set */
+ 	IPCT_NATSEQADJ,		/* NAT is doing sequence adjustment */
+ 	IPCT_SECMARK,		/* new security mark has been set */
++	IPCT_QOSCONNMARK,	/* new qosconnmark has been set */
+ };
+ 
+ enum ip_conntrack_expect_events {
+diff -arupN iptables-1.4.21-orig/include/linux/netfilter/nf_conntrack_common.h.orig iptables-1.4.21/include/linux/netfilter/nf_conntrack_common.h.orig
+--- iptables-1.4.21-orig/include/linux/netfilter/nf_conntrack_common.h.orig	1969-12-31 18:00:00.000000000 -0600
++++ iptables-1.4.21/include/linux/netfilter/nf_conntrack_common.h.orig	2013-11-22 05:18:13.000000000 -0600
+@@ -0,0 +1,113 @@
++#ifndef _NF_CONNTRACK_COMMON_H
++#define _NF_CONNTRACK_COMMON_H
++/* Connection state tracking for netfilter.  This is separated from,
++   but required by, the NAT layer; it can also be used by an iptables
++   extension. */
++enum ip_conntrack_info {
++	/* Part of an established connection (either direction). */
++	IP_CT_ESTABLISHED,
++
++	/* Like NEW, but related to an existing connection, or ICMP error
++	   (in either direction). */
++	IP_CT_RELATED,
++
++	/* Started a new connection to track (only
++           IP_CT_DIR_ORIGINAL); may be a retransmission. */
++	IP_CT_NEW,
++
++	/* >= this indicates reply direction */
++	IP_CT_IS_REPLY,
++
++	IP_CT_ESTABLISHED_REPLY = IP_CT_ESTABLISHED + IP_CT_IS_REPLY,
++	IP_CT_RELATED_REPLY = IP_CT_RELATED + IP_CT_IS_REPLY,
++	IP_CT_NEW_REPLY = IP_CT_NEW + IP_CT_IS_REPLY,	
++	/* Number of distinct IP_CT types (no NEW in reply dirn). */
++	IP_CT_NUMBER = IP_CT_IS_REPLY * 2 - 1
++};
++
++/* Bitset representing status of connection. */
++enum ip_conntrack_status {
++	/* It's an expected connection: bit 0 set.  This bit never changed */
++	IPS_EXPECTED_BIT = 0,
++	IPS_EXPECTED = (1 << IPS_EXPECTED_BIT),
++
++	/* We've seen packets both ways: bit 1 set.  Can be set, not unset. */
++	IPS_SEEN_REPLY_BIT = 1,
++	IPS_SEEN_REPLY = (1 << IPS_SEEN_REPLY_BIT),
++
++	/* Conntrack should never be early-expired. */
++	IPS_ASSURED_BIT = 2,
++	IPS_ASSURED = (1 << IPS_ASSURED_BIT),
++
++	/* Connection is confirmed: originating packet has left box */
++	IPS_CONFIRMED_BIT = 3,
++	IPS_CONFIRMED = (1 << IPS_CONFIRMED_BIT),
++
++	/* Connection needs src nat in orig dir.  This bit never changed. */
++	IPS_SRC_NAT_BIT = 4,
++	IPS_SRC_NAT = (1 << IPS_SRC_NAT_BIT),
++
++	/* Connection needs dst nat in orig dir.  This bit never changed. */
++	IPS_DST_NAT_BIT = 5,
++	IPS_DST_NAT = (1 << IPS_DST_NAT_BIT),
++
++	/* Both together. */
++	IPS_NAT_MASK = (IPS_DST_NAT | IPS_SRC_NAT),
++
++	/* Connection needs TCP sequence adjusted. */
++	IPS_SEQ_ADJUST_BIT = 6,
++	IPS_SEQ_ADJUST = (1 << IPS_SEQ_ADJUST_BIT),
++
++	/* NAT initialization bits. */
++	IPS_SRC_NAT_DONE_BIT = 7,
++	IPS_SRC_NAT_DONE = (1 << IPS_SRC_NAT_DONE_BIT),
++
++	IPS_DST_NAT_DONE_BIT = 8,
++	IPS_DST_NAT_DONE = (1 << IPS_DST_NAT_DONE_BIT),
++
++	/* Both together */
++	IPS_NAT_DONE_MASK = (IPS_DST_NAT_DONE | IPS_SRC_NAT_DONE),
++
++	/* Connection is dying (removed from lists), can not be unset. */
++	IPS_DYING_BIT = 9,
++	IPS_DYING = (1 << IPS_DYING_BIT),
++
++	/* Connection has fixed timeout. */
++	IPS_FIXED_TIMEOUT_BIT = 10,
++	IPS_FIXED_TIMEOUT = (1 << IPS_FIXED_TIMEOUT_BIT),
++
++	/* Conntrack is a template */
++	IPS_TEMPLATE_BIT = 11,
++	IPS_TEMPLATE = (1 << IPS_TEMPLATE_BIT),
++
++	/* Conntrack is a fake untracked entry */
++	IPS_UNTRACKED_BIT = 12,
++	IPS_UNTRACKED = (1 << IPS_UNTRACKED_BIT),
++};
++
++/* Connection tracking event types */
++enum ip_conntrack_events {
++	IPCT_NEW,		/* new conntrack */
++	IPCT_RELATED,		/* related conntrack */
++	IPCT_DESTROY,		/* destroyed conntrack */
++	IPCT_REPLY,		/* connection has seen two-way traffic */
++	IPCT_ASSURED,		/* connection status has changed to assured */
++	IPCT_PROTOINFO,		/* protocol information has changed */
++	IPCT_HELPER,		/* new helper has been set */
++	IPCT_MARK,		/* new mark has been set */
++	IPCT_NATSEQADJ,		/* NAT is doing sequence adjustment */
++	IPCT_SECMARK,		/* new security mark has been set */
++};
++
++enum ip_conntrack_expect_events {
++	IPEXP_NEW,		/* new expectation */
++	IPEXP_DESTROY,		/* destroyed expectation */
++};
++
++/* expectation flags */
++#define NF_CT_EXPECT_PERMANENT		0x1
++#define NF_CT_EXPECT_INACTIVE		0x2
++#define NF_CT_EXPECT_USERSPACE		0x4
++
++
++#endif /* _NF_CONNTRACK_COMMON_H */
+diff -arupN iptables-1.4.21-orig/include/linux/netfilter/xt_qosconnmark.h iptables-1.4.21/include/linux/netfilter/xt_qosconnmark.h
+--- iptables-1.4.21-orig/include/linux/netfilter/xt_qosconnmark.h	1969-12-31 18:00:00.000000000 -0600
++++ iptables-1.4.21/include/linux/netfilter/xt_qosconnmark.h	2017-02-13 04:19:47.450851618 -0600
+@@ -0,0 +1,31 @@
++#ifndef _XT_QOSCONNMARK_H
++#define _XT_QOSCONNMARK_H
++
++#include <linux/types.h>
++
++/* Copyright (C) 2002,2004 MARA Systems AB <http://www.marasystems.com>
++ * by Henrik Nordstrom <hno@marasystems.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ */
++
++enum {
++	XT_QOSCONNMARK_SET = 0,
++	XT_QOSCONNMARK_SAVE_QOSMARK,
++	XT_QOSCONNMARK_RESTORE_QOSMARK
++};
++
++struct xt_qosconnmark_tginfo1 {
++	__u64 mark, ctmask, nfmask;
++	__u8 mode;
++};
++
++struct xt_qosconnmark_mtinfo1 {
++	__u64 mark, mask;
++	__u8 invert;
++};
++
++#endif /*_XT_QOSCONNMARK_H*/
+diff -arupN iptables-1.4.21-orig/include/linux/netfilter/xt_QOSCONNMARK.h iptables-1.4.21/include/linux/netfilter/xt_QOSCONNMARK.h
+--- iptables-1.4.21-orig/include/linux/netfilter/xt_QOSCONNMARK.h	1969-12-31 18:00:00.000000000 -0600
++++ iptables-1.4.21/include/linux/netfilter/xt_QOSCONNMARK.h	2017-02-13 04:19:47.450851618 -0600
+@@ -0,0 +1,6 @@
++#ifndef _XT_QOSCONNMARK_H_target
++#define _XT_QOSCONNMARK_H_target
++
++#include <linux/netfilter/xt_qosconnmark.h>
++
++#endif /*_XT_QOSCONNMARK_H_target*/
+diff -arupN iptables-1.4.21-orig/include/linux/netfilter/xt_qosmark.h iptables-1.4.21/include/linux/netfilter/xt_qosmark.h
+--- iptables-1.4.21-orig/include/linux/netfilter/xt_qosmark.h	1969-12-31 18:00:00.000000000 -0600
++++ iptables-1.4.21/include/linux/netfilter/xt_qosmark.h	2017-02-13 04:19:47.450851618 -0600
+@@ -0,0 +1,15 @@
++#ifndef _XT_QOSMARK_H
++#define _XT_QOSMARK_H
++
++#include <linux/types.h>
++
++struct xt_qosmark_tginfo2 {
++	__u64 mark, mask;
++};
++
++struct xt_qosmark_mtinfo1 {
++	__u64 mark, mask;
++	__u8 invert;
++};
++
++#endif /*_XT_QOSMARK_H*/
+diff -arupN iptables-1.4.21-orig/include/linux/netfilter/xt_QOSMARK.h iptables-1.4.21/include/linux/netfilter/xt_QOSMARK.h
+--- iptables-1.4.21-orig/include/linux/netfilter/xt_QOSMARK.h	1969-12-31 18:00:00.000000000 -0600
++++ iptables-1.4.21/include/linux/netfilter/xt_QOSMARK.h	2017-02-13 04:19:47.450851618 -0600
+@@ -0,0 +1,6 @@
++#ifndef _XT_QOSMARK_H_target
++#define _XT_QOSMARK_H_target
++
++#include <linux/netfilter/xt_qosmark.h>
++
++#endif /*_XT_QOSMARK_H_target */

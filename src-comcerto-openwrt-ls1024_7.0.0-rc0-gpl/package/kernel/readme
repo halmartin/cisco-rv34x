@@ -1,0 +1,4 @@
+Changes:
+
+1)Linux/modules/wireless.mk :Broadcom Full mac wifi driver is added 
+2)Linux/mac80211/Makefile:Removed comparision of three header fiiles which are not updated in current linux version.This is requirred for hostapd compilation

@@ -1,0 +1,29 @@
+diff -ruaN a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2017-07-25 11:28:24.390126464 +0530
++++ b/src/source/rtdot1x.c	2017-07-25 11:35:22.762126414 +0530
+@@ -454,6 +454,8 @@
+ 	DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: LAN%d, Event = %s\n",
+ 				get_physical_portno(buf[0]), (buf[1] == 0)?"DOWN":"UP");
+ 	if (((rv_prod_type_g  == PROD_TYPE_RV_340) && (buf[0] > total_ports_g)) ||
++	   ((rv_prod_type_g  == PROD_TYPE_RV_160) && (buf[0] >= total_ports_g)) ||
++            ((rv_prod_type_g  == PROD_TYPE_RV_260) && (buf[0] >= total_ports_g)) ||
+ 	    ((rv_prod_type_g  == PROD_TYPE_RV_345) && (buf[0] >= total_ports_g)) || (buf[1] > 1))
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Handle_Link_Monitor_Events: Invalid port_id = %d, port_event = %d\n",buf[0], buf[1]);
+@@ -952,6 +954,16 @@
+ 		portid = 0;
+ 		max_ports = total_ports_g;
+ 	}
++	else if (rv_prod_type_g  == PROD_TYPE_RV_160)
++	{
++		portid = 0;
++		max_ports = total_ports_g;
++	}
++	else if (rv_prod_type_g  == PROD_TYPE_RV_260)
++        {
++                portid = 0;
++                max_ports = total_ports_g;
++        }
+ 
+ 	for(; portid < max_ports; portid++)
+ 	{

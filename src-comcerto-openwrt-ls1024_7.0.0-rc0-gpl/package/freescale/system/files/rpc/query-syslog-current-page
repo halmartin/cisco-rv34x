@@ -1,0 +1,16 @@
+#!/bin/sh
+
+logoutputfile="/tmp/Log/syslog.log"
+
+page_index=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "page-index") {print $(I+1)};}'`
+page_size=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "page-size") {print $(I+1)};}'`
+
+if [ -z "$page_size" ];then
+	page_size=50	
+fi
+
+index_prev=$(($page_index -1))
+log_start_number=`expr $index_prev \* $page_size + 1`
+log_end_number=`expr $log_start_number + $page_size - 1`
+
+awk "NR==$log_start_number,NR==$log_end_number" $logoutputfile

@@ -1,0 +1,77 @@
+#!/bin/sh
+
+# input: 
+# url "input-url"
+
+# output:
+# echo "category \"$cat_val\" reputation \"$rep_val\" status \"$status_val\""
+
+DBG_FILE=/tmp/url-lookup.dbg
+# For debug prints
+DBG=1
+dbg_echo() {
+  if [ -n "$DBG" ]
+  then
+    echo " # DBG: " "$1"
+  fi
+}
+
+devid=`uci get  systeminfo.sysinfo.pid | cut -d - -f1`
+uid=`uci get  systeminfo.sysinfo.serial_number`
+
+rm $DBG_FILE
+
+dbg_echo $devid,$uid >$DBG_FILE
+
+dbg_echo "arguments $0,$@" >>$DBG_FILE
+
+# Usage: url_lookup <DEVID> <UID> <URL>
+resp=`url_lookup "$devid-WB" "$uid" "$2"`
+#resp with success case: <cat1>,<cat2>,.. <cat5>:<urlreputationscore>. There should be atleast one category in the response. i.e <cat1>:<urlreputationscore> 
+#resp with failure case: any other format or ouput other than above mentioned success case will be treated as failure case.
+
+dbg_echo "url_lookup response:$resp" >>$DBG_FILE
+
+cat_val=`echo $resp | cut -d ":" -f1`
+rep_val=`echo $resp | cut -d ":" -f2`
+
+dbg_echo "cat:$cat_val" >>$DBG_FILE
+dbg_echo "rep:$rep_val" >>$DBG_FILE
+
+## in case of success case, the response will not have "Webfilter" keyword in cat_val. Hence below check is added.
+if [[ $cat_val != *"Webfilter"* ]]; then
+	if [ "$rep_val" -le "20" ]; then
+		status_val="Highly Risk"
+		dbg_echo "<=20" >>$DBG_FILE
+	elif [ "$rep_val" -ge "81" ]; then
+		status_val="Well known"
+		dbg_echo ">=81" >>$DBG_FILE
+	elif [ "$rep_val" -ge "21" -a "$rep_val" -le "40" ]; then
+		status_val="suspicious sites"
+		dbg_echo ">=21" >>$DBG_FILE
+	elif [ "$rep_val" -ge "41" -a "$rep_val" -le "60" ]; then
+		status_val="generally benign sites"
+		dbg_echo ">=41" >>$DBG_FILE
+	elif [ "$rep_val" -ge "61" -a "$rep_val" -le "80" ]; then
+		status_val="benign sites"
+		dbg_echo ">=61" >>$DBG_FILE
+	fi
+	## Web reputation: WRI 
+	#81 - 100 These are well known sites with strong security practices, and rarely exhibit characteristics that expose the user to security risks. There is a very low probability that the user will be exposed to malicious links or payloads.
+	#61 - 80  These are benign sites, and rarely exhibit characteristics that expose the user to security risks. There is a low probability that the user will be exposed to malicious links or payloads.
+	#41 - 60  These are generally benign sites, but have exhibited some characteristics that suggest security risk. There is some probability that the user will be exposed to malicious links or payloads.
+	#21 - 40  These are suspicious sites. There is a higher than average probability that the user will be exposed to malicious links or payloads.
+	# 1 - 20  These are high risk sites. There is a high probability that the user will be exposed to malicious links or payloads.
+else
+	rep_val=0
+	status_val="URL lookup failed"
+	dbg_echo "No category " >>$DBG_FILE
+fi
+
+dbg_echo "Ret:catval $cat_val" >>$DBG_FILE
+dbg_echo "Ret:rep_val $rep_val"  >>$DBG_FILE
+dbg_echo "Ret:status $status_val" >>$DBG_FILE
+
+echo "category \"$cat_val\" reputation \"$rep_val\" status \"$status_val\""
+
+exit 0

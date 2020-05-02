@@ -1,0 +1,277 @@
+#!/bin/sh
+
+errcode=1
+errstring="Invalid Arguments"
+TMP_CERTS_OUT="/tmp/out_certs"
+LOG_DIR="/tmp/Log"
+CONFIG_DIR="/tmp/configuration"
+LOG_OUTPUT_FILE="/tmp/Log/syslog.log"
+TMP_LOGOUTPUT="/tmp/tmpOutLog"
+CERT_DIR="/etc/ssl/certs/"
+EXPORT_LOG="/tmp/exportLog"
+downloadurl=
+cert_type="invalid"
+filetype=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "fileType") {print $(I+1)};}'`
+certificate_name=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "certificate-name") {print $(I+1)};}'`
+csr_name=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "csr-name") {print $(I+1)};}'`
+#cert_type=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "type") {print $(I+1)};}'`
+format=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "format") {print $(I+1)};}'`
+password=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "password") {print $(I+1)};}'`
+
+CONFIG_SCRIPT="config_mgmt.sh"
+DOWNLOAD_CERT="/www/download/certificate"
+DOWNLOAD_LOG="/www/download/log"
+DOWNLOAD_USER="/www/download/template"
+DOWNLOAD_TECH_REPORT="/www/download/techreport"
+
+pid=`uci get systeminfo.sysinfo.pid`
+current_time=`date +%Y%m%d-%Hh%Mm%Ss`
+tech_report_file1="TechReport_$pid"
+tech_report_file2="_$current_time"
+TECH_REPORT_FILE="$tech_report_file1$tech_report_file2"
+EXPORT_TECH_REPORT="sh /usr/bin/exportReport.sh"
+LOG_LOCATION="/tmp/log"
+
+LOCAL_CERT=0
+CA_CERT=1
+CSR=2
+PEM_EXT="pem"
+CRT_EXT="crt"
+
+
+DOWNLOAD_URL_CERT="/download/certificate"
+DOWNLOAD_URL_LOG="/download/log"
+DOWNLOAD_URL_CONFIG="/download/configuration"
+DOWNLOAD_URL_USER="/download/template"
+DOWNLOAD_URL_TECH_REPORT="/download/techreport"
+mkdir -p $DOWNLOAD_TECH_REPORT
+mkdir -p $DOWNLOAD_URL_TECH_REPORT
+
+if [ "$filetype" = "certificate" ] || [ "$filetype" = "csr" ];then
+#{
+		checkCertType=`openssl req -in $CERT_DIR/$csr_name.$PEM_EXT  -noout -text | grep "Certificate Request"`
+                if [ -n "$checkCertType" ];then                                                                          
+			format=$PEM_EXT
+			certificate_name=$csr_name
+                        cert_type="certificate-sign-request"                                                                 
+                else
+		#{
+                       checkCertType=`openssl x509 -in $CERT_DIR/$certificate_name.$PEM_EXT  -noout -text | grep "CA:TRUE"` 
+                       if [ -n "$checkCertType" ];then
+				IsImported=`uci get certificate.$certificate_name.is_imported`
+
+				if [ "$IsImported" = "0" ];then
+ 	                               cert_type="CA"                                                                               
+				else
+					errstring=" Exporting "Imported CAs" not allowed "
+					exit 1
+				fi
+                        else      
+				checkCertType=`openssl x509 -in $CERT_DIR/$certificate_name.$CRT_EXT  -noout -text | grep "CA:TRUE"`
+                                if [ -n "$checkCertType" ];then                                                              
+                                        cert_type="CA"                                                                       
+                                        preinstalled_cert=1 
+				else                                                                                           
+	                               checkCertType=`openssl x509 -in $CERT_DIR/$certificate_name.$PEM_EXT  -noout -text | grep "Certificate"`
+        	                        if [ -n "$checkCertType" ]; then  
+                	                        cert_type="certificate"
+                        	        fi                                                                                          
+				fi
+                        fi
+		#}
+                fi  
+
+	if [ "$cert_type" = "invalid" ];then
+		errstring="Invalid certificate type"
+	else
+	#{
+		if [ -n "$certificate_name" ] && [ -n "$format" ];then
+			if [ "$format" = "pem" ] || [ "$format" = "pkcs12" ];then
+				if [ "$format" = "pkcs12" ] && [ -z "$password" ];then
+					errstring="Please provide password to export certificate in pkcs12 format"
+				else
+				#{
+					if [ "$cert_type" = "certification-sign-request" ] && [ "$format" = "pkcs12" ];then
+						errstring="certification-sign-request can be downloaded in pem format only"
+					else
+					#{
+						# Delete link to downloaded certificats, actual certificated we are deleting from backend code.
+						rm -rf  $DOWNLOAD_CERT/*
+						rm -rf  $TMP_CERTS_OUT/*
+						if [ "$format" = "pem" ];then
+							format=0
+						else
+							format=1
+						fi
+						`uci set certificate.$certificate_name=exported_certificate >/dev/null 2>&1` || {
+						errstring="Invalid Certificate Name"
+						}
+					
+						`uci set certificate.$certificate_name.format=$format >/dev/null 2>&1`
+						if [ "$format" = 1 ];then
+							`uci set certificate.$certificate_name.password=$password`
+						fi
+						if [ "$preinstalled_cert" = 1 ] && [ "$format" = 1 ];then                                   
+							errstring="PreInstalled certs cannot be exported in PKCS12 format"                  
+							exit 1                                                                             
+						fi                                                                                          
+ 		                                `uci set certificate.$certificate_name.preinstalled_cert=$preinstalled_cert >/dev/null 2>&1`
+						
+						`/etc/init.d/config_update.sh certificate >/dev/null 2>&1`
+						
+						errcode=$?
+						if [ "$errcode" -ne 0 ];then
+							errstring="Certificate Export Failed"
+							logger -t system -p local0.error "Certificate export failed for $certificate_name."
+						else
+							filename=`ls $TMP_CERTS_OUT`
+							errstring="Certificate $certificate_name exported successfully."
+							downloadurl="$DOWNLOAD_URL_CERT/$filename"
+							logger -t system -p local0.info "Certificate $certificate_name exported successfully."
+							`ln -s "$TMP_CERTS_OUT/$filename" $DOWNLOAD_CERT/$filename >/dev/null 2>&1`
+						fi
+					#}
+					fi
+				#}
+				fi
+			else
+				errstring="Certificate Can be exported in pem or pkcs12 format only"
+			fi
+		else
+			errstring="Please provide Certificate name, type and download format"
+		fi
+	#}
+	fi
+#}
+fi
+
+# Configuration cases
+if [ "$filetype" = "configuration" ];then
+	config_type=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "config-type") {print $(I+1)};}'`	
+	
+	# Prepare Log File Name
+	curr_date=`date +%Y-%m-%d_%H-%M-%S`
+	devicename=`uci get systeminfo.sysinfo.pid | cut -d - -f 1`
+
+	# Running to PC
+	if [ "$config_type" = "config-running" ];then
+		$CONFIG_SCRIPT "export" "config-running" "FILE://Configuration/"$devicename"_configuration_"$curr_date".xml"
+		errcode=$?
+                if [ "$errcode" -ne 0 ];then
+			logger -t system -p local0.error "Failed to save running configuration to PC"
+                        errstring="Failed to save running configuration to PC"
+                else
+			logger -t system -p local0.info "Running configuration saved to PC"
+                        errstring="$CONFIG_DIR/"$devicename"_configuration_"$curr_date".xml"
+                        downloadurl="$DOWNLOAD_URL_CONFIG/"$devicename"_configuration_"$curr_date".xml"
+                fi
+	fi
+	
+	# Startup to PC
+	if [ "$config_type" = "config-startup" ];then
+		$CONFIG_SCRIPT "export" "config-startup" "FILE://Configuration/"$devicename"_configuration_"$curr_date".xml"
+		errcode=$?
+                if [ "$errcode" -ne 0 ];then
+			logger -t system -p local0.error "Failed to save startup configuration to PC"
+                        errstring="Failed to save startup configuration to PC"
+                else
+			logger -t system -p local0.info "Startup configuration saved to PC"
+                        errstring="$CONFIG_DIR/"$devicename"_configuration_"$curr_date".xml"
+                        downloadurl="$DOWNLOAD_URL_CONFIG/"$devicename"_configuration_"$curr_date".xml"
+                fi
+	fi
+	
+	# Backup to PC
+	if [ "$config_type" = "config-backup" ];then
+		$CONFIG_SCRIPT "export" "config-backup" "FILE://Configuration/"$devicename"_configuration_"$curr_date".xml"
+		errcode=$?
+                if [ "$errcode" -ne 0 ];then
+			logger -t system -p local0.error "Failed to save backup configuration to PC"
+                        errstring="Failed to save backup configuration to PC"
+                else
+			logger -t system -p local0.info "Backup configuration saved to PC"
+                        errstring="$CONFIG_DIR/"$devicename"_configuration_"$curr_date".xml"
+                        downloadurl="$DOWNLOAD_URL_CONFIG/"$devicename"_configuration_"$curr_date".xml"
+                fi
+	fi
+	
+	# Mirror to PC
+	if [ "$config_type" = "config-mirror" ];then
+		$CONFIG_SCRIPT "export" "config-mirror" "FILE://Configuration/"$devicename"_configuration_"$curr_date".xml"
+		errcode=$?
+                if [ "$errcode" -ne 0 ];then
+			logger -t system -p local0.error "Failed to save mirror configuration to PC"
+                        errstring="Failed to save mirror configuration to PC"
+                else
+			logger -t system -p local0.info "Mirror configuration saved to PC"
+                        errstring="$CONFIG_DIR/"$devicename"_configuration_"$curr_date".xml"
+                        downloadurl="$DOWNLOAD_URL_CONFIG/"$devicename"_configuration_"$curr_date".xml"
+                fi
+	fi
+fi
+
+
+# Export Logs to PC case
+
+if [ "$filetype" = "log" ];then
+	# We dont need any other parameter for exporting logs to usb. We will convert the syslog format logs from /tmp/Log/syslog.log and copy to /tmp/Log/$devicename_syslog_$year$month$day.log. Also make a symlink to the log file.
+
+	# Prepare Log File Name
+	curr_date=`date +%Y-%m-%d_%H-%M-%S`
+	devicename=`uci get systeminfo.sysinfo.pid | cut -d - -f 1`
+	
+	# Delete previous file
+	rm -rf $LOG_DIR/"$devicename"*
+	rm -rf $DOWNLOAD_LOG/*
+
+	log_file=$LOG_DIR/"$devicename"_syslog_"$curr_date".log
+	basefileName=`basename $log_file`
+					
+	# Copy file to normal format from syslog format.
+	`awk 'NF{NF-=2};1' <$LOG_OUTPUT_FILE >$TMP_LOGOUTPUT` >/dev/null 2>&1
+	`awk '{$1=""; $2=""; $3="" ;$5="" ;$7 ="";$8 ="";$9="";sub("  ", " ");$2="<"$2">";sub(" \"","");sub("\"$","");print}' $TMP_LOGOUTPUT > $EXPORT_LOG` >/dev/null 2>&1						
+	cp -f "$EXPORT_LOG" "$log_file"
+
+	`ln -s $log_file $DOWNLOAD_LOG/$basefileName >/dev/null 2>&1`
+	rm -rf $EXPORT_LOG $TMP_LOGOUTPUT
+	errcode=0
+	fileName=`basename $log_file`
+	errstring="$fileName exported successfully"
+	downloadurl="$DOWNLOAD_URL_LOG/$fileName"
+fi
+
+if [ "$filetype" = "user-template" ];then
+	rm -rf $DOWNLOAD_USER/* 
+	template_file=/tmp/www/template/user-template.csv
+	fileName=`basename $template_file`
+
+	`ln -s $template_file $DOWNLOAD_USER/$fileName >/dev/null 2>&1`
+	errcode=0
+	errstring="$fileName exported successfully"
+	downloadurl="$DOWNLOAD_URL_USER/$fileName"
+fi
+
+if [ "$filetype" = "tech-report" ];then
+	rm -rf $DOWNLOAD_TECH_REPORT/*
+	rm -rf $DOWNLOAD_URL_TECH_REPORT/*
+	rm -f $LOG_LOCATION/TechReport*
+	`$EXPORT_TECH_REPORT $TECH_REPORT_FILE 2>/dev/null 1>/dev/null`
+	techReport=$TECH_REPORT_FILE.bin
+	tech_report_file=$LOG_LOCATION/$TECH_REPORT_FILE.bin
+	fileName=`basename $tech_report_file`
+
+	`ln -s $tech_report_file $DOWNLOAD_TECH_REPORT/$TECH_REPORT_FILE.bin >/dev/null 2>&1`
+	errcode=0
+	errstring="$fileName exported successfully"
+	cp $LOG_LOCATION/$TECH_REPORT_FILE.bin $DOWNLOAD_URL_TECH_REPORT/$TECH_REPORT_FILE.bin
+	downloadurl="$DOWNLOAD_URL_TECH_REPORT/$TECH_REPORT_FILE.bin"
+	logger -t system -p local0.info "Technical report files are copied to PC"
+fi
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errstring\""
+	exit 1
+else
+	echo "download-url \"$downloadurl\""
+	exit 0
+fi

@@ -1,0 +1,144 @@
+From 4a7d63b0f986f6f31e1d89029ecd525a1bb5f25e Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Thu, 12 Jul 2018 17:44:44 +0530
+Subject: [PATCH] SBR-4670 CPS improvement
+
+It has been finally concluded that the issue is with netifd.
+	Further debug of netifd 2015 version code has given us clues that it is trying to set the Packet steering Queues in kernel.
+	Packet steering queues are per device and are around 16 in number for TX and RX. netifd version 2015 is setting those
+	parameters during boot. netifd 2014 version is not setting them. Also. we can improve CPS in BB2MR0 with these changes since the kernel
+	version in BB2MR0 supports since we use 2014 netifd version in it.
+
+Finally, we could observe 3750 CPS with this change.
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ device.c       | 14 ++++++++++++++
+ device.h       |  4 ++++
+ system-linux.c | 37 ++++++++++++++++++++++++++++++++++---
+ 3 files changed, 52 insertions(+), 3 deletions(-)
+
+diff --git a/device.c b/device.c
+index c95d2fe..434c9ba 100644
+--- a/device.c
++++ b/device.c
+@@ -38,6 +38,8 @@ static const struct blobmsg_policy dev_attrs[__DEV_ATTR_MAX] = {
+ 	[DEV_ATTR_TXQUEUELEN] = { .name = "txqueuelen", .type = BLOBMSG_TYPE_INT32 },
+ 	[DEV_ATTR_ENABLED] = { .name = "enabled", .type = BLOBMSG_TYPE_BOOL },
+ 	[DEV_ATTR_IPV6] = { .name = "ipv6", .type = BLOBMSG_TYPE_BOOL },
++	[DEV_ATTR_RPS] = { .name = "rps", .type = BLOBMSG_TYPE_BOOL },
++	[DEV_ATTR_XPS] = { .name = "xps", .type = BLOBMSG_TYPE_BOOL },
+ };
+ 
+ const struct uci_blob_param_list device_attr_list = {
+@@ -186,6 +188,16 @@ device_init_settings(struct device *dev, struct blob_attr **tb)
+ 		s->flags |= DEV_OPT_IPV6;
+ 	}
+ 
++	if ((cur = tb[DEV_ATTR_RPS]))
++		s->rps = blobmsg_get_bool(cur);
++	else
++		s->rps = true;
++
++	if ((cur = tb[DEV_ATTR_XPS]))
++		s->xps = blobmsg_get_bool(cur);
++	else
++		s->xps = true;
++
+ 	device_set_disabled(dev, disabled);
+ }
+ 
+@@ -315,6 +327,8 @@ int device_init(struct device *dev, const struct device_type *type, const char *
+ 
+ 	system_if_clear_state(dev);
+ 	device_check_state(dev);
++	dev->settings.rps = true;
++	dev->settings.xps = true;
+ 
+ 	return 0;
+ }
+diff --git a/device.h b/device.h
+index 01a68bc..b791c02 100644
+--- a/device.h
++++ b/device.h
+@@ -32,6 +32,8 @@ enum {
+ 	DEV_ATTR_TXQUEUELEN,
+ 	DEV_ATTR_ENABLED,
+ 	DEV_ATTR_IPV6,
++	DEV_ATTR_RPS,
++	DEV_ATTR_XPS,
+ 	__DEV_ATTR_MAX,
+ };
+ 
+@@ -108,6 +110,8 @@ struct device_settings {
+ 	unsigned int txqueuelen;
+ 	uint8_t macaddr[6];
+ 	bool ipv6;
++	bool rps;
++	bool xps;
+ };
+ 
+ /*
+diff --git a/system-linux.c b/system-linux.c
+index 53eea67..bbd6b3e 100644
+--- a/system-linux.c
++++ b/system-linux.c
+@@ -946,14 +946,43 @@ system_if_get_settings(struct device *dev, struct device_settings *s)
+ 	}
+ }
+ 
++static void
++system_if_set_rps_xps_val(const char *path, int val)
++{
++	char val_buf[8];
++	glob_t gl;
++	int i;
++
++	if (glob(path, 0, NULL, &gl))
++		return;
++
++	snprintf(val_buf, sizeof(val_buf), "%x", val);
++	for (i = 0; i < gl.gl_pathc; i++)
++		system_set_sysctl(gl.gl_pathv[i], val_buf);
++}
++
++static void
++system_if_apply_rps_xps(struct device *dev, struct device_settings *s)
++{
++	long n_cpus = sysconf(_SC_NPROCESSORS_ONLN);
++	int val;
++
++	if (n_cpus < 2)
++		return;
++
++	val = (1 << n_cpus) - 1;
++	snprintf(dev_buf, sizeof(dev_buf), "/sys/class/net/%s/queues/*/rps_cpus", dev->ifname);
++	system_if_set_rps_xps_val(dev_buf, s->rps ? val : 0);
++
++	snprintf(dev_buf, sizeof(dev_buf), "/sys/class/net/%s/queues/*/xps_cpus", dev->ifname);
++	system_if_set_rps_xps_val(dev_buf, s->xps ? val : 0);
++}
++
+ void
+ system_if_apply_settings(struct device *dev, struct device_settings *s, unsigned int apply_mask)
+ {
+ 	struct ifreq ifr;
+ 
+-	if (!apply_mask)
+-		return;
+-
+ 	memset(&ifr, 0, sizeof(ifr));
+ 	strncpy(ifr.ifr_name, dev->ifname, sizeof(ifr.ifr_name));
+ 	if (s->flags & DEV_OPT_MTU & apply_mask) {
+@@ -974,6 +1003,8 @@ system_if_apply_settings(struct device *dev, struct device_settings *s, unsigned
+ 	}
+ 	if (s->flags & DEV_OPT_IPV6 & apply_mask)
+ 		system_set_disable_ipv6(dev, s->ipv6 ? "0" : "1");
++
++	system_if_apply_rps_xps(dev, s);
+ }
+ 
+ int system_if_up(struct device *dev)
+-- 
+1.9.1
+

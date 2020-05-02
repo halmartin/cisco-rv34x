@@ -1,0 +1,100 @@
+#!/bin/sh
+
+# input: "md5Checksum <string> file <binary>"
+# output: "code <int32> errstr <string>"
+errcode=1
+errstr=""
+total=0
+title="USERNAME,PASSWORD,GROUP"
+
+AAA_PATH="/tmp/user"
+AAA_FILE="$AAA_PATH/.users.csv"
+
+file=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "file") {print $(I+1)};}'`
+md5Checksum=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "md5Checksum") {print $(I+1)};}'`
+
+generate_aaa_xml()
+{
+	local output=$AAA_PATH/aaa.xml
+	csv=$1
+	
+	echo "<config xmlns=\"http://tail-f.com/ns/config/1.0\">" > $output
+	echo "  <users xmlns=\"http://cisco.com/ns/ciscosb/usergroup\">" >> $output
+#	echo "    <authentication>" >> $output
+#	echo "      <users>"  >> $output
+	
+	IFS=","
+	while read username password group
+	do
+		[ -n "$username" -a -n "$password" -a -n "$group" ] && {
+			total=`expr $total + 1`
+			echo "        <user>"  >> $output
+			echo "          <name>$username</name>"  >> $output
+			echo "          <password>$password</password>"  >> $output
+			echo "          <group>$group</group>"  >> $output
+			echo "        </user>"  >> $output
+		}
+	done < $1
+	
+#	echo "      </users>"  >> $output
+#	echo "    </authentication>" >> $output
+	echo "  </users>" >> $output
+	echo "</config>" >> $output
+	
+	logger -t RPC "total=$total"
+
+	[ "$total" = "0" ] && {
+		echo ""
+		rm $output
+	} || {
+		echo $output
+	}
+}
+
+#checksum=`md5sum $AAA_PATH/$(basename $file) | awk '{print $1}'`
+checksum="$md5Checksum"
+filetitle=$(cat $AAA_PATH/$(basename $file) | sed -e "s/\r/\n/g" -e "s/\n\n/\n/g" -e '$a' | sed 's/#.*$//g' | head -n 1)
+
+if [ "$title" = "$filetitle" ];then
+	if [ "$checksum"  = "$md5Checksum" ];then
+
+		cat $AAA_PATH/$(basename $file) | sed -e "s/\r/\n/g" -e "s/\n\n/\n/g" -e '$a' | sed 's/#.*$//g' | sed 1d > $AAA_FILE
+
+		config=$(generate_aaa_xml $AAA_FILE)
+
+		logger -t RPC "$config"	
+
+		[ -n "$config" ] && {
+			# unset two ENV value for avoid attaching to existing session
+			unset CONFD_MAAPI_USID
+			unset CONFD_MAAPI_THANDLE
+
+			/usr/bin/confd_load -l -m $config
+		
+			errcode="$?"
+		} || {
+			errcode=1
+		}
+		rm -f $AAA_FILE
+		rm -f $AAA_PATH/$(basename $file)
+
+		[ "$errcode" = "0" ] && {
+			errstr="`echo "Import user successfully "`"
+		} || {
+			errstr="`echo "Import user failed. User name, Password and Group are mandatory"`"
+		}
+	else
+		errcode=1
+		errstr="Wrong md5Checksum"
+	fi
+else
+	errcode=1
+	errstr="Wrong title"
+fi
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errstr\""
+	exit 1
+else
+	exit 0
+fi

@@ -1,0 +1,11 @@
+OURCE : xl2tpd 1.3.6 version package took from Git Hub chaos calmer 15.05 base and SVN revision is 4346
+SOURCE PATH : https://github.com/openwrt/packages/branches/for-15.05/net/xl2tpd/
+Repository Root: https://github.com/openwrt/packages
+Repository UUID: 4fbbc104-6007-a6e9-cabc-ce57b7db7bff
+Revision: 4346
+Last Changed Rev: 4346
+Last Changed Date: 2015-09-22 14:12:24 +0530 (Tue, 22 Sep 2015) 
+SUPPORT: Alsa-utils
+
+CHANGES:
+==========

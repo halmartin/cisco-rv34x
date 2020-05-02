@@ -1,0 +1,121 @@
+diff -ruaN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2017-09-01 11:53:22.013734506 +0530
++++ b/src/source/ieee802_1x.c	2017-09-01 17:46:36.521731977 +0530
+@@ -1354,48 +1354,52 @@
+ 
+ int authorize (char *group)
+ {
+-  int retval;
+-   struct sockaddr_in addr;
+-  int rsock;
+-  int action;
++	int retval;
++	struct sockaddr_in addr;
++	int rsock;
++	int action;
+   
+-       confd_init_vsn(NULL,NULL,4,0x06040000);
+-       addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+-       addr.sin_family = AF_INET;
+-       addr.sin_port = htons(4565);
++       	confd_init_vsn(NULL,NULL,4,0x06040000);
++       	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
++       	addr.sin_family = AF_INET;
++       	addr.sin_port = htons(4565);
+         
+-       if ((rsock = socket(PF_INET, SOCK_STREAM, 0)) < 0 )
+-          {
+-              return 0;
+-          }
+-       if (cdb_connect(rsock, CDB_READ_SOCKET, (struct sockaddr *)&addr,
+-                                sizeof (struct sockaddr_in)) < 0)
+-          {
+-              return 0;
+-          }
+-       if (cdb_start_session(rsock, CDB_RUNNING) != CONFD_OK)
+-          {
+-              return 0;
+-          }
+-
+-       retval = cdb_get_enum_value(rsock, &action,
+-                                    "/nacm:nacm/nacm:rule-list{%s}/feature-rule{%s}/action",group,"dot1x");
++       	if ((rsock = socket(PF_INET, SOCK_STREAM, 0)) < 0 )
++        {
++		DBGPRINT(RT_DEBUG_ERROR,"ConfD socket creation failed\n");
++              	return 0;
++        }
++       	if (cdb_connect(rsock, CDB_READ_SOCKET, (struct sockaddr *)&addr, sizeof (struct sockaddr_in)) < 0)
++        {
++		DBGPRINT(RT_DEBUG_ERROR,"cdb_connect failed\n");
++              	return 0;
++        }
++       	if (cdb_start_session(rsock, CDB_RUNNING) != CONFD_OK)
++        {
++		DBGPRINT(RT_DEBUG_ERROR,"CDB start session failed\n");
++              	return 0;
++        }
++       	retval = cdb_get_enum_value(rsock, &action,
++                                    "/nacm:nacm/nacm:groups/group{%s}/feature-rule{%s}/action",group,"dot1x");
+         if(retval != CONFD_OK)
+-          {
+-             cdb_close(rsock);
+-             return 0;
+-          }
++        {
++		DBGPRINT(RT_DEBUG_ERROR,"ConfD group authorization failed\n");
++             	cdb_close(rsock);
++             	return 0;
++        }
+         
+-         if(action == 0)
+-           {
+-              cdb_close(rsock);
+-              return 1;
+-           }
+-          else
+-           {
+-              cdb_close(rsock);
+-              return 0;
+-           }
++        if(action == 0)
++        {
++		DBGPRINT(RT_DEBUG_INFO,"ConfD authorization action successful\n");
++              	cdb_close(rsock);
++              	return 1;
++	}
++        else
++        {
++		DBGPRINT(RT_DEBUG_ERROR,"ConfD authorization action failed\n");
++              	cdb_close(rsock);
++              	return 0;
++	}
+ }
+ /* Process the RADIUS frames from Authentication Server */
+ static RadiusRxResult
+@@ -1426,12 +1430,16 @@
+    	else 
+     		group_authorize = authorize(groupname);
+ 
+-    if(group_authorize == 0)
+-        return RADIUS_RX_UNKNOWN;
++    	if(group_authorize == 0)
++	{
++		DBGPRINT(RT_DEBUG_ERROR,"group is not authorised so returning RADIUS_RX_UNKNOWN \n");
++        	return RADIUS_RX_UNKNOWN;
++	}
+ 
+ 	sta = Ap_get_sta_radius_identifier(rtapd, msg->hdr->identifier);
+ 	if (sta == NULL)
+ 	{
++		DBGPRINT(RT_DEBUG_ERROR,"STA is NULL So returning RADIUS_RX_UNKNOWN \n");
+ 		return RADIUS_RX_UNKNOWN;
+ 	}
+ 
+@@ -1476,6 +1484,7 @@
+ 	/* Extrace Idle-Timeout attribute */
+ 	idle_timeout_set = !Radius_msg_get_attr_int32(msg, RADIUS_ATTR_IDLE_TIMEOUT, &idle_timeout);
+ 			
++	DBGPRINT(RT_DEBUG_INFO,"Radius message [msg->hdr->code = %d ]\n", msg->hdr->code);
+ 	switch (msg->hdr->code)
+ 	{
+ 		case RADIUS_CODE_ACCESS_ACCEPT:

@@ -1,0 +1,265 @@
+# 4-11-2017: Abdul Moiz <abdul.moiz@nxp.com>
+# Boardinfo all parameters at one shot
+diff -Naur ./commands/boardinfo.c ../../b/barebox-2011.06.0/commands/boardinfo.c
+--- ./commands/boardinfo.c	2017-04-10 20:54:51.406653808 +0530
++++ ../../b/barebox-2011.06.0/commands/boardinfo.c	2017-04-11 18:43:32.293305633 +0530
+@@ -159,6 +159,7 @@
+ {
+   int ret = 0, fd = -1, n_written = 0;
+   int i, j, len = 2, n_mac_octet = 0;
++  int k = 0;
+   char c = '\0';
+   unsigned char type = 0xFF;
+   unsigned int count = 2;
+@@ -176,11 +177,12 @@
+ 
+   memset(&board_data, 0x00, sizeof(board_data));
+ 
+-  printf("\nEnter PID : ");
++  printf("\nPID : ");
++  k = 0;
+   while (len < (SIZE_PID + 2))
+   {
+-    c = getc();
+-    if ( isalnum(c) || c == KEY_CR || c == '-' )
++    c = argv[2][k];
++    if ( isalnum(c) || c == NULL || c == '-' )
+     {
+       c = toupper(c);
+       putchar(c);
+@@ -190,10 +192,11 @@
+       printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
+       return COMMAND_ERROR;
+     }
+-    if ( c == KEY_CR )
++    if ( c == NULL )
+     {
+       break;
+     }
++    k++;
+     len++;
+     boarddata[count++] = c;
+   }
+@@ -201,13 +204,14 @@
+   boarddata[count - len] = type;
+   boarddata[count - len + 1] = len - 2;
+ 
+-  printf("\nEnter VID : ");
++  printf("\nVID : ");
++  k = 0;
+   len = 2;
+   count = count + len;
+   while (len < (SIZE_VID + 2))
+   {
+-    c = getc();
+-    if ( isalnum(c) || c == KEY_CR )
++    c = argv[3][k];
++    if ( isalnum(c) || c == NULL )
+     {
+       c = toupper(c);
+       putchar(c);
+@@ -217,10 +221,11 @@
+       printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
+       return COMMAND_ERROR;
+     }
+-    if ( c == KEY_CR )
++    if ( c == NULL )
+     {
+       break;
+     }
++    k++;
+     len++;
+     boarddata[count++] = c;
+   }
+@@ -228,13 +233,14 @@
+   boarddata[count - len] = type;
+   boarddata[count - len + 1] = len - 2;
+ 
+-  printf("\nEnter S/N : ");
++  printf("\nS/N : ");
++  k = 0;
+   len = 2;
+   count = count + len;
+   while (len < (SIZE_S_N + 2))
+   {
+-    c = getc();
+-    if ( isalnum(c) || c == KEY_CR )
++    c = argv[4][k];
++    if ( isalnum(c) || c == NULL )
+     {
+       c = toupper(c);
+       putchar(c);
+@@ -244,10 +250,11 @@
+       printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
+       return COMMAND_ERROR;
+     }
+-    if ( c == KEY_CR )
++    if ( c == NULL )
+     {
+       break;
+     }
++    k++;
+     len++;
+     boarddata[count++] = c;
+   }
+@@ -262,10 +269,11 @@
+     type = 0xC3;
+     boarddata[count++] = type;
+     boarddata[count++] = 6;
+-    printf("\nEnter %-3s MAC : ",  i == 0 ? "LAN" : "WAN" );
++    k = 0;
++    printf("\n%-3s MAC : ",  i == 0 ? "LAN" : "WAN" );
+     while (n_mac_octet < (TOTAL_MAC_OCTET))
+     {
+-      c = toupper(getc());
++      c = toupper(argv[5+i][k]);
+       putchar(c);
+       if ((isxdigit(c)) && ( isOctetFull < full ))
+       {
+@@ -286,6 +294,7 @@
+       else if ((  c == ':' ) && ( isOctetFull == full ))
+       {
+         isOctetFull = empty;
++        k++;
+         continue;
+       }
+       else
+@@ -293,19 +302,21 @@
+         printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
+         return COMMAND_ERROR;
+       }
++    k++;
+     }
+     for (j=0;j<6;j++)
+       boarddata[count++] = macdata[i][j];
+   }
+ 
+-  printf("\nEnter Part No : ");
++  printf("\nPart No : ");
++  k = 0;
+   len = 2;
+   count = count + len;
+   while (len < (SIZE_P_N + 2))
+   {
+-    c = getc();
++    c = argv[7][k];
+ 
+-    if ( isprint(c))
++    if ( isprint(c) || c == NULL)
+     {
+       c = toupper(c);
+       putchar(c);
+@@ -315,10 +326,11 @@
+       printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
+       return COMMAND_ERROR;
+     }
+-    if ( c == KEY_CR )
++    if ( c == NULL )
+     {
+       break;
+     }
++    k++;
+     len++;
+     boarddata[count++] = c;
+    }
+@@ -326,16 +338,15 @@
+   boarddata[count - len ] = type;
+   boarddata[count - len + 1] = len - 2;
+ 
+-  printf("\nEnter PROD Name : ");
++  printf("\nPROD Name : ");
++  k = 0;
+   len = 2;
+   count = count + len;
+   while (len < (SIZE_PROD_NAME + 2))
+   {
+-    c = getc();
+-    if (c == KEY_CR)
+-      break;
++    c = argv[8][k];
+ 
+-    if ( isprint(c))
++    if ( isprint(c) || c == NULL)
+     {
+       c = toupper(c);
+       putchar(c);
+@@ -345,10 +356,11 @@
+       printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
+       return COMMAND_ERROR;
+     }
+-    if ( c == KEY_CR )
++    if ( c == NULL )
+     {
+       break;
+     }
++    k++;
+     len++;
+     boarddata[count++] = c;
+   }
+@@ -356,16 +368,15 @@
+   boarddata[count - len ] = type;
+   boarddata[count - len + 1] = len - 2;
+ 
+-  printf("\nEnter PROD Series : ");
++  printf("\nPROD Series : ");
++  k = 0;
+   len = 2;
+   count = count + len;
+   while (len < (SIZE_PROD_SERIES + 2))
+   {
+-    c = getc();
+-    if (c == KEY_CR)
+-      break;
++    c = argv[9][k];
+ 
+-    if ( isprint(c))
++    if ( isprint(c) || c == NULL)
+     {
+       c = toupper(c);
+       putchar(c);
+@@ -375,10 +386,11 @@
+       printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
+       return COMMAND_ERROR;
+     }
+-    if ( c == KEY_CR )
++    if ( c == NULL )
+     {
+       break;
+     }
++    k++;
+     len++;
+     boarddata[count++] = c;
+   }
+@@ -561,6 +573,9 @@
+   }
+   else if (strcmp(argv[1], "-u") == 0)
+   {
++    if(argc < 10)
++       return COMMAND_ERROR_USAGE;
++
+     command_boardinfo_update(argc, argv);
+   }
+   else if (strcmp(argv[1], "-s") == 0)
+@@ -580,13 +595,16 @@
+ "options:\n"
+ " -m  lists boardinfo MAC ID contents from /dev/spi1.boardinfo\n"
+ " -u  update boardinfo (default updates info to /dev/spi1.boardinfo)\n"
++"  	usage: boardinfo -u <PID> <VID> <S/N> <LAN  MAC> <WAN MAC> <P/N> <PROD_NAME> <PROD_SERIES>\n"
++"			PID 	  	: <MAX 14 char>\n"
++"			VID 	  	: <MAX  3 char>\n"
++"			S/N 	  	: <MAX 11 char>\n"
++"			LAN MAC   	: <6 octets of MAC address with : separator e.g. aa:bb:cc:dd:ee:f0 >\n"
++"			WAN MAC   	: <6 octets of MAC address with : separator e.g. aa:bb:cc:dd:ee:f1 >\n"
++"			P/N 	  	: <MAX 12 char>\n"
++"			PROD_NAME 	: <MAX 16 char>\n"
++"			PROD_SERIES	: <MAX 16 char>\n"
+ " -s  lists boardinfo contents from /dev/spi1.boardinfo\n"
+-" e.g.    boardinfo -u\n"
+-"Enter PID : <MAX 14 char>\n"
+-"Enter VID : <MAX  3 char>\n"
+-"Enter S/N : <MAX 11 char>\n"
+-"Enter LAN MAC   : <6 octets of MAC address with : separator e.g. aa:bb:cc:dd:ee:f0 >\n"
+-"Enter WAN MAC 	 : <6 octets of MAC address with : separator e.g. aa:bb:cc:dd:ee:f1 >\n"
+ ;
+ 
+ BAREBOX_CMD_START(boardinfo)

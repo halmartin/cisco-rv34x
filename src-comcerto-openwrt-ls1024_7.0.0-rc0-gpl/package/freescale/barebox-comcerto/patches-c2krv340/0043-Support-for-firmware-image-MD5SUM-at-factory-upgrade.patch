@@ -1,0 +1,81 @@
+From 53a0928153a6d8c9d675c0a9d97505675554c6f0 Mon Sep 17 00:00:00 2001
+From: user <user@user-VirtualBox.(none)>
+Date: Mon, 4 Apr 2016 15:53:03 +0530
+Subject: [PATCH 43/60] Support for firmware image MD5SUM at factory upgrade
+ Signed-off-by: user <user@user-VirtualBox.(none)>
+
+---
+ arch/arm/boards/comcerto-rv340/env/bin/update          | 2 ++
+ arch/arm/boards/comcerto-rv340/env/bin/update_firmware | 6 ++++++
+ arch/arm/boards/comcerto-rv340/env/config              | 5 ++++-
+ 3 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/update b/arch/arm/boards/comcerto-rv340/env/bin/update
+index 10ff4d3..e1b6629 100644
+--- a/arch/arm/boards/comcerto-rv340/env/bin/update
++++ b/arch/arm/boards/comcerto-rv340/env/bin/update
+@@ -46,6 +46,8 @@ elif [ x${type} = xbareboxenv ]; then
+ 		image=bareboxenv.bin
+ 	fi
+ 	type=env
++elif [ x${type} = xmd5sum1 -o  x${type} = xmd5sum2 ]; then
++  image=$md5sumimage
+ elif [ x${type} = xconfigcert ]; then
+   image=$imageconfig
+ elif [ x${type} = xavcsign ]; then
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/update_firmware b/arch/arm/boards/comcerto-rv340/env/bin/update_firmware
+index e3ad8ae..490143e 100644
+--- a/arch/arm/boards/comcerto-rv340/env/bin/update_firmware
++++ b/arch/arm/boards/comcerto-rv340/env/bin/update_firmware
+@@ -6,14 +6,17 @@ if [ x$1 = ximage1 ]; then
+   echo "Updating Firmware image1"
+   kernel=kernel1
+   rootfs=rootfs1
++  md5sum=md5sum1
+ elif [ x$1 = ximage2 ]; then
+   echo "Updating Firmware image2"
+   kernel=kernel2
+   rootfs=rootfs2
++  md5sum=md5sum2
+ else
+   echo "No Input Option >> Updating Default Firmware image1"
+   kernel=kernel1
+   rootfs=rootfs1
++  md5sum=md5sum1
+ fi
+ echo "Updating Kernel with Image : $kernelimage ..."
+ update -t $kernel -d nand
+@@ -21,4 +24,7 @@ echo "done Kernel Update"
+ echo "Updating Rootfs with Image : $rootfsimage ..."
+ update -t $rootfs -d nand
+ echo "done Rootfs Update"
++echo "Updating md5sum with Image : $md5sumimage ..."
++update -t $md5sum -d fastspi
++echo "done md5sum Update"
+ echo "To set last updated image as default (active), Please set active/backup environment variables by editing and saving File: /env/config and reset board"
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index 0f0f6be..658f616 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -31,6 +31,9 @@ rootfsimage=openwrt-comcerto2000-hgw-rootfs-ubi_nand.img
+ kernelimage_type=uimage
+ kernelimage=openwrt-comcerto2000-hgw-uImage.img
+ 
++# md5sum image
++md5sumimage=md5sum_fw-rv340-img
++
+ # yaffs2 custom images
+ imageconfig=root_configcert.yaffs2
+ imageavc=root_avcsign.yaffs2
+@@ -52,7 +55,7 @@ ON=0
+ OFF=1
+ 
+ fast_spi_device="spi1.0"
+-fast_spi_parts="128k(uloader)ro,512k(barebox),128k(env),128k(boardinfo)ro"
++fast_spi_parts="128k(uloader)ro,512k(barebox),128k(env),128k(boardinfo)ro,64k(md5sum1),64k(md5sum2)"
+ 
+ nand_device="comcertonand"
+ nand_parts="512k(barebox),512k(bareboxfact)ro,128k(env),8M(kernel1),92M(rootfs1),128k(reserved_dtb1),8M(kernel2),92M(rootfs2),128k(reserved_dtb2),2M(configcert),12M(avcsign),32M(webrootdb),2M(license)"
+-- 
+2.7.4
+

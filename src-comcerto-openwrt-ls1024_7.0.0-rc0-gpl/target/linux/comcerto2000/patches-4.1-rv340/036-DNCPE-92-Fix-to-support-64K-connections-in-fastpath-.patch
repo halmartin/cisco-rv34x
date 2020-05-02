@@ -1,0 +1,29 @@
+From 995c890a3580f4b9281ae8fecbf4c6f29ec1f61f Mon Sep 17 00:00:00 2001
+From: abhinav <abhinav.podduturi@freescale.com>
+Date: Wed, 2 Sep 2015 09:39:31 +0530
+Subject: [PATCH 10/19] DNCPE-92 : Fix to support 64K connections in fastpath
+ with Per Flow stats feature enabled.
+
+With Per Flow Statistics enabled, we cannot support 64K connections in fast-path due to
+insufficient pfe dma size since Per Flow Stats feature requires an additional 144 Bytes
+per connection. So increasing pfe dma size by 10MB.
+---
+ arch/arm/mach-comcerto/comcerto-2000.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-comcerto/comcerto-2000.c b/arch/arm/mach-comcerto/comcerto-2000.c
+index 2333b1e..3df7afd 100755
+--- a/arch/arm/mach-comcerto/comcerto-2000.c
++++ b/arch/arm/mach-comcerto/comcerto-2000.c
+@@ -168,7 +168,7 @@ static struct map_desc comcerto_io_desc[] __initdata =
+ #if defined(CONFIG_COMCERTO_64K_PAGES)
+ #define PFE_DMA_SIZE		(8 * SZ_1M)
+ #else
+-#define PFE_DMA_SIZE            (16 * SZ_1M)
++#define PFE_DMA_SIZE            (26 * SZ_1M)
+ #endif
+ 
+ #define DSPG_DECT_CSS_DMA_SIZE	(10 * SZ_1M)
+-- 
+1.7.7.4
+

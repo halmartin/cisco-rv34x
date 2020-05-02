@@ -1,0 +1,78 @@
+From 5b542ab6c776fea8318a55bf5445fba6c91f1107 Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Date: Fri, 6 Oct 2017 22:16:37 +0530
+Subject: [PATCH] 440-DPD-pfe-support
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+---
+ src/libcharon/plugins/kernel_pfkey/kernel_pfkey_ipsec.c | 11 +++++++----
+ src/libcharon/sa/child_sa.c                             | 12 +++++-------
+ 2 files changed, 12 insertions(+), 11 deletions(-)
+
+diff --git a/src/libcharon/plugins/kernel_pfkey/kernel_pfkey_ipsec.c b/src/libcharon/plugins/kernel_pfkey/kernel_pfkey_ipsec.c
+index 1b22ea5..7a79d33 100644
+--- a/src/libcharon/plugins/kernel_pfkey/kernel_pfkey_ipsec.c
++++ b/src/libcharon/plugins/kernel_pfkey/kernel_pfkey_ipsec.c
+@@ -1992,7 +1992,7 @@ METHOD(kernel_ipsec_t, update_sa, status_t,
+ METHOD(kernel_ipsec_t, query_sa, status_t,
+ 	private_kernel_pfkey_ipsec_t *this, kernel_ipsec_sa_id_t *id,
+ 	kernel_ipsec_query_sa_t *data, uint64_t *bytes, uint64_t *packets,
+-	time_t *time)
++	time_t *use_time)
+ {
+ 	unsigned char request[PFKEY_BUFFER_SIZE];
+ 	struct sadb_msg *msg, *out;
+@@ -2052,16 +2052,19 @@ METHOD(kernel_ipsec_t, query_sa, status_t,
+ 		/* at least on Linux and FreeBSD this contains the number of packets */
+ 		*packets = response.lft_current->sadb_lifetime_allocations;
+ 	}
+-	if (time)
++	if (use_time)
+ 	{
+ #ifdef __APPLE__
+ 		/* OS X uses the "last" time of use in usetime */
+-		*time = response.lft_current->sadb_lifetime_usetime;
++		*use_time = response.lft_current->sadb_lifetime_usetime;
+ #else /* !__APPLE__ */
+ 		/* on Linux, sadb_lifetime_usetime is set to the "first" time of use,
+ 		 * which is actually correct according to PF_KEY. We have to query
+ 		 * policies for the last usetime. */
+-		*time = 0;
++		if (response.lft_current->sadb_lifetime_usetime)
++			*use_time = time_monotonic(NULL) - (time(NULL) - response.lft_current->sadb_lifetime_usetime);
++		else
++			*use_time = 0;
+ #endif /* !__APPLE__ */
+ 	}
+ 
+diff --git a/src/libcharon/sa/child_sa.c b/src/libcharon/sa/child_sa.c
+index e4364de..597999c 100644
+--- a/src/libcharon/sa/child_sa.c
++++ b/src/libcharon/sa/child_sa.c
+@@ -613,18 +613,16 @@ METHOD(child_sa_t, get_usestats, void,
+ 	private_child_sa_t *this, bool inbound,
+ 	time_t *time, uint64_t *bytes, uint64_t *packets)
+ {
+-	if ((!bytes && !packets) || update_usebytes(this, inbound) != FAILED)
++	time_t tmp;
++	if (update_usebytes(this, inbound) != FAILED)
+ 	{
+ 		/* there was traffic since last update or the kernel interface
+ 		 * does not support querying the number of usebytes.
+ 		 */
+-		if (time)
++		tmp = this->my_usetime;
++		if (update_usetime(this, inbound) && inbound)
+ 		{
+-			if (!update_usetime(this, inbound) && !bytes && !packets)
+-			{
+-				/* if policy query did not yield a usetime, query SAs instead */
+-				update_usebytes(this, inbound);
+-			}
++			this->my_usetime = max(this->my_usetime, tmp);
+ 		}
+ 	}
+ 	if (time)
+-- 
+1.9.1
+

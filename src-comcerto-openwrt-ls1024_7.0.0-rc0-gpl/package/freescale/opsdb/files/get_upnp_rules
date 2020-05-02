@@ -1,0 +1,12 @@
+#!/bin/sh
+rm -f /tmp/stats/upnprules
+touch /tmp/stats/upnprules
+
+local output
+output=`iptables -w -t nat -L MINIUPNPD|grep "^DNAT" | sed -e "s/  */ /g" | cut -d" " -f7,8|sed -e "s/ /:/g"|cut -d":" -f2,4,5`
+if [ -n "$output" ];then
+    for word in $output; do    
+        echo $word >> /tmp/stats/upnprules
+    done
+fi
+

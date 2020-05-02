@@ -1,0 +1,32 @@
+--- a/public.c	2016-01-27 13:08:13.384081982 +0530
++++ b/public.c	2016-01-27 13:08:30.392081527 +0530
+@@ -100,7 +100,7 @@ int pam_ldap_search (pam_handle_t *pamh)
+     int i;
+     char *attribute     = "";
+     BerElement *ber;
+-    char *group;
++    char *group=NULL;
+     FILE *file = NULL;
+     char tmpdn[256] = {'\0'};
+     char *token = NULL;
+@@ -182,16 +182,16 @@ int pam_ldap_search (pam_handle_t *pamh)
+                      group = strtok(group,"=");                                                                                                                                               group = strtok(NULL,"\0");
+ 
+                  }
++                 if (group != NULL)
++                     (void) pam_set_data (pamh, "groupattr",(void *) strdup (group),
++                                                                     free_data);
+                  ldap_value_free(values);
+              }
+           }
+        ldap_memfree(dn);
+      }
+ 
+-     if (group != NULL)
+-         (void) pam_set_data (pamh, "groupattr",(void *) strdup (group),
+-                                        free_data);
+-     else
++     if (group == NULL)
+          (void) pam_set_data (pamh, "groupattr",(void *) strdup ("default"),
+                                                          free_data);
+ 

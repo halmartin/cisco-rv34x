@@ -1,0 +1,13 @@
+#!/bin/sh
+
+LOG_DIR="/tmp/log"
+# input the TechReport file which was generated using exportReport.sh, since file name is 
+# appended with current time (hh+mm+ss) so better to input file name. 
+TECH_REPORT_FILE="$1"
+
+downloadurl="$LOG_DIR/$TECH_REPORT_FILE"
+logger -t system -p local0.info "Technical report files are copied to PC"
+
+rm -f $TECH_REPORT_FILE
+
+echo "download-url \"$downloadurl\""

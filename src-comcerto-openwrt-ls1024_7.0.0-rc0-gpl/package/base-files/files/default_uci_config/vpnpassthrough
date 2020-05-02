@@ -1,0 +1,6 @@
+
+config passthrough 'global'
+	option ipsec_passthrough '1'
+	option pptp_passthrough '1'
+	option l2tp_passthrough '1'
+

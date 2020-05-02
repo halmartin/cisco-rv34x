@@ -1,0 +1,3054 @@
+diff --git a/drivers/net/usb/cdc-phonet.c b/drivers/net/usb/cdc-phonet.c
+old mode 100644
+new mode 100755
+index 415ce8b..06327b4
+--- a/drivers/net/usb/cdc-phonet.c
++++ b/drivers/net/usb/cdc-phonet.c
+@@ -11,7 +11,7 @@
+  *
+  * This program is distributed in the hope that it will be useful, but
+  * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. ?See the GNU
+  * General Public License for more details.
+  *
+  * You should have received a copy of the GNU General Public License
+@@ -340,32 +340,13 @@ static int usbpn_probe(struct usb_interface *intf, const struct usb_device_id *i
+ 	u8 *data;
+ 	int phonet = 0;
+ 	int len, err;
++	struct usb_cdc_parsed_header hdr;
+ 
+ 	data = intf->altsetting->extra;
+ 	len = intf->altsetting->extralen;
+-	while (len >= 3) {
+-		u8 dlen = data[0];
+-		if (dlen < 3)
+-			return -EINVAL;
+-
+-		/* bDescriptorType */
+-		if (data[1] == USB_DT_CS_INTERFACE) {
+-			/* bDescriptorSubType */
+-			switch (data[2]) {
+-			case USB_CDC_UNION_TYPE:
+-				if (union_header || dlen < 5)
+-					break;
+-				union_header =
+-					(struct usb_cdc_union_desc *)data;
+-				break;
+-			case 0xAB:
+-				phonet = 1;
+-				break;
+-			}
+-		}
+-		data += dlen;
+-		len -= dlen;
+-	}
++	cdc_parse_cdc_header(&hdr, intf, data, len);
++	union_header = hdr.usb_cdc_union_desc;
++	phonet = hdr.phonet_magic_present;
+ 
+ 	if (!union_header || !phonet)
+ 		return -EINVAL;
+diff --git a/drivers/net/usb/cdc_ether.c b/drivers/net/usb/cdc_ether.c
+old mode 100644
+new mode 100755
+index 4545e78..05dca3e
+--- a/drivers/net/usb/cdc_ether.c
++++ b/drivers/net/usb/cdc_ether.c
+@@ -54,11 +54,19 @@ static int is_wireless_rndis(struct usb_interface_descriptor *desc)
+ 		desc->bInterfaceProtocol == 3);
+ }
+ 
++static int is_novatel_rndis(struct usb_interface_descriptor *desc)
++{
++	return (desc->bInterfaceClass == USB_CLASS_MISC &&
++		desc->bInterfaceSubClass == 4 &&
++		desc->bInterfaceProtocol == 1);
++}
++
+ #else
+ 
+ #define is_rndis(desc)		0
+ #define is_activesync(desc)	0
+ #define is_wireless_rndis(desc)	0
++#define is_novatel_rndis(desc)	0
+ 
+ #endif
+ 
+@@ -112,8 +120,7 @@ int usbnet_generic_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
+ 	int				rndis;
+ 	bool				android_rndis_quirk = false;
+ 	struct usb_driver		*driver = driver_of(intf);
+-	struct usb_cdc_mdlm_desc	*desc = NULL;
+-	struct usb_cdc_mdlm_detail_desc *detail = NULL;
++	struct usb_cdc_parsed_header header;
+ 
+ 	if (sizeof(dev->data) < sizeof(*info))
+ 		return -EDOM;
+@@ -151,160 +158,100 @@ int usbnet_generic_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
+ 	 */
+ 	rndis = (is_rndis(&intf->cur_altsetting->desc) ||
+ 		 is_activesync(&intf->cur_altsetting->desc) ||
+-		 is_wireless_rndis(&intf->cur_altsetting->desc));
++		 is_wireless_rndis(&intf->cur_altsetting->desc) ||
++		 is_novatel_rndis(&intf->cur_altsetting->desc));
+ 
+ 	memset(info, 0, sizeof(*info));
+ 	info->control = intf;
+-	while (len > 3) {
+-		if (buf[1] != USB_DT_CS_INTERFACE)
+-			goto next_desc;
+-
+-		/* use bDescriptorSubType to identify the CDC descriptors.
+-		 * We expect devices with CDC header and union descriptors.
+-		 * For CDC Ethernet we need the ethernet descriptor.
+-		 * For RNDIS, ignore two (pointless) CDC modem descriptors
+-		 * in favor of a complicated OID-based RPC scheme doing what
+-		 * CDC Ethernet achieves with a simple descriptor.
+-		 */
+-		switch (buf[2]) {
+-		case USB_CDC_HEADER_TYPE:
+-			if (info->header) {
+-				dev_dbg(&intf->dev, "extra CDC header\n");
+-				goto bad_desc;
+-			}
+-			info->header = (void *) buf;
+-			if (info->header->bLength != sizeof(*info->header)) {
+-				dev_dbg(&intf->dev, "CDC header len %u\n",
+-					info->header->bLength);
+-				goto bad_desc;
+-			}
+-			break;
+-		case USB_CDC_ACM_TYPE:
+-			/* paranoia:  disambiguate a "real" vendor-specific
+-			 * modem interface from an RNDIS non-modem.
+-			 */
+-			if (rndis) {
+-				struct usb_cdc_acm_descriptor *acm;
+-
+-				acm = (void *) buf;
+-				if (acm->bmCapabilities) {
+-					dev_dbg(&intf->dev,
+-						"ACM capabilities %02x, "
+-						"not really RNDIS?\n",
+-						acm->bmCapabilities);
+-					goto bad_desc;
+-				}
+-			}
+-			break;
+-		case USB_CDC_UNION_TYPE:
+-			if (info->u) {
+-				dev_dbg(&intf->dev, "extra CDC union\n");
+-				goto bad_desc;
+-			}
+-			info->u = (void *) buf;
+-			if (info->u->bLength != sizeof(*info->u)) {
+-				dev_dbg(&intf->dev, "CDC union len %u\n",
+-					info->u->bLength);
+-				goto bad_desc;
+-			}
+-
+-			/* we need a master/control interface (what we're
+-			 * probed with) and a slave/data interface; union
+-			 * descriptors sort this all out.
+-			 */
+-			info->control = usb_ifnum_to_if(dev->udev,
+-						info->u->bMasterInterface0);
+-			info->data = usb_ifnum_to_if(dev->udev,
+-						info->u->bSlaveInterface0);
+-			if (!info->control || !info->data) {
+-				dev_dbg(&intf->dev,
+-					"master #%u/%p slave #%u/%p\n",
+-					info->u->bMasterInterface0,
+-					info->control,
+-					info->u->bSlaveInterface0,
+-					info->data);
+-				/* fall back to hard-wiring for RNDIS */
+-				if (rndis) {
+-					android_rndis_quirk = true;
+-					goto next_desc;
+-				}
+-				goto bad_desc;
+-			}
+-			if (info->control != intf) {
+-				dev_dbg(&intf->dev, "bogus CDC Union\n");
+-				/* Ambit USB Cable Modem (and maybe others)
+-				 * interchanges master and slave interface.
+-				 */
+-				if (info->data == intf) {
+-					info->data = info->control;
+-					info->control = intf;
+-				} else
+-					goto bad_desc;
+-			}
+-
+-			/* some devices merge these - skip class check */
+-			if (info->control == info->data)
+-				goto next_desc;
+-
+-			/* a data interface altsetting does the real i/o */
+-			d = &info->data->cur_altsetting->desc;
+-			if (d->bInterfaceClass != USB_CLASS_CDC_DATA) {
+-				dev_dbg(&intf->dev, "slave class %u\n",
+-					d->bInterfaceClass);
+-				goto bad_desc;
+-			}
+-			break;
+-		case USB_CDC_ETHERNET_TYPE:
+-			if (info->ether) {
+-				dev_dbg(&intf->dev, "extra CDC ether\n");
+-				goto bad_desc;
+-			}
+-			info->ether = (void *) buf;
+-			if (info->ether->bLength != sizeof(*info->ether)) {
+-				dev_dbg(&intf->dev, "CDC ether len %u\n",
+-					info->ether->bLength);
+-				goto bad_desc;
+-			}
+-			dev->hard_mtu = le16_to_cpu(
+-						info->ether->wMaxSegmentSize);
+-			/* because of Zaurus, we may be ignoring the host
+-			 * side link address we were given.
+-			 */
+-			break;
+-		case USB_CDC_MDLM_TYPE:
+-			if (desc) {
+-				dev_dbg(&intf->dev, "extra MDLM descriptor\n");
+-				goto bad_desc;
+-			}
+-
+-			desc = (void *)buf;
+-
+-			if (desc->bLength != sizeof(*desc))
+-				goto bad_desc;
+-
+-			if (memcmp(&desc->bGUID, mbm_guid, 16))
+-				goto bad_desc;
+-			break;
+-		case USB_CDC_MDLM_DETAIL_TYPE:
+-			if (detail) {
+-				dev_dbg(&intf->dev, "extra MDLM detail descriptor\n");
+-				goto bad_desc;
+-			}
+-
+-			detail = (void *)buf;
+-
+-			if (detail->bGuidDescriptorType == 0) {
+-				if (detail->bLength < (sizeof(*detail) + 1))
+-					goto bad_desc;
+-			} else
+-				goto bad_desc;
+-			break;
++
++	cdc_parse_cdc_header(&header, intf, buf, len);
++
++	info->u = header.usb_cdc_union_desc;
++	info->header = header.usb_cdc_header_desc;
++	info->ether = header.usb_cdc_ether_desc;
++	if (!info->u) {
++		if (rndis)
++			goto skip;
++		else /* in that case a quirk is mandatory */
++			goto bad_desc;
++	}
++	/* we need a master/control interface (what we're
++	 * probed with) and a slave/data interface; union
++	 * descriptors sort this all out.
++	 */
++	info->control = usb_ifnum_to_if(dev->udev,
++	info->u->bMasterInterface0);
++	info->data = usb_ifnum_to_if(dev->udev,
++		info->u->bSlaveInterface0);
++	if (!info->control || !info->data) {
++		dev_dbg(&intf->dev,
++			"master #%u/%p slave #%u/%p\n",
++			info->u->bMasterInterface0,
++			info->control,
++			info->u->bSlaveInterface0,
++			info->data);
++		/* fall back to hard-wiring for RNDIS */
++		if (rndis) {
++			android_rndis_quirk = true;
++			goto skip;
+ 		}
+-next_desc:
+-		len -= buf[0];	/* bLength */
+-		buf += buf[0];
++		goto bad_desc;
++	}
++	if (info->control != intf) {
++		dev_dbg(&intf->dev, "bogus CDC Union\n");
++		/* Ambit USB Cable Modem (and maybe others)
++		 * interchanges master and slave interface.
++		 */
++		if (info->data == intf) {
++			info->data = info->control;
++			info->control = intf;
++		} else
++			goto bad_desc;
+ 	}
+ 
++	/* some devices merge these - skip class check */
++	if (info->control == info->data)
++		goto skip;
++
++	/* a data interface altsetting does the real i/o */
++	d = &info->data->cur_altsetting->desc;
++	if (d->bInterfaceClass != USB_CLASS_CDC_DATA) {
++		dev_dbg(&intf->dev, "slave class %u\n",
++			d->bInterfaceClass);
++		goto bad_desc;
++	}
++skip:
++	if (	rndis &&
++		header.usb_cdc_acm_descriptor &&
++		header.usb_cdc_acm_descriptor->bmCapabilities) {
++			dev_dbg(&intf->dev,
++				"ACM capabilities %02x, not really RNDIS?\n",
++				header.usb_cdc_acm_descriptor->bmCapabilities);
++			goto bad_desc;
++	}
++
++	if (header.usb_cdc_ether_desc && info->ether->wMaxSegmentSize) {
++		dev->hard_mtu = le16_to_cpu(info->ether->wMaxSegmentSize);
++		/* because of Zaurus, we may be ignoring the host
++		 * side link address we were given.
++		 */
++	}
++
++	if (header.usb_cdc_mdlm_desc &&
++		memcmp(header.usb_cdc_mdlm_desc->bGUID, mbm_guid, 16)) {
++		dev_dbg(&intf->dev, "GUID doesn't match\n");
++		goto bad_desc;
++	}
++
++	if (header.usb_cdc_mdlm_detail_desc &&
++		header.usb_cdc_mdlm_detail_desc->bLength <
++			(sizeof(struct usb_cdc_mdlm_detail_desc) + 1)) {
++		dev_dbg(&intf->dev, "Descriptor too short\n");
++		goto bad_desc;
++	}
++
++
++
+ 	/* Microsoft ActiveSync based and some regular RNDIS devices lack the
+ 	 * CDC descriptors, so we'll hard-wire the interfaces and not check
+ 	 * for descriptors.
+@@ -324,7 +271,7 @@ next_desc:
+ 			goto bad_desc;
+ 		}
+ 
+-	} else if (!info->header || !info->u || (!rndis && !info->ether)) {
++	} else if (!info->header || (!rndis && !info->ether)) {
+ 		dev_dbg(&intf->dev, "missing cdc %s%s%sdescriptor\n",
+ 			info->header ? "" : "header ",
+ 			info->u ? "" : "union ",
+@@ -372,6 +319,26 @@ next_desc:
+ 		return -ENODEV;
+ 	}
+ 
++	return 0;
++
++bad_desc:
++	dev_info(&dev->udev->dev, "bad CDC descriptors\n");
++	return -ENODEV;
++}
++EXPORT_SYMBOL_GPL(usbnet_generic_cdc_bind);
++
++
++/* like usbnet_generic_cdc_bind() but handles filter initialization
++ * correctly
++ */
++int usbnet_ether_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
++{
++	int rv;
++
++	rv = usbnet_generic_cdc_bind(dev, intf);
++	if (rv < 0)
++		goto bail_out;
++
+ 	/* Some devices don't initialise properly. In particular
+ 	 * the packet filter is not reset. There are devices that
+ 	 * don't do reset all the way. So the packet filter should
+@@ -379,13 +346,10 @@ next_desc:
+ 	 */
+ 	usbnet_cdc_update_filter(dev);
+ 
+-	return 0;
+-
+-bad_desc:
+-	dev_info(&dev->udev->dev, "bad CDC descriptors\n");
+-	return -ENODEV;
++bail_out:
++	return rv;
+ }
+-EXPORT_SYMBOL_GPL(usbnet_generic_cdc_bind);
++EXPORT_SYMBOL_GPL(usbnet_ether_cdc_bind);
+ 
+ void usbnet_cdc_unbind(struct usbnet *dev, struct usb_interface *intf)
+ {
+@@ -479,7 +443,7 @@ int usbnet_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
+ 	BUILD_BUG_ON((sizeof(((struct usbnet *)0)->data)
+ 			< sizeof(struct cdc_state)));
+ 
+-	status = usbnet_generic_cdc_bind(dev, intf);
++	status = usbnet_ether_cdc_bind(dev, intf);
+ 	if (status < 0)
+ 		return status;
+ 
+@@ -494,6 +458,64 @@ int usbnet_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
+ }
+ EXPORT_SYMBOL_GPL(usbnet_cdc_bind);
+ 
++static int usbnet_cdc_zte_bind(struct usbnet *dev, struct usb_interface *intf)
++{
++	int status = usbnet_cdc_bind(dev, intf);
++
++	if (!status && (dev->net->dev_addr[0] & 0x02))
++		eth_hw_addr_random(dev->net);
++
++	return status;
++}
++
++/* Make sure packets have correct destination MAC address
++ *
++ * A firmware bug observed on some devices (ZTE MF823/831/910) is that the
++ * device sends packets with a static, bogus, random MAC address (event if
++ * device MAC address has been updated). Always set MAC address to that of the
++ * device.
++ */
++static int usbnet_cdc_zte_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
++{
++	if (skb->len < ETH_HLEN || !(skb->data[0] & 0x02))
++		return 1;
++
++	skb_reset_mac_header(skb);
++	ether_addr_copy(eth_hdr(skb)->h_dest, dev->net->dev_addr);
++
++	return 1;
++}
++
++/* Ensure correct link state
++ *
++ * Some devices (ZTE MF823/831/910) export two carrier on notifications when
++ * connected. This causes the link state to be incorrect. Work around this by
++ * always setting the state to off, then on.
++ */
++static void usbnet_cdc_zte_status(struct usbnet *dev, struct urb *urb)
++{
++	struct usb_cdc_notification *event;
++
++	if (urb->actual_length < sizeof(*event))
++		return;
++
++	event = urb->transfer_buffer;
++
++	if (event->bNotificationType != USB_CDC_NOTIFY_NETWORK_CONNECTION) {
++		usbnet_cdc_status(dev, urb);
++		return;
++	}
++
++	netif_dbg(dev, timer, dev->net, "CDC: carrier %s\n",
++		  event->wValue ? "on" : "off");
++
++	if (event->wValue &&
++	    netif_carrier_ok(dev->net))
++		netif_carrier_off(dev->net);
++
++	usbnet_link_change(dev, !!event->wValue, 0);
++}
++
+ static const struct driver_info	cdc_info = {
+ 	.description =	"CDC Ethernet Device",
+ 	.flags =	FLAG_ETHER | FLAG_POINTTOPOINT,
+@@ -504,6 +526,17 @@ static const struct driver_info	cdc_info = {
+ 	.manage_power =	usbnet_manage_power,
+ };
+ 
++static const struct driver_info	zte_cdc_info = {
++	.description =	"ZTE CDC Ethernet Device",
++	.flags =	FLAG_ETHER | FLAG_POINTTOPOINT,
++	.bind =		usbnet_cdc_zte_bind,
++	.unbind =	usbnet_cdc_unbind,
++	.status =	usbnet_cdc_zte_status,
++	.set_rx_mode =	usbnet_cdc_update_filter,
++	.manage_power =	usbnet_manage_power,
++	.rx_fixup = usbnet_cdc_zte_rx_fixup,
++};
++
+ static const struct driver_info wwan_info = {
+ 	.description =	"Mobile Broadband Network Device",
+ 	.flags =	FLAG_WWAN,
+@@ -523,6 +556,12 @@ static const struct driver_info wwan_info = {
+ #define REALTEK_VENDOR_ID	0x0bda
+ #define SAMSUNG_VENDOR_ID	0x04e8
+ #define LENOVO_VENDOR_ID	0x17ef
++#define LINKSYS_VENDOR_ID	0x13b1
++#define NVIDIA_VENDOR_ID	0x0955
++#define HP_VENDOR_ID		0x03f0
++#define MICROSOFT_VENDOR_ID	0x045e
++#define UBLOX_VENDOR_ID		0x1546
++#define TPLINK_VENDOR_ID	0x2357
+ 
+ static const struct usb_device_id	products[] = {
+ /* BLACKLIST !!
+@@ -669,6 +708,13 @@ static const struct usb_device_id	products[] = {
+ 	.driver_info = 0,
+ },
+ 
++/* HP lt2523 (Novatel E371) - handled by qmi_wwan */
++{
++	USB_DEVICE_AND_INTERFACE_INFO(HP_VENDOR_ID, 0x421d, USB_CLASS_COMM,
++				      USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = 0,
++},
++
+ /* AnyDATA ADU960S - handled by qmi_wwan */
+ {
+ 	USB_DEVICE_AND_INTERFACE_INFO(0x16d5, 0x650a, USB_CLASS_COMM,
+@@ -703,6 +749,29 @@ static const struct usb_device_id	products[] = {
+ 	.driver_info = 0,
+ },
+ 
++#if IS_ENABLED(CONFIG_USB_RTL8152)
++/* Linksys USB3GIGV1 Ethernet Adapter */
++{
++	USB_DEVICE_AND_INTERFACE_INFO(LINKSYS_VENDOR_ID, 0x0041, USB_CLASS_COMM,
++			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = 0,
++},
++#endif
++
++/* ThinkPad USB-C Dock (based on Realtek RTL8153) */
++{
++	USB_DEVICE_AND_INTERFACE_INFO(LENOVO_VENDOR_ID, 0x3062, USB_CLASS_COMM,
++			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = 0,
++},
++
++/* ThinkPad Thunderbolt 3 Dock (based on Realtek RTL8153) */
++{
++	USB_DEVICE_AND_INTERFACE_INFO(LENOVO_VENDOR_ID, 0x3069, USB_CLASS_COMM,
++			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = 0,
++},
++
+ /* Lenovo Thinkpad USB 3.0 Ethernet Adapters (based on Realtek RTL8153) */
+ {
+ 	USB_DEVICE_AND_INTERFACE_INFO(LENOVO_VENDOR_ID, 0x7205, USB_CLASS_COMM,
+@@ -710,6 +779,48 @@ static const struct usb_device_id	products[] = {
+ 	.driver_info = 0,
+ },
+ 
++/* Lenovo USB C to Ethernet Adapter (based on Realtek RTL8153) */
++{
++	USB_DEVICE_AND_INTERFACE_INFO(LENOVO_VENDOR_ID, 0x720c, USB_CLASS_COMM,
++			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = 0,
++},
++
++/* Lenovo USB-C Travel Hub (based on Realtek RTL8153) */
++{
++	USB_DEVICE_AND_INTERFACE_INFO(LENOVO_VENDOR_ID, 0x7214, USB_CLASS_COMM,
++			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = 0,
++},
++
++/* NVIDIA Tegra USB 3.0 Ethernet Adapters (based on Realtek RTL8153) */
++{
++	USB_DEVICE_AND_INTERFACE_INFO(NVIDIA_VENDOR_ID, 0x09ff, USB_CLASS_COMM,
++			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = 0,
++},
++
++/* Microsoft Surface 2 dock (based on Realtek RTL8152) */
++{
++	USB_DEVICE_AND_INTERFACE_INFO(MICROSOFT_VENDOR_ID, 0x07ab, USB_CLASS_COMM,
++			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = 0,
++},
++
++/* Microsoft Surface 3 dock (based on Realtek RTL8153) */
++{
++	USB_DEVICE_AND_INTERFACE_INFO(MICROSOFT_VENDOR_ID, 0x07c6, USB_CLASS_COMM,
++			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = 0,
++},
++
++	/* TP-LINK UE300 USB 3.0 Ethernet Adapters (based on Realtek RTL8153) */
++{
++	USB_DEVICE_AND_INTERFACE_INFO(TPLINK_VENDOR_ID, 0x0601, USB_CLASS_COMM,
++			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = 0,
++},
++
+ /* WHITELIST!!!
+  *
+  * CDC Ether uses two interfaces, not necessarily consecutive.
+@@ -755,6 +866,35 @@ static const struct usb_device_id	products[] = {
+ 	USB_VENDOR_AND_INTERFACE_INFO(0x1bc7, USB_CLASS_COMM,
+ 			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
+ 	.driver_info = (kernel_ulong_t) &wwan_info,
++}, {
++	/* Dell DW5580 modules */
++	USB_DEVICE_AND_INTERFACE_INFO(DELL_VENDOR_ID, 0x81ba, USB_CLASS_COMM,
++			USB_CDC_SUBCLASS_ETHERNET, USB_CDC_PROTO_NONE),
++	.driver_info = (kernel_ulong_t)&wwan_info,
++}, {
++	/* Huawei ME906 and ME909 */
++	USB_DEVICE_AND_INTERFACE_INFO(HUAWEI_VENDOR_ID, 0x15c1, USB_CLASS_COMM,
++				      USB_CDC_SUBCLASS_ETHERNET,
++				      USB_CDC_PROTO_NONE),
++	.driver_info = (unsigned long)&wwan_info,
++}, {
++	/* ZTE modules */
++	USB_VENDOR_AND_INTERFACE_INFO(ZTE_VENDOR_ID, USB_CLASS_COMM,
++				      USB_CDC_SUBCLASS_ETHERNET,
++				      USB_CDC_PROTO_NONE),
++	.driver_info = (unsigned long)&zte_cdc_info,
++}, {
++	/* U-blox TOBY-L2 */
++	USB_DEVICE_AND_INTERFACE_INFO(UBLOX_VENDOR_ID, 0x1143, USB_CLASS_COMM,
++				      USB_CDC_SUBCLASS_ETHERNET,
++				      USB_CDC_PROTO_NONE),
++	.driver_info = (unsigned long)&wwan_info,
++}, {
++	/* U-blox SARA-U2 */
++	USB_DEVICE_AND_INTERFACE_INFO(UBLOX_VENDOR_ID, 0x1104, USB_CLASS_COMM,
++				      USB_CDC_SUBCLASS_ETHERNET,
++				      USB_CDC_PROTO_NONE),
++	.driver_info = (unsigned long)&wwan_info,
+ }, {
+ 	USB_INTERFACE_INFO(USB_CLASS_COMM, USB_CDC_SUBCLASS_ETHERNET,
+ 			USB_CDC_PROTO_NONE),
+diff --git a/drivers/net/usb/cdc_mbim.c b/drivers/net/usb/cdc_mbim.c
+old mode 100644
+new mode 100755
+index e4b7a47..c29a2ad
+--- a/drivers/net/usb/cdc_mbim.c
++++ b/drivers/net/usb/cdc_mbim.c
+@@ -100,7 +100,7 @@ static const struct net_device_ops cdc_mbim_netdev_ops = {
+ 	.ndo_stop             = usbnet_stop,
+ 	.ndo_start_xmit       = usbnet_start_xmit,
+ 	.ndo_tx_timeout       = usbnet_tx_timeout,
+-	.ndo_change_mtu       = usbnet_change_mtu,
++	.ndo_change_mtu       = cdc_ncm_change_mtu,
+ 	.ndo_set_mac_address  = eth_mac_addr,
+ 	.ndo_validate_addr    = eth_validate_addr,
+ 	.ndo_vlan_rx_add_vid  = cdc_mbim_rx_add_vid,
+@@ -158,7 +158,7 @@ static int cdc_mbim_bind(struct usbnet *dev, struct usb_interface *intf)
+ 	if (!cdc_ncm_comm_intf_is_mbim(intf->cur_altsetting))
+ 		goto err;
+ 
+-	ret = cdc_ncm_bind_common(dev, intf, data_altsetting);
++	ret = cdc_ncm_bind_common(dev, intf, data_altsetting, dev->driver_info->data);
+ 	if (ret)
+ 		goto err;
+ 
+@@ -582,6 +582,41 @@ static const struct driver_info cdc_mbim_info_zlp = {
+ 	.tx_fixup = cdc_mbim_tx_fixup,
+ };
+ 
++/* The spefication explicitly allows NDPs to be placed anywhere in the
++ * frame, but some devices fail unless the NDP is placed after the IP
++ * packets.  Using the CDC_NCM_FLAG_NDP_TO_END flags to force this
++ * behaviour.
++ *
++ * Note: The current implementation of this feature restricts each NTB
++ * to a single NDP, implying that multiplexed sessions cannot share an
++ * NTB. This might affect performace for multiplexed sessions.
++ */
++static const struct driver_info cdc_mbim_info_ndp_to_end = {
++	.description = "CDC MBIM",
++	.flags = FLAG_NO_SETINT | FLAG_MULTI_PACKET | FLAG_WWAN,
++	.bind = cdc_mbim_bind,
++	.unbind = cdc_mbim_unbind,
++	.manage_power = cdc_mbim_manage_power,
++	.rx_fixup = cdc_mbim_rx_fixup,
++	.tx_fixup = cdc_mbim_tx_fixup,
++	.data = CDC_NCM_FLAG_NDP_TO_END,
++};
++
++/* Some modems (e.g. Telit LE922A6) do not work properly with altsetting
++ * toggle done in cdc_ncm_bind_common. CDC_MBIM_FLAG_AVOID_ALTSETTING_TOGGLE
++ * flag is used to avoid this procedure.
++ */
++static const struct driver_info cdc_mbim_info_avoid_altsetting_toggle = {
++	.description = "CDC MBIM",
++	.flags = FLAG_NO_SETINT | FLAG_MULTI_PACKET | FLAG_WWAN,
++	.bind = cdc_mbim_bind,
++	.unbind = cdc_mbim_unbind,
++	.manage_power = cdc_mbim_manage_power,
++	.rx_fixup = cdc_mbim_rx_fixup,
++	.tx_fixup = cdc_mbim_tx_fixup,
++	.data = CDC_MBIM_FLAG_AVOID_ALTSETTING_TOGGLE,
++};
++
+ static const struct usb_device_id mbim_devs[] = {
+ 	/* This duplicate NCM entry is intentional. MBIM devices can
+ 	 * be disguised as NCM by default, and this is necessary to
+@@ -597,6 +632,21 @@ static const struct usb_device_id mbim_devs[] = {
+ 	{ USB_VENDOR_AND_INTERFACE_INFO(0x0bdb, USB_CLASS_COMM, USB_CDC_SUBCLASS_MBIM, USB_CDC_PROTO_NONE),
+ 	  .driver_info = (unsigned long)&cdc_mbim_info,
+ 	},
++
++	/* Some Huawei devices, ME906s-158 (12d1:15c1) and E3372
++	 * (12d1:157d), are known to fail unless the NDP is placed
++	 * after the IP packets.  Applying the quirk to all Huawei
++	 * devices is broader than necessary, but harmless.
++	 */
++	{ USB_VENDOR_AND_INTERFACE_INFO(0x12d1, USB_CLASS_COMM, USB_CDC_SUBCLASS_MBIM, USB_CDC_PROTO_NONE),
++	  .driver_info = (unsigned long)&cdc_mbim_info_ndp_to_end,
++	},
++
++	/* Telit LE922A6 in MBIM composition */
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x1bc7, 0x1041, USB_CLASS_COMM, USB_CDC_SUBCLASS_MBIM, USB_CDC_PROTO_NONE),
++	  .driver_info = (unsigned long)&cdc_mbim_info_avoid_altsetting_toggle,
++	},
++
+ 	/* default entry */
+ 	{ USB_INTERFACE_INFO(USB_CLASS_COMM, USB_CDC_SUBCLASS_MBIM, USB_CDC_PROTO_NONE),
+ 	  .driver_info = (unsigned long)&cdc_mbim_info_zlp,
+diff --git a/drivers/net/usb/cdc_ncm.c b/drivers/net/usb/cdc_ncm.c
+old mode 100644
+new mode 100755
+index 8067b8f..9ac2cef
+--- a/drivers/net/usb/cdc_ncm.c
++++ b/drivers/net/usb/cdc_ncm.c
+@@ -6,7 +6,7 @@
+  * Original author: Hans Petter Selasky <hans.petter.selasky@stericsson.com>
+  *
+  * USB Host Driver for Network Control Model (NCM)
+- * http://www.usb.org/developers/devclass_docs/NCM10.zip
++ * http://www.usb.org/developers/docs/devclass_docs/NCM10_012011.zip
+  *
+  * The NCM encoding, decoding and initialization logic
+  * derives from FreeBSD 8.x. if_cdce.c and if_cdcereg.h
+@@ -41,6 +41,7 @@
+ #include <linux/module.h>
+ #include <linux/netdevice.h>
+ #include <linux/ctype.h>
++#include <linux/etherdevice.h>
+ #include <linux/ethtool.h>
+ #include <linux/workqueue.h>
+ #include <linux/mii.h>
+@@ -283,6 +284,48 @@ static DEVICE_ATTR(rx_max, S_IRUGO | S_IWUSR, cdc_ncm_show_rx_max, cdc_ncm_store
+ static DEVICE_ATTR(tx_max, S_IRUGO | S_IWUSR, cdc_ncm_show_tx_max, cdc_ncm_store_tx_max);
+ static DEVICE_ATTR(tx_timer_usecs, S_IRUGO | S_IWUSR, cdc_ncm_show_tx_timer_usecs, cdc_ncm_store_tx_timer_usecs);
+ 
++static ssize_t ndp_to_end_show(struct device *d, struct device_attribute *attr, char *buf)
++{
++	struct usbnet *dev = netdev_priv(to_net_dev(d));
++	struct cdc_ncm_ctx *ctx = (struct cdc_ncm_ctx *)dev->data[0];
++
++	return sprintf(buf, "%c\n", ctx->drvflags & CDC_NCM_FLAG_NDP_TO_END ? 'Y' : 'N');
++}
++
++static ssize_t ndp_to_end_store(struct device *d,  struct device_attribute *attr, const char *buf, size_t len)
++{
++	struct usbnet *dev = netdev_priv(to_net_dev(d));
++	struct cdc_ncm_ctx *ctx = (struct cdc_ncm_ctx *)dev->data[0];
++	bool enable;
++
++	if (strtobool(buf, &enable))
++		return -EINVAL;
++
++	/* no change? */
++	if (enable == (ctx->drvflags & CDC_NCM_FLAG_NDP_TO_END))
++		return len;
++
++	if (enable && !ctx->delayed_ndp16) {
++		ctx->delayed_ndp16 = kzalloc(ctx->max_ndp_size, GFP_KERNEL);
++		if (!ctx->delayed_ndp16)
++			return -ENOMEM;
++	}
++
++	/* flush pending data before changing flag */
++	netif_tx_lock_bh(dev->net);
++	usbnet_start_xmit(NULL, dev->net);
++	spin_lock_bh(&ctx->mtx);
++	if (enable)
++		ctx->drvflags |= CDC_NCM_FLAG_NDP_TO_END;
++	else
++		ctx->drvflags &= ~CDC_NCM_FLAG_NDP_TO_END;
++	spin_unlock_bh(&ctx->mtx);
++	netif_tx_unlock_bh(dev->net);
++
++	return len;
++}
++static DEVICE_ATTR_RW(ndp_to_end);
++
+ #define NCM_PARM_ATTR(name, format, tocpu)				\
+ static ssize_t cdc_ncm_show_##name(struct device *d, struct device_attribute *attr, char *buf) \
+ { \
+@@ -305,6 +348,7 @@ NCM_PARM_ATTR(wNtbOutMaxDatagrams, "%u", le16_to_cpu);
+ 
+ static struct attribute *cdc_ncm_sysfs_attrs[] = {
+ 	&dev_attr_min_tx_pkt.attr,
++	&dev_attr_ndp_to_end.attr,
+ 	&dev_attr_rx_max.attr,
+ 	&dev_attr_tx_max.attr,
+ 	&dev_attr_tx_timer_usecs.attr,
+@@ -684,18 +728,49 @@ static void cdc_ncm_free(struct cdc_ncm_ctx *ctx)
+ 		ctx->tx_curr_skb = NULL;
+ 	}
+ 
++	kfree(ctx->delayed_ndp16);
++
+ 	kfree(ctx);
+ }
+ 
+-int cdc_ncm_bind_common(struct usbnet *dev, struct usb_interface *intf, u8 data_altsetting)
++/* we need to override the usbnet change_mtu ndo for two reasons:
++ *  - respect the negotiated maximum datagram size
++ *  - avoid unwanted changes to rx and tx buffers
++ */
++int cdc_ncm_change_mtu(struct net_device *net, int new_mtu)
++{
++	struct usbnet *dev = netdev_priv(net);
++	int maxmtu = cdc_ncm_max_dgram_size(dev) - cdc_ncm_eth_hlen(dev);
++
++	if (new_mtu <= 0 || new_mtu > maxmtu)
++		return -EINVAL;
++
++	net->mtu = new_mtu;
++	cdc_ncm_set_dgram_size(dev, new_mtu + cdc_ncm_eth_hlen(dev));
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(cdc_ncm_change_mtu);
++
++static const struct net_device_ops cdc_ncm_netdev_ops = {
++	.ndo_open	     = usbnet_open,
++	.ndo_stop	     = usbnet_stop,
++	.ndo_start_xmit	     = usbnet_start_xmit,
++	.ndo_tx_timeout	     = usbnet_tx_timeout,
++	.ndo_change_mtu	     = cdc_ncm_change_mtu,
++	.ndo_set_mac_address = eth_mac_addr,
++	.ndo_validate_addr   = eth_validate_addr,
++};
++
++int cdc_ncm_bind_common(struct usbnet *dev, struct usb_interface *intf, u8 data_altsetting, int drvflags)
+ {
+-	const struct usb_cdc_union_desc *union_desc = NULL;
+ 	struct cdc_ncm_ctx *ctx;
+ 	struct usb_driver *driver;
+ 	u8 *buf;
+ 	int len;
+ 	int temp;
+ 	u8 iface_no;
++	struct usb_cdc_parsed_header hdr;
+ 
+ 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+ 	if (!ctx)
+@@ -720,69 +795,18 @@ int cdc_ncm_bind_common(struct usbnet *dev, struct usb_interface *intf, u8 data_
+ 	len = intf->cur_altsetting->extralen;
+ 
+ 	/* parse through descriptors associated with control interface */
+-	while ((len > 0) && (buf[0] > 2) && (buf[0] <= len)) {
+-
+-		if (buf[1] != USB_DT_CS_INTERFACE)
+-			goto advance;
+-
+-		switch (buf[2]) {
+-		case USB_CDC_UNION_TYPE:
+-			if (buf[0] < sizeof(*union_desc))
+-				break;
+-
+-			union_desc = (const struct usb_cdc_union_desc *)buf;
+-			/* the master must be the interface we are probing */
+-			if (intf->cur_altsetting->desc.bInterfaceNumber !=
+-			    union_desc->bMasterInterface0) {
+-				dev_dbg(&intf->dev, "bogus CDC Union\n");
+-				goto error;
+-			}
+-			ctx->data = usb_ifnum_to_if(dev->udev,
+-						    union_desc->bSlaveInterface0);
+-			break;
+-
+-		case USB_CDC_ETHERNET_TYPE:
+-			if (buf[0] < sizeof(*(ctx->ether_desc)))
+-				break;
+-
+-			ctx->ether_desc =
+-					(const struct usb_cdc_ether_desc *)buf;
+-			break;
+-
+-		case USB_CDC_NCM_TYPE:
+-			if (buf[0] < sizeof(*(ctx->func_desc)))
+-				break;
+-
+-			ctx->func_desc = (const struct usb_cdc_ncm_desc *)buf;
+-			break;
+-
+-		case USB_CDC_MBIM_TYPE:
+-			if (buf[0] < sizeof(*(ctx->mbim_desc)))
+-				break;
+-
+-			ctx->mbim_desc = (const struct usb_cdc_mbim_desc *)buf;
+-			break;
+-
+-		case USB_CDC_MBIM_EXTENDED_TYPE:
+-			if (buf[0] < sizeof(*(ctx->mbim_extended_desc)))
+-				break;
++	cdc_parse_cdc_header(&hdr, intf, buf, len);
+ 
+-			ctx->mbim_extended_desc =
+-				(const struct usb_cdc_mbim_extended_desc *)buf;
+-			break;
+-
+-		default:
+-			break;
+-		}
+-advance:
+-		/* advance to next descriptor */
+-		temp = buf[0];
+-		buf += temp;
+-		len -= temp;
+-	}
++	if (hdr.usb_cdc_union_desc)
++		ctx->data = usb_ifnum_to_if(dev->udev,
++					    hdr.usb_cdc_union_desc->bSlaveInterface0);
++	ctx->ether_desc = hdr.usb_cdc_ether_desc;
++	ctx->func_desc = hdr.usb_cdc_ncm_desc;
++	ctx->mbim_desc = hdr.usb_cdc_mbim_desc;
++	ctx->mbim_extended_desc = hdr.usb_cdc_mbim_extended_desc;
+ 
+ 	/* some buggy devices have an IAD but no CDC Union */
+-	if (!union_desc && intf->intf_assoc && intf->intf_assoc->bInterfaceCount == 2) {
++	if (!hdr.usb_cdc_union_desc && intf->intf_assoc && intf->intf_assoc->bInterfaceCount == 2) {
+ 		ctx->data = usb_ifnum_to_if(dev->udev, intf->cur_altsetting->desc.bInterfaceNumber + 1);
+ 		dev_dbg(&intf->dev, "CDC Union missing - got slave from IAD\n");
+ 	}
+@@ -815,7 +839,18 @@ advance:
+ 
+ 	iface_no = ctx->data->cur_altsetting->desc.bInterfaceNumber;
+ 
+-	/* reset data interface */
++	/* Device-specific flags */
++	ctx->drvflags = drvflags;
++
++	/* Reset data interface. Some devices will not reset properly
++	 * unless they are configured first.  Toggle the altsetting to
++	 * force a reset.
++	 * Some other devices do not work properly with this procedure
++	 * that can be avoided using quirk CDC_MBIM_FLAG_AVOID_ALTSETTING_TOGGLE
++	 */
++	if (!(ctx->drvflags & CDC_MBIM_FLAG_AVOID_ALTSETTING_TOGGLE))
++		usb_set_interface(dev->udev, iface_no, data_altsetting);
++
+ 	temp = usb_set_interface(dev->udev, iface_no, 0);
+ 	if (temp) {
+ 		dev_dbg(&intf->dev, "set interface failed\n");
+@@ -826,6 +861,13 @@ advance:
+ 	if (cdc_ncm_init(dev))
+ 		goto error2;
+ 
++	/* Some firmwares need a pause here or they will silently fail
++	 * to set up the interface properly.  This value was decided
++	 * empirically on a Sierra Wireless MC7455 running 02.08.02.00
++	 * firmware.
++	 */
++	usleep_range(10000, 20000);
++
+ 	/* configure data interface */
+ 	temp = usb_set_interface(dev->udev, iface_no, data_altsetting);
+ 	if (temp) {
+@@ -855,12 +897,23 @@ advance:
+ 	/* finish setting up the device specific data */
+ 	cdc_ncm_setup(dev);
+ 
++	/* Allocate the delayed NDP if needed. */
++	if (ctx->drvflags & CDC_NCM_FLAG_NDP_TO_END) {
++		ctx->delayed_ndp16 = kzalloc(ctx->max_ndp_size, GFP_KERNEL);
++		if (!ctx->delayed_ndp16)
++			goto error2;
++		dev_info(&intf->dev, "NDP will be placed at end of frame for this device.");
++	}
++
+ 	/* override ethtool_ops */
+ 	dev->net->ethtool_ops = &cdc_ncm_ethtool_ops;
+ 
+ 	/* add our sysfs attrs */
+ 	dev->net->sysfs_groups[0] = &cdc_ncm_sysfs_attr_group;
+ 
++	/* must handle MTU changes */
++	dev->net->netdev_ops = &cdc_ncm_netdev_ops;
++
+ 	return 0;
+ 
+ error2:
+@@ -923,7 +976,7 @@ u8 cdc_ncm_select_altsetting(struct usb_interface *intf)
+ 	 * which we may have matched:
+ 	 *
+ 	 *  "Functions that implement both NCM 1.0 and MBIM (an
+-	 *   “NCM/MBIM function”) according to this recommendation
++	 *   ?�NCM/MBIM function?? according to this recommendation
+ 	 *   shall provide two alternate settings for the
+ 	 *   Communication Interface.  Alternate setting 0, and the
+ 	 *   associated class and endpoint descriptors, shall be
+@@ -948,23 +1001,15 @@ EXPORT_SYMBOL_GPL(cdc_ncm_select_altsetting);
+ 
+ static int cdc_ncm_bind(struct usbnet *dev, struct usb_interface *intf)
+ {
+-	int ret;
+-
+ 	/* MBIM backwards compatible function? */
+ 	if (cdc_ncm_select_altsetting(intf) != CDC_NCM_COMM_ALTSETTING_NCM)
+ 		return -ENODEV;
+ 
+-	/* The NCM data altsetting is fixed */
+-	ret = cdc_ncm_bind_common(dev, intf, CDC_NCM_DATA_ALTSETTING_NCM);
+-
+-	/*
+-	 * We should get an event when network connection is "connected" or
+-	 * "disconnected". Set network connection in "disconnected" state
+-	 * (carrier is OFF) during attach, so the IP network stack does not
+-	 * start IPv6 negotiation and more.
++	/* The NCM data altsetting is fixed, so we hard-coded it.
++	 * Additionally, generic NCM devices are assumed to accept arbitrarily
++	 * placed NDP.
+ 	 */
+-	usbnet_link_change(dev, 0, 0);
+-	return ret;
++	return cdc_ncm_bind_common(dev, intf, CDC_NCM_DATA_ALTSETTING_NCM, 0);
+ }
+ 
+ static void cdc_ncm_align_tail(struct sk_buff *skb, size_t modulus, size_t remainder, size_t max)
+@@ -986,6 +1031,22 @@ static struct usb_cdc_ncm_ndp16 *cdc_ncm_ndp(struct cdc_ncm_ctx *ctx, struct sk_
+ 	struct usb_cdc_ncm_nth16 *nth16 = (void *)skb->data;
+ 	size_t ndpoffset = le16_to_cpu(nth16->wNdpIndex);
+ 
++	/* If NDP should be moved to the end of the NCM package, we can't follow the
++	* NTH16 header as we would normally do. NDP isn't written to the SKB yet, and
++	* the wNdpIndex field in the header is actually not consistent with reality. It will be later.
++	*/
++	if (ctx->drvflags & CDC_NCM_FLAG_NDP_TO_END) {
++		if (ctx->delayed_ndp16->dwSignature == sign)
++			return ctx->delayed_ndp16;
++
++		/* We can only push a single NDP to the end. Return
++		 * NULL to send what we've already got and queue this
++		 * skb for later.
++		 */
++		else if (ctx->delayed_ndp16->dwSignature)
++			return NULL;
++	}
++
+ 	/* follow the chain of NDPs, looking for a match */
+ 	while (ndpoffset) {
+ 		ndp16 = (struct usb_cdc_ncm_ndp16 *)(skb->data + ndpoffset);
+@@ -995,6 +1056,7 @@ static struct usb_cdc_ncm_ndp16 *cdc_ncm_ndp(struct cdc_ncm_ctx *ctx, struct sk_
+ 	}
+ 
+ 	/* align new NDP */
++	if (!(ctx->drvflags & CDC_NCM_FLAG_NDP_TO_END))
+ 	cdc_ncm_align_tail(skb, ctx->tx_ndp_modulus, 0, ctx->tx_max);
+ 
+ 	/* verify that there is room for the NDP and the datagram (reserve) */
+@@ -1008,7 +1070,11 @@ static struct usb_cdc_ncm_ndp16 *cdc_ncm_ndp(struct cdc_ncm_ctx *ctx, struct sk_
+ 		nth16->wNdpIndex = cpu_to_le16(skb->len);
+ 
+ 	/* push a new empty NDP */
+-	ndp16 = (struct usb_cdc_ncm_ndp16 *)memset(skb_put(skb, ctx->max_ndp_size), 0, ctx->max_ndp_size);
++	if (!(ctx->drvflags & CDC_NCM_FLAG_NDP_TO_END))
++		ndp16 = (struct usb_cdc_ncm_ndp16 *)memset(skb_put(skb, ctx->max_ndp_size), 0, ctx->max_ndp_size);
++	else
++		ndp16 = ctx->delayed_ndp16;
++
+ 	ndp16->dwSignature = sign;
+ 	ndp16->wLength = cpu_to_le16(sizeof(struct usb_cdc_ncm_ndp16) + sizeof(struct usb_cdc_ncm_dpe16));
+ 	return ndp16;
+@@ -1023,6 +1089,15 @@ cdc_ncm_fill_tx_frame(struct usbnet *dev, struct sk_buff *skb, __le32 sign)
+ 	struct sk_buff *skb_out;
+ 	u16 n = 0, index, ndplen;
+ 	u8 ready2send = 0;
++	u32 delayed_ndp_size;
++
++	/* When our NDP gets written in cdc_ncm_ndp(), then skb_out->len gets updated
++	 * accordingly. Otherwise, we should check here.
++	 */
++	if (ctx->drvflags & CDC_NCM_FLAG_NDP_TO_END)
++		delayed_ndp_size = ctx->max_ndp_size;
++	else
++		delayed_ndp_size = 0;
+ 
+ 	/* if there is a remaining skb, it gets priority */
+ 	if (skb != NULL) {
+@@ -1077,7 +1152,7 @@ cdc_ncm_fill_tx_frame(struct usbnet *dev, struct sk_buff *skb, __le32 sign)
+ 		cdc_ncm_align_tail(skb_out,  ctx->tx_modulus, ctx->tx_remainder, ctx->tx_max);
+ 
+ 		/* check if we had enough room left for both NDP and frame */
+-		if (!ndp16 || skb_out->len + skb->len > ctx->tx_max) {
++		if (!ndp16 || skb_out->len + skb->len + delayed_ndp_size > ctx->tx_max) {
+ 			if (n == 0) {
+ 				/* won't fit, MTU problem? */
+ 				dev_kfree_skb_any(skb);
+@@ -1150,6 +1225,17 @@ cdc_ncm_fill_tx_frame(struct usbnet *dev, struct sk_buff *skb, __le32 sign)
+ 		/* variables will be reset at next call */
+ 	}
+ 
++	/* If requested, put NDP at end of frame. */
++	if (ctx->drvflags & CDC_NCM_FLAG_NDP_TO_END) {
++		nth16 = (struct usb_cdc_ncm_nth16 *)skb_out->data;
++		cdc_ncm_align_tail(skb_out, ctx->tx_ndp_modulus, 0, ctx->tx_max);
++		nth16->wNdpIndex = cpu_to_le16(skb_out->len);
++		memcpy(skb_put(skb_out, ctx->max_ndp_size), ctx->delayed_ndp16, ctx->max_ndp_size);
++
++		/* Zero out delayed NDP - signature checking will naturally fail. */
++		ndp16 = memset(ctx->delayed_ndp16, 0, ctx->max_ndp_size);
++	}
++
+ 	/* If collected data size is less or equal ctx->min_tx_pkt
+ 	 * bytes, we send buffers as it is. If we get more data, it
+ 	 * would be more efficient for USB HS mobile device with DMA
+@@ -1506,7 +1592,8 @@ static void cdc_ncm_status(struct usbnet *dev, struct urb *urb)
+ 
+ static const struct driver_info cdc_ncm_info = {
+ 	.description = "CDC NCM",
+-	.flags = FLAG_POINTTOPOINT | FLAG_NO_SETINT | FLAG_MULTI_PACKET,
++	.flags = FLAG_POINTTOPOINT | FLAG_NO_SETINT | FLAG_MULTI_PACKET
++			| FLAG_LINK_INTR,
+ 	.bind = cdc_ncm_bind,
+ 	.unbind = cdc_ncm_unbind,
+ 	.manage_power = usbnet_manage_power,
+@@ -1519,7 +1606,7 @@ static const struct driver_info cdc_ncm_info = {
+ static const struct driver_info wwan_info = {
+ 	.description = "Mobile Broadband Network Device",
+ 	.flags = FLAG_POINTTOPOINT | FLAG_NO_SETINT | FLAG_MULTI_PACKET
+-			| FLAG_WWAN,
++			| FLAG_LINK_INTR | FLAG_WWAN,
+ 	.bind = cdc_ncm_bind,
+ 	.unbind = cdc_ncm_unbind,
+ 	.manage_power = usbnet_manage_power,
+@@ -1532,7 +1619,7 @@ static const struct driver_info wwan_info = {
+ static const struct driver_info wwan_noarp_info = {
+ 	.description = "Mobile Broadband Network Device (NO ARP)",
+ 	.flags = FLAG_POINTTOPOINT | FLAG_NO_SETINT | FLAG_MULTI_PACKET
+-			| FLAG_WWAN | FLAG_NOARP,
++			| FLAG_LINK_INTR | FLAG_WWAN | FLAG_NOARP,
+ 	.bind = cdc_ncm_bind,
+ 	.unbind = cdc_ncm_unbind,
+ 	.manage_power = usbnet_manage_power,
+@@ -1552,6 +1639,31 @@ static const struct usb_device_id cdc_devs[] = {
+ 	  .driver_info = (unsigned long) &wwan_info,
+ 	},
+ 
++	/* Telit LE910 V2 */
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x1bc7, 0x0036,
++		USB_CLASS_COMM,
++		USB_CDC_SUBCLASS_NCM, USB_CDC_PROTO_NONE),
++	  .driver_info = (unsigned long)&wwan_noarp_info,
++	},
++
++	/* DW5812 LTE Verizon Mobile Broadband Card
++	 * Unlike DW5550 this device requires FLAG_NOARP
++	 */
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x413c, 0x81bb,
++		USB_CLASS_COMM,
++		USB_CDC_SUBCLASS_NCM, USB_CDC_PROTO_NONE),
++	  .driver_info = (unsigned long)&wwan_noarp_info,
++	},
++
++	/* DW5813 LTE AT&T Mobile Broadband Card
++	 * Unlike DW5550 this device requires FLAG_NOARP
++	 */
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x413c, 0x81bc,
++		USB_CLASS_COMM,
++		USB_CDC_SUBCLASS_NCM, USB_CDC_PROTO_NONE),
++	  .driver_info = (unsigned long)&wwan_noarp_info,
++	},
++
+ 	/* Dell branded MBM devices like DW5550 */
+ 	{ .match_flags = USB_DEVICE_ID_MATCH_INT_INFO
+ 		| USB_DEVICE_ID_MATCH_VENDOR,
+diff --git a/drivers/net/usb/huawei_cdc_ncm.c b/drivers/net/usb/huawei_cdc_ncm.c
+old mode 100644
+new mode 100755
+index 735f7da..2680a65
+--- a/drivers/net/usb/huawei_cdc_ncm.c
++++ b/drivers/net/usb/huawei_cdc_ncm.c
+@@ -73,11 +73,14 @@ static int huawei_cdc_ncm_bind(struct usbnet *usbnet_dev,
+ 	struct usb_driver *subdriver = ERR_PTR(-ENODEV);
+ 	int ret = -ENODEV;
+ 	struct huawei_cdc_ncm_state *drvstate = (void *)&usbnet_dev->data;
++	int drvflags = 0;
+ 
+ 	/* altsetting should always be 1 for NCM devices - so we hard-coded
+-	 * it here
++	 * it here. Some huawei devices will need the NDP part of the NCM package to
++	 * be at the end of the frame.
+ 	 */
+-	ret = cdc_ncm_bind_common(usbnet_dev, intf, 1);
++	drvflags |= CDC_NCM_FLAG_NDP_TO_END;
++	ret = cdc_ncm_bind_common(usbnet_dev, intf, 1, drvflags);
+ 	if (ret)
+ 		goto err;
+ 
+diff --git a/drivers/net/usb/qmi_wwan.c b/drivers/net/usb/qmi_wwan.c
+old mode 100644
+new mode 100755
+index f603f36..6fe1cdb
+--- a/drivers/net/usb/qmi_wwan.c
++++ b/drivers/net/usb/qmi_wwan.c
+@@ -14,7 +14,9 @@
+ #include <linux/netdevice.h>
+ #include <linux/ethtool.h>
+ #include <linux/etherdevice.h>
++#include <linux/if_arp.h>
+ #include <linux/mii.h>
++#include <linux/rtnetlink.h>
+ #include <linux/usb.h>
+ #include <linux/usb/cdc.h>
+ #include <linux/usb/usbnet.h>
+@@ -48,11 +50,104 @@
+ struct qmi_wwan_state {
+ 	struct usb_driver *subdriver;
+ 	atomic_t pmcount;
+-	unsigned long unused;
++	unsigned long flags;
+ 	struct usb_interface *control;
+ 	struct usb_interface *data;
+ };
+ 
++enum qmi_wwan_flags {
++	QMI_WWAN_FLAG_RAWIP = 1 << 0,
++};
++
++enum qmi_wwan_quirks {
++	QMI_WWAN_QUIRK_DTR = 1 << 0,	/* needs "set DTR" request */
++};
++
++static void qmi_wwan_netdev_setup(struct net_device *net)
++{
++	struct usbnet *dev = netdev_priv(net);
++	struct qmi_wwan_state *info = (void *)&dev->data;
++
++	if (info->flags & QMI_WWAN_FLAG_RAWIP) {
++		net->header_ops      = NULL;  /* No header */
++		net->type            = ARPHRD_NONE;
++		net->hard_header_len = 0;
++		net->addr_len        = 0;
++		net->flags           = IFF_POINTOPOINT | IFF_NOARP | IFF_MULTICAST;
++		netdev_dbg(net, "mode: raw IP\n");
++	} else if (!net->header_ops) { /* don't bother if already set */
++		ether_setup(net);
++		netdev_dbg(net, "mode: Ethernet\n");
++	}
++
++	/* recalculate buffers after changing hard_header_len */
++	usbnet_change_mtu(net, net->mtu);
++}
++
++static ssize_t raw_ip_show(struct device *d, struct device_attribute *attr, char *buf)
++{
++	struct usbnet *dev = netdev_priv(to_net_dev(d));
++	struct qmi_wwan_state *info = (void *)&dev->data;
++
++	return sprintf(buf, "%c\n", info->flags & QMI_WWAN_FLAG_RAWIP ? 'Y' : 'N');
++}
++
++static ssize_t raw_ip_store(struct device *d,  struct device_attribute *attr, const char *buf, size_t len)
++{
++	struct usbnet *dev = netdev_priv(to_net_dev(d));
++	struct qmi_wwan_state *info = (void *)&dev->data;
++	bool enable;
++	int ret;
++
++	if (strtobool(buf, &enable))
++		return -EINVAL;
++
++	/* no change? */
++	if (enable == (info->flags & QMI_WWAN_FLAG_RAWIP))
++		return len;
++
++	if (!rtnl_trylock())
++		return restart_syscall();
++
++	/* we don't want to modify a running netdev */
++	if (netif_running(dev->net)) {
++		netdev_err(dev->net, "Cannot change a running device\n");
++		ret = -EBUSY;
++		goto err;
++	}
++
++	/* let other drivers deny the change */
++	ret = call_netdevice_notifiers(NETDEV_PRE_TYPE_CHANGE, dev->net);
++	ret = notifier_to_errno(ret);
++	if (ret) {
++		netdev_err(dev->net, "Type change was refused\n");
++		goto err;
++	}
++
++	if (enable)
++		info->flags |= QMI_WWAN_FLAG_RAWIP;
++	else
++		info->flags &= ~QMI_WWAN_FLAG_RAWIP;
++	qmi_wwan_netdev_setup(dev->net);
++	call_netdevice_notifiers(NETDEV_POST_TYPE_CHANGE, dev->net);
++	ret = len;
++err:
++	rtnl_unlock();
++	return ret;
++}
++
++static DEVICE_ATTR_RW(raw_ip);
++
++static struct attribute *qmi_wwan_sysfs_attrs[] = {
++	&dev_attr_raw_ip.attr,
++	NULL,
++};
++
++static struct attribute_group qmi_wwan_sysfs_attr_group = {
++	.name = "qmi",
++	.attrs = qmi_wwan_sysfs_attrs,
++};
++
+ /* default ethernet address used by the modem */
+ static const u8 default_modem_addr[ETH_ALEN] = {0x02, 0x50, 0xf3};
+ 
+@@ -80,6 +175,8 @@ static const u8 buggy_fw_addr[ETH_ALEN] = {0x00, 0xa0, 0xc6, 0x00, 0x00, 0x00};
+  */
+ static int qmi_wwan_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
+ {
++	struct qmi_wwan_state *info = (void *)&dev->data;
++	bool rawip = info->flags & QMI_WWAN_FLAG_RAWIP;
+ 	__be16 proto;
+ 
+ 	/* This check is no longer done by usbnet */
+@@ -94,15 +191,25 @@ static int qmi_wwan_rx_fixup(struct usbnet *dev, struct sk_buff *skb)
+ 		proto = htons(ETH_P_IPV6);
+ 		break;
+ 	case 0x00:
++		if (rawip)
++			return 0;
+ 		if (is_multicast_ether_addr(skb->data))
+ 			return 1;
+ 		/* possibly bogus destination - rewrite just in case */
+ 		skb_reset_mac_header(skb);
+ 		goto fix_dest;
+ 	default:
++		if (rawip)
++			return 0;
+ 		/* pass along other packets without modifications */
+ 		return 1;
+ 	}
++	if (rawip) {
++		skb->dev = dev->net; /* normally set by eth_type_trans */
++		skb->protocol = proto;
++		return 1;
++	}
++
+ 	if (skb_headroom(skb) < ETH_HLEN)
+ 		return 0;
+ 	skb_push(skb, ETH_HLEN);
+@@ -223,17 +330,31 @@ err:
+ 	return rv;
+ }
+ 
++/* Send CDC SetControlLineState request, setting or clearing the DTR.
++ * "Required for Autoconnect and 9x30 to wake up" according to the
++ * GobiNet driver. The requirement has been verified on an MDM9230
++ * based Sierra Wireless MC7455
++ */
++static int qmi_wwan_change_dtr(struct usbnet *dev, bool on)
++{
++	u8 intf = dev->intf->cur_altsetting->desc.bInterfaceNumber;
++
++	return usbnet_write_cmd(dev, USB_CDC_REQ_SET_CONTROL_LINE_STATE,
++				USB_DIR_OUT | USB_TYPE_CLASS | USB_RECIP_INTERFACE,
++				on ? 0x01 : 0x00, intf, NULL, 0);
++}
++
+ static int qmi_wwan_bind(struct usbnet *dev, struct usb_interface *intf)
+ {
+ 	int status = -1;
+ 	u8 *buf = intf->cur_altsetting->extra;
+ 	int len = intf->cur_altsetting->extralen;
+ 	struct usb_interface_descriptor *desc = &intf->cur_altsetting->desc;
+-	struct usb_cdc_union_desc *cdc_union = NULL;
+-	struct usb_cdc_ether_desc *cdc_ether = NULL;
+-	u32 found = 0;
++	struct usb_cdc_union_desc *cdc_union;
++	struct usb_cdc_ether_desc *cdc_ether;
+ 	struct usb_driver *driver = driver_of(intf);
+ 	struct qmi_wwan_state *info = (void *)&dev->data;
++	struct usb_cdc_parsed_header hdr;
+ 
+ 	BUILD_BUG_ON((sizeof(((struct usbnet *)0)->data) <
+ 		      sizeof(struct qmi_wwan_state)));
+@@ -243,63 +364,9 @@ static int qmi_wwan_bind(struct usbnet *dev, struct usb_interface *intf)
+ 	info->data = intf;
+ 
+ 	/* and a number of CDC descriptors */
+-	while (len > 3) {
+-		struct usb_descriptor_header *h = (void *)buf;
+-
+-		/* ignore any misplaced descriptors */
+-		if (h->bDescriptorType != USB_DT_CS_INTERFACE)
+-			goto next_desc;
+-
+-		/* buf[2] is CDC descriptor subtype */
+-		switch (buf[2]) {
+-		case USB_CDC_HEADER_TYPE:
+-			if (found & 1 << USB_CDC_HEADER_TYPE) {
+-				dev_dbg(&intf->dev, "extra CDC header\n");
+-				goto err;
+-			}
+-			if (h->bLength != sizeof(struct usb_cdc_header_desc)) {
+-				dev_dbg(&intf->dev, "CDC header len %u\n",
+-					h->bLength);
+-				goto err;
+-			}
+-			break;
+-		case USB_CDC_UNION_TYPE:
+-			if (found & 1 << USB_CDC_UNION_TYPE) {
+-				dev_dbg(&intf->dev, "extra CDC union\n");
+-				goto err;
+-			}
+-			if (h->bLength != sizeof(struct usb_cdc_union_desc)) {
+-				dev_dbg(&intf->dev, "CDC union len %u\n",
+-					h->bLength);
+-				goto err;
+-			}
+-			cdc_union = (struct usb_cdc_union_desc *)buf;
+-			break;
+-		case USB_CDC_ETHERNET_TYPE:
+-			if (found & 1 << USB_CDC_ETHERNET_TYPE) {
+-				dev_dbg(&intf->dev, "extra CDC ether\n");
+-				goto err;
+-			}
+-			if (h->bLength != sizeof(struct usb_cdc_ether_desc)) {
+-				dev_dbg(&intf->dev, "CDC ether len %u\n",
+-					h->bLength);
+-				goto err;
+-			}
+-			cdc_ether = (struct usb_cdc_ether_desc *)buf;
+-			break;
+-		}
+-
+-		/* Remember which CDC functional descriptors we've seen.  Works
+-		 * for all types we care about, of which USB_CDC_ETHERNET_TYPE
+-		 * (0x0f) is the highest numbered
+-		 */
+-		if (buf[2] < 32)
+-			found |= 1 << buf[2];
+-
+-next_desc:
+-		len -= h->bLength;
+-		buf += h->bLength;
+-	}
++	cdc_parse_cdc_header(&hdr, intf, buf, len);
++	cdc_union = hdr.usb_cdc_union_desc;
++	cdc_ether = hdr.usb_cdc_ether_desc;
+ 
+ 	/* Use separate control and data interfaces if we found a CDC Union */
+ 	if (cdc_union) {
+@@ -311,7 +378,10 @@ next_desc:
+ 				"bogus CDC Union: master=%u, slave=%u\n",
+ 				cdc_union->bMasterInterface0,
+ 				cdc_union->bSlaveInterface0);
+-			goto err;
++
++			/* ignore and continue... */
++			cdc_union = NULL;
++			info->data = intf;
+ 		}
+ 	}
+ 
+@@ -334,6 +404,29 @@ next_desc:
+ 		usb_driver_release_interface(driver, info->data);
+ 	}
+ 
++	/* disabling remote wakeup on MDM9x30 devices has the same
++	 * effect as clearing DTR. The device will not respond to QMI
++	 * requests until we set DTR again.  This is similar to a
++	 * QMI_CTL SYNC request, clearing a lot of firmware state
++	 * including the client ID allocations.
++	 *
++	 * Our usage model allows a session to span multiple
++	 * open/close events, so we must prevent the firmware from
++	 * clearing out state the clients might need.
++	 *
++	 * MDM9x30 is the first QMI chipset with USB3 support. Abuse
++	 * this fact to enable the quirk for all USB3 devices.
++	 *
++	 * There are also chipsets with the same "set DTR" requirement
++	 * but without USB3 support.  Devices based on these chips
++	 * need a quirk flag in the device ID table.
++	 */
++	if (dev->driver_info->data & QMI_WWAN_QUIRK_DTR ||
++	    le16_to_cpu(dev->udev->descriptor.bcdUSB) >= 0x0201) {
++		qmi_wwan_manage_power(dev, 1);
++		qmi_wwan_change_dtr(dev, true);
++	}
++
+ 	/* Never use the same address on both ends of the link, even if the
+ 	 * buggy firmware told us to. Or, if device is assigned the well-known
+ 	 * buggy firmware MAC address, replace it with a random address,
+@@ -348,6 +441,7 @@ next_desc:
+ 		dev->net->dev_addr[0] &= 0xbf;	/* clear "IP" bit */
+ 	}
+ 	dev->net->netdev_ops = &qmi_wwan_netdev_ops;
++	dev->net->sysfs_groups[0] = &qmi_wwan_sysfs_attr_group;
+ err:
+ 	return status;
+ }
+@@ -361,6 +455,12 @@ static void qmi_wwan_unbind(struct usbnet *dev, struct usb_interface *intf)
+ 	if (info->subdriver && info->subdriver->disconnect)
+ 		info->subdriver->disconnect(info->control);
+ 
++	/* disable MDM9x30 quirk */
++	if (le16_to_cpu(dev->udev->descriptor.bcdUSB) >= 0x0201) {
++		qmi_wwan_change_dtr(dev, false);
++		qmi_wwan_manage_power(dev, 0);
++	}
++
+ 	/* allow user to unbind using either control or data */
+ 	if (intf == info->control)
+ 		other = info->data;
+@@ -435,6 +535,16 @@ static const struct driver_info	qmi_wwan_info = {
+ 	.rx_fixup       = qmi_wwan_rx_fixup,
+ };
+ 
++static const struct driver_info	qmi_wwan_info_quirk_dtr = {
++	.description	= "WWAN/QMI device",
++	.flags		= FLAG_WWAN,
++	.bind		= qmi_wwan_bind,
++	.unbind		= qmi_wwan_unbind,
++	.manage_power	= qmi_wwan_manage_power,
++	.rx_fixup       = qmi_wwan_rx_fixup,
++	.data           = QMI_WWAN_QUIRK_DTR,
++};
++
+ #define HUAWEI_VENDOR_ID	0x12D1
+ 
+ /* map QMI/wwan function by a fixed interface number */
+@@ -442,6 +552,11 @@ static const struct driver_info	qmi_wwan_info = {
+ 	USB_DEVICE_INTERFACE_NUMBER(vend, prod, num), \
+ 	.driver_info = (unsigned long)&qmi_wwan_info
+ 
++/* devices requiring "set DTR" quirk */
++#define QMI_QUIRK_SET_DTR(vend, prod, num) \
++	USB_DEVICE_INTERFACE_NUMBER(vend, prod, num), \
++	.driver_info = (unsigned long)&qmi_wwan_info_quirk_dtr
++
+ /* Gobi 1000 QMI/wwan interface number is 3 according to qcserial */
+ #define QMI_GOBI1K_DEVICE(vend, prod) \
+ 	QMI_FIXED_INTF(vend, prod, 3)
+@@ -539,9 +654,14 @@ static const struct usb_device_id products[] = {
+ 					      USB_CDC_PROTO_NONE),
+ 		.driver_info        = (unsigned long)&qmi_wwan_info,
+ 	},
++	{	/* HP lt4112 LTE/HSPA+ Gobi 4G Module (Huawei me906e) */
++		USB_DEVICE_AND_INTERFACE_INFO(0x03f0, 0x581d, USB_CLASS_VENDOR_SPEC, 1, 7),
++		.driver_info = (unsigned long)&qmi_wwan_info,
++	},
+ 
+ 	/* 3. Combined interface devices matching on interface number */
+ 	{QMI_FIXED_INTF(0x0408, 0xea42, 4)},	/* Yota / Megafon M100-1 */
++	{QMI_FIXED_INTF(0x05c6, 0x6001, 3)},	/* 4G LTE usb-modem U901 */
+ 	{QMI_FIXED_INTF(0x05c6, 0x7000, 0)},
+ 	{QMI_FIXED_INTF(0x05c6, 0x7001, 1)},
+ 	{QMI_FIXED_INTF(0x05c6, 0x7002, 1)},
+@@ -748,15 +868,17 @@ static const struct usb_device_id products[] = {
+ 	{QMI_FIXED_INTF(0x19d2, 0x1426, 2)},	/* ZTE MF91 */
+ 	{QMI_FIXED_INTF(0x19d2, 0x1428, 2)},	/* Telewell TW-LTE 4G v2 */
+ 	{QMI_FIXED_INTF(0x19d2, 0x2002, 4)},	/* ZTE (Vodafone) K3765-Z */
++	{QMI_FIXED_INTF(0x2001, 0x7e19, 4)},	/* D-Link DWM-221 B1 */
+ 	{QMI_FIXED_INTF(0x0f3d, 0x68a2, 8)},    /* Sierra Wireless MC7700 */
+ 	{QMI_FIXED_INTF(0x114f, 0x68a2, 8)},    /* Sierra Wireless MC7750 */
+ 	{QMI_FIXED_INTF(0x1199, 0x68a2, 8)},	/* Sierra Wireless MC7710 in QMI mode */
+ 	{QMI_FIXED_INTF(0x1199, 0x68a2, 19)},	/* Sierra Wireless MC7710 in QMI mode */
+-	{QMI_FIXED_INTF(0x1199, 0x68c0, 8)},	/* Sierra Wireless MC73xx */
+-	{QMI_FIXED_INTF(0x1199, 0x68c0, 10)},	/* Sierra Wireless MC73xx */
++	{QMI_FIXED_INTF(0x1199, 0x68c0, 8)},	/* Sierra Wireless MC7304/MC7354 */
++	{QMI_FIXED_INTF(0x1199, 0x68c0, 10)},	/* Sierra Wireless MC7304/MC7354 */
+ 	{QMI_FIXED_INTF(0x1199, 0x901c, 8)},    /* Sierra Wireless EM7700 */
+ 	{QMI_FIXED_INTF(0x1199, 0x901f, 8)},    /* Sierra Wireless EM7355 */
+ 	{QMI_FIXED_INTF(0x1199, 0x9041, 8)},	/* Sierra Wireless MC7305/MC7355 */
++	{QMI_FIXED_INTF(0x1199, 0x9041, 10)},	/* Sierra Wireless MC7305/MC7355 */
+ 	{QMI_FIXED_INTF(0x1199, 0x9051, 8)},	/* Netgear AirCard 340U */
+ 	{QMI_FIXED_INTF(0x1199, 0x9053, 8)},	/* Sierra Wireless Modem */
+ 	{QMI_FIXED_INTF(0x1199, 0x9054, 8)},	/* Sierra Wireless Modem */
+@@ -764,12 +886,18 @@ static const struct usb_device_id products[] = {
+ 	{QMI_FIXED_INTF(0x1199, 0x9056, 8)},	/* Sierra Wireless Modem */
+ 	{QMI_FIXED_INTF(0x1199, 0x9057, 8)},
+ 	{QMI_FIXED_INTF(0x1199, 0x9061, 8)},	/* Sierra Wireless Modem */
++	{QMI_FIXED_INTF(0x1199, 0x9071, 8)},	/* Sierra Wireless MC74xx */
++	{QMI_FIXED_INTF(0x1199, 0x9071, 10)},	/* Sierra Wireless MC74xx */
++	{QMI_FIXED_INTF(0x1199, 0x9079, 8)},	/* Sierra Wireless EM74xx */
++	{QMI_FIXED_INTF(0x1199, 0x9079, 10)},	/* Sierra Wireless EM74xx */
+ 	{QMI_FIXED_INTF(0x1bbb, 0x011e, 4)},	/* Telekom Speedstick LTE II (Alcatel One Touch L100V LTE) */
+ 	{QMI_FIXED_INTF(0x1bbb, 0x0203, 2)},	/* Alcatel L800MA */
+ 	{QMI_FIXED_INTF(0x2357, 0x0201, 4)},	/* TP-LINK HSUPA Modem MA180 */
+ 	{QMI_FIXED_INTF(0x2357, 0x9000, 4)},	/* TP-LINK MA260 */
++	{QMI_QUIRK_SET_DTR(0x1bc7, 0x1040, 2)},	/* Telit LE922A */
+ 	{QMI_FIXED_INTF(0x1bc7, 0x1200, 5)},	/* Telit LE920 */
+ 	{QMI_FIXED_INTF(0x1bc7, 0x1201, 2)},	/* Telit LE920 */
++	{QMI_FIXED_INTF(0x1c9e, 0x9b01, 3)},	/* XS Stick W100-2 from 4G Systems */
+ 	{QMI_FIXED_INTF(0x0b3c, 0xc000, 4)},	/* Olivetti Olicard 100 */
+ 	{QMI_FIXED_INTF(0x0b3c, 0xc001, 4)},	/* Olivetti Olicard 120 */
+ 	{QMI_FIXED_INTF(0x0b3c, 0xc002, 4)},	/* Olivetti Olicard 140 */
+@@ -779,12 +907,21 @@ static const struct usb_device_id products[] = {
+ 	{QMI_FIXED_INTF(0x0b3c, 0xc00b, 4)},	/* Olivetti Olicard 500 */
+ 	{QMI_FIXED_INTF(0x1e2d, 0x0060, 4)},	/* Cinterion PLxx */
+ 	{QMI_FIXED_INTF(0x1e2d, 0x0053, 4)},	/* Cinterion PHxx,PXxx */
++	{QMI_FIXED_INTF(0x1e2d, 0x0082, 4)},	/* Cinterion PHxx,PXxx (2 RmNet) */
++	{QMI_FIXED_INTF(0x1e2d, 0x0082, 5)},	/* Cinterion PHxx,PXxx (2 RmNet) */
++	{QMI_FIXED_INTF(0x1e2d, 0x0083, 4)},	/* Cinterion PHxx,PXxx (1 RmNet + USB Audio)*/
+ 	{QMI_FIXED_INTF(0x413c, 0x81a2, 8)},	/* Dell Wireless 5806 Gobi(TM) 4G LTE Mobile Broadband Card */
+ 	{QMI_FIXED_INTF(0x413c, 0x81a3, 8)},	/* Dell Wireless 5570 HSPA+ (42Mbps) Mobile Broadband Card */
+ 	{QMI_FIXED_INTF(0x413c, 0x81a4, 8)},	/* Dell Wireless 5570e HSPA+ (42Mbps) Mobile Broadband Card */
+ 	{QMI_FIXED_INTF(0x413c, 0x81a8, 8)},	/* Dell Wireless 5808 Gobi(TM) 4G LTE Mobile Broadband Card */
+ 	{QMI_FIXED_INTF(0x413c, 0x81a9, 8)},	/* Dell Wireless 5808e Gobi(TM) 4G LTE Mobile Broadband Card */
+-	{QMI_FIXED_INTF(0x03f0, 0x581d, 4)},	/* HP lt4112 LTE/HSPA+ Gobi 4G Module (Huawei me906e) */
++	{QMI_FIXED_INTF(0x413c, 0x81b1, 8)},	/* Dell Wireless 5809e Gobi(TM) 4G LTE Mobile Broadband Card */
++	{QMI_FIXED_INTF(0x413c, 0x81b3, 8)},	/* Dell Wireless 5809e Gobi(TM) 4G LTE Mobile Broadband Card (rev3) */
++	{QMI_FIXED_INTF(0x03f0, 0x4e1d, 8)},	/* HP lt4111 LTE/EV-DO/HSPA+ Gobi 4G Module */
++	{QMI_FIXED_INTF(0x22de, 0x9061, 3)},	/* WeTelecom WPD-600N */
++	{QMI_FIXED_INTF(0x1e0e, 0x9001, 5)},	/* SIMCom 7230E */
++	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0125, 4)},	/* Quectel EC25, EC20 R2.0  Mini PCIe */
++	{QMI_QUIRK_SET_DTR(0x2c7c, 0x0121, 4)},	/* Quectel EC21 Mini PCIe */
+ 
+ 	/* 4. Gobi 1000 devices */
+ 	{QMI_GOBI1K_DEVICE(0x05c6, 0x9212)},	/* Acer Gobi Modem Device */
+@@ -815,6 +952,7 @@ static const struct usb_device_id products[] = {
+ 	{QMI_GOBI_DEVICE(0x05c6, 0x9245)},	/* Samsung Gobi 2000 Modem device (VL176) */
+ 	{QMI_GOBI_DEVICE(0x03f0, 0x251d)},	/* HP Gobi 2000 Modem device (VP412) */
+ 	{QMI_GOBI_DEVICE(0x05c6, 0x9215)},	/* Acer Gobi 2000 Modem device (VP413) */
++	{QMI_FIXED_INTF(0x05c6, 0x9215, 4)},	/* Quectel EC20 Mini PCIe */
+ 	{QMI_GOBI_DEVICE(0x05c6, 0x9265)},	/* Asus Gobi 2000 Modem device (VR305) */
+ 	{QMI_GOBI_DEVICE(0x05c6, 0x9235)},	/* Top Global Gobi 2000 Modem device (VR306) */
+ 	{QMI_GOBI_DEVICE(0x05c6, 0x9275)},	/* iRex Technologies Gobi 2000 Modem device (VR307) */
+@@ -846,10 +984,24 @@ static const struct usb_device_id products[] = {
+ };
+ MODULE_DEVICE_TABLE(usb, products);
+ 
++static bool quectel_ec20_detected(struct usb_interface *intf)
++{
++	struct usb_device *dev = interface_to_usbdev(intf);
++
++	if (dev->actconfig &&
++	    le16_to_cpu(dev->descriptor.idVendor) == 0x05c6 &&
++	    le16_to_cpu(dev->descriptor.idProduct) == 0x9215 &&
++	    dev->actconfig->desc.bNumInterfaces == 5)
++		return true;
++
++	return false;
++}
++
+ static int qmi_wwan_probe(struct usb_interface *intf,
+ 			  const struct usb_device_id *prod)
+ {
+ 	struct usb_device_id *id = (struct usb_device_id *)prod;
++	struct usb_interface_descriptor *desc = &intf->cur_altsetting->desc;
+ 
+ 	/* Workaround to enable dynamic IDs.  This disables usbnet
+ 	 * blacklisting functionality.  Which, if required, can be
+@@ -861,6 +1013,12 @@ static int qmi_wwan_probe(struct usb_interface *intf,
+ 		id->driver_info = (unsigned long)&qmi_wwan_info;
+ 	}
+ 
++	/* Quectel EC20 quirk where we've QMI on interface 4 instead of 0 */
++	if (quectel_ec20_detected(intf) && desc->bInterfaceNumber == 0) {
++		dev_dbg(&intf->dev, "Quectel EC20 quirk, skipping interface 0\n");
++		return -ENODEV;
++	}
++
+ 	return usbnet_probe(intf, id);
+ }
+ 
+diff --git a/drivers/net/usb/rndis_host.c b/drivers/net/usb/rndis_host.c
+old mode 100644
+new mode 100755
+index 524a47a..c03d9ac
+--- a/drivers/net/usb/rndis_host.c
++++ b/drivers/net/usb/rndis_host.c
+@@ -428,7 +428,11 @@ generic_rndis_bind(struct usbnet *dev, struct usb_interface *intf, int flags)
+ 		dev_err(&intf->dev, "rndis get ethaddr, %d\n", retval);
+ 		goto halt_fail_and_release;
+ 	}
+-	memcpy(net->dev_addr, bp, ETH_ALEN);
++
++	if (bp[0] & 0x02)
++		eth_hw_addr_random(net);
++	else
++	    memcpy(net->dev_addr, bp, ETH_ALEN);
+ 
+ 	/* set a nonzero filter to enable data transfers */
+ 	memset(u.set, 0, sizeof *u.set);
+@@ -627,6 +631,10 @@ static const struct usb_device_id	products [] = {
+ 	/* RNDIS for tethering */
+ 	USB_INTERFACE_INFO(USB_CLASS_WIRELESS_CONTROLLER, 1, 3),
+ 	.driver_info = (unsigned long) &rndis_info,
++}, {
++	/* Novatel Verizon USB730L */
++	USB_INTERFACE_INFO(USB_CLASS_MISC, 4, 1),
++	.driver_info = (unsigned long) &rndis_info,
+ },
+ 	{ },		// END
+ };
+diff --git a/drivers/net/usb/usbnet.c b/drivers/net/usb/usbnet.c
+old mode 100644
+new mode 100755
+index a9566ce..4050535
+--- a/drivers/net/usb/usbnet.c
++++ b/drivers/net/usb/usbnet.c
+@@ -331,7 +331,10 @@ void usbnet_skb_return (struct usbnet *dev, struct sk_buff *skb)
+ 		return;
+ 	}
+ 
+-	skb->protocol = eth_type_trans (skb, dev->net);
++	/* only update if unset to allow minidriver rx_fixup override */
++	if (skb->protocol == 0)
++		skb->protocol = eth_type_trans (skb, dev->net);
++
+ 	dev->net->stats.rx_packets++;
+ 	dev->net->stats.rx_bytes += skb->len;
+ 
+@@ -398,8 +401,11 @@ int usbnet_change_mtu (struct net_device *net, int new_mtu)
+ 	dev->hard_mtu = net->mtu + net->hard_header_len;
+ 	if (dev->rx_urb_size == old_hard_mtu) {
+ 		dev->rx_urb_size = dev->hard_mtu;
+-		if (dev->rx_urb_size > old_rx_urb_size)
++		if (dev->rx_urb_size > old_rx_urb_size) {
++			usbnet_pause_rx(dev);
+ 			usbnet_unlink_rx_urbs(dev);
++			usbnet_resume_rx(dev);
++		}
+ 	}
+ 
+ 	/* max qlen depend on hard_mtu and rx_urb_size */
+@@ -436,12 +442,18 @@ static enum skb_state defer_bh(struct usbnet *dev, struct sk_buff *skb,
+ 	old_state = entry->state;
+ 	entry->state = state;
+ 	__skb_unlink(skb, list);
+-	spin_unlock(&list->lock);
+-	spin_lock(&dev->done.lock);
++
++	/* defer_bh() is never called with list == &dev->done.
++	 * spin_lock_nested() tells lockdep that it is OK to take
++	 * dev->done.lock here with list->lock held.
++	 */
++	spin_lock_nested(&dev->done.lock, SINGLE_DEPTH_NESTING);
++
+ 	__skb_queue_tail(&dev->done, skb);
+ 	if (dev->done.qlen == 1)
+ 		tasklet_schedule(&dev->bh);
+-	spin_unlock_irqrestore(&dev->done.lock, flags);
++	spin_unlock(&dev->done.lock);
++	spin_unlock_irqrestore(&list->lock, flags);
+ 	return old_state;
+ }
+ 
+@@ -770,6 +782,20 @@ EXPORT_SYMBOL_GPL(usbnet_unlink_rx_urbs);
+ 
+ /*-------------------------------------------------------------------------*/
+ 
++static void wait_skb_queue_empty(struct sk_buff_head *q)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&q->lock, flags);
++	while (!skb_queue_empty(q)) {
++		spin_unlock_irqrestore(&q->lock, flags);
++		schedule_timeout(msecs_to_jiffies(UNLINK_TIMEOUT_MS));
++		set_current_state(TASK_UNINTERRUPTIBLE);
++		spin_lock_irqsave(&q->lock, flags);
++	}
++	spin_unlock_irqrestore(&q->lock, flags);
++}
++
+ // precondition: never called in_interrupt
+ static void usbnet_terminate_urbs(struct usbnet *dev)
+ {
+@@ -783,14 +809,11 @@ static void usbnet_terminate_urbs(struct usbnet *dev)
+ 		unlink_urbs(dev, &dev->rxq);
+ 
+ 	/* maybe wait for deletions to finish. */
+-	while (!skb_queue_empty(&dev->rxq)
+-		&& !skb_queue_empty(&dev->txq)
+-		&& !skb_queue_empty(&dev->done)) {
+-			schedule_timeout(msecs_to_jiffies(UNLINK_TIMEOUT_MS));
+-			set_current_state(TASK_UNINTERRUPTIBLE);
+-			netif_dbg(dev, ifdown, dev->net,
+-				  "waited for %d urb completions\n", temp);
+-	}
++	wait_skb_queue_empty(&dev->rxq);
++	wait_skb_queue_empty(&dev->txq);
++	wait_skb_queue_empty(&dev->done);
++	netif_dbg(dev, ifdown, dev->net,
++		  "waited for %d urb completions\n", temp);
+ 	set_current_state(TASK_RUNNING);
+ 	remove_wait_queue(&dev->wait, &wait);
+ }
+@@ -799,7 +822,7 @@ int usbnet_stop (struct net_device *net)
+ {
+ 	struct usbnet		*dev = netdev_priv(net);
+ 	struct driver_info	*info = dev->driver_info;
+-	int			retval, pm;
++	int			retval, pm, mpn;
+ 
+ 	clear_bit(EVENT_DEV_OPEN, &dev->flags);
+ 	netif_stop_queue (net);
+@@ -830,6 +853,8 @@ int usbnet_stop (struct net_device *net)
+ 
+ 	usbnet_purge_paused_rxq(dev);
+ 
++	mpn = !test_and_clear_bit(EVENT_NO_RUNTIME_PM, &dev->flags);
++
+ 	/* deferred work (task, timer, softirq) must also stop.
+ 	 * can't flush_scheduled_work() until we drop rtnl (later),
+ 	 * else workers could deadlock; so make workers a NOP.
+@@ -840,8 +865,7 @@ int usbnet_stop (struct net_device *net)
+ 	if (!pm)
+ 		usb_autopm_put_interface(dev->intf);
+ 
+-	if (info->manage_power &&
+-	    !test_and_clear_bit(EVENT_NO_RUNTIME_PM, &dev->flags))
++	if (info->manage_power && mpn)
+ 		info->manage_power(dev, 0);
+ 	else
+ 		usb_autopm_put_interface(dev->intf);
+@@ -1506,8 +1530,9 @@ static void usbnet_bh (unsigned long param)
+ 	} else if (netif_running (dev->net) &&
+ 		   netif_device_present (dev->net) &&
+ 		   netif_carrier_ok(dev->net) &&
+-		   !timer_pending (&dev->delay) &&
+-		   !test_bit (EVENT_RX_HALT, &dev->flags)) {
++		   !timer_pending(&dev->delay) &&
++		   !test_bit(EVENT_RX_PAUSED, &dev->flags) &&
++		   !test_bit(EVENT_RX_HALT, &dev->flags)) {
+ 		int	temp = dev->rxq.qlen;
+ 
+ 		if (temp < RX_QLEN(dev)) {
+@@ -1664,12 +1689,6 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
+ 	 * bind() should set rx_urb_size in that case.
+ 	 */
+ 	dev->hard_mtu = net->mtu + net->hard_header_len;
+-#if 0
+-// dma_supported() is deeply broken on almost all architectures
+-	// possible with some EHCI controllers
+-	if (dma_supported (&udev->dev, DMA_BIT_MASK(64)))
+-		net->features |= NETIF_F_HIGHDMA;
+-#endif
+ 
+ 	net->netdev_ops = &usbnet_netdev_ops;
+ 	net->watchdog_timeo = TX_TIMEOUT_JIFFIES;
+@@ -1774,6 +1793,13 @@ out3:
+ 	if (info->unbind)
+ 		info->unbind (dev, udev);
+ out1:
++	/* subdrivers must undo all they did in bind() if they
++	 * fail it, but we may fail later and a deferred kevent
++	 * may trigger an error resubmitting itself and, worse,
++	 * schedule a timer. So we kill it all just in case.
++	 */
++	cancel_work_sync(&dev->kevent);
++	del_timer_sync(&dev->delay);
+ 	free_netdev(net);
+ out:
+ 	return status;
+diff --git a/drivers/usb/core/message.c b/drivers/usb/core/message.c
+old mode 100644
+new mode 100755
+index f368d20..2cd4004
+--- a/drivers/usb/core/message.c
++++ b/drivers/usb/core/message.c
+@@ -12,6 +12,7 @@
+ #include <linux/nls.h>
+ #include <linux/device.h>
+ #include <linux/scatterlist.h>
++#include <linux/usb/cdc.h>
+ #include <linux/usb/quirks.h>
+ #include <linux/usb/hcd.h>	/* for usbcore internals */
+ #include <asm/byteorder.h>
+@@ -1990,3 +1991,155 @@ int usb_driver_set_configuration(struct usb_device *udev, int config)
+ 	return 0;
+ }
+ EXPORT_SYMBOL_GPL(usb_driver_set_configuration);
++
++/**
++ * cdc_parse_cdc_header - parse the extra headers present in CDC devices
++ * @hdr: the place to put the results of the parsing
++ * @intf: the interface for which parsing is requested
++ * @buffer: pointer to the extra headers to be parsed
++ * @buflen: length of the extra headers
++ *
++ * This evaluates the extra headers present in CDC devices which
++ * bind the interfaces for data and control and provide details
++ * about the capabilities of the device.
++ *
++ * Return: number of descriptors parsed or -EINVAL
++ * if the header is contradictory beyond salvage
++ */
++
++int cdc_parse_cdc_header(struct usb_cdc_parsed_header *hdr,
++				struct usb_interface *intf,
++				u8 *buffer,
++				int buflen)
++{
++	/* duplicates are ignored */
++	struct usb_cdc_union_desc *union_header = NULL;
++
++	/* duplicates are not tolerated */
++	struct usb_cdc_header_desc *header = NULL;
++	struct usb_cdc_ether_desc *ether = NULL;
++	struct usb_cdc_mdlm_detail_desc *detail = NULL;
++	struct usb_cdc_mdlm_desc *desc = NULL;
++
++	unsigned int elength;
++	int cnt = 0;
++
++	memset(hdr, 0x00, sizeof(struct usb_cdc_parsed_header));
++	hdr->phonet_magic_present = false;
++	while (buflen > 0) {
++		elength = buffer[0];
++		if (!elength) {
++			dev_err(&intf->dev, "skipping garbage byte\n");
++			elength = 1;
++			goto next_desc;
++		}
++		if (buffer[1] != USB_DT_CS_INTERFACE) {
++			dev_err(&intf->dev, "skipping garbage\n");
++			goto next_desc;
++		}
++
++		switch (buffer[2]) {
++		case USB_CDC_UNION_TYPE: /* we've found it */
++			if (elength < sizeof(struct usb_cdc_union_desc))
++				goto next_desc;
++			if (union_header) {
++				dev_err(&intf->dev, "More than one union descriptor, skipping ...\n");
++				goto next_desc;
++			}
++			union_header = (struct usb_cdc_union_desc *)buffer;
++			break;
++		case USB_CDC_COUNTRY_TYPE:
++			if (elength < sizeof(struct usb_cdc_country_functional_desc))
++				goto next_desc;
++			hdr->usb_cdc_country_functional_desc =
++				(struct usb_cdc_country_functional_desc *)buffer;
++			break;
++		case USB_CDC_HEADER_TYPE:
++			if (elength != sizeof(struct usb_cdc_header_desc))
++				goto next_desc;
++			if (header)
++				return -EINVAL;
++			header = (struct usb_cdc_header_desc *)buffer;
++			break;
++		case USB_CDC_ACM_TYPE:
++			if (elength < sizeof(struct usb_cdc_acm_descriptor))
++				goto next_desc;
++			hdr->usb_cdc_acm_descriptor =
++				(struct usb_cdc_acm_descriptor *)buffer;
++			break;
++		case USB_CDC_ETHERNET_TYPE:
++			if (elength != sizeof(struct usb_cdc_ether_desc))
++				goto next_desc;
++			if (ether)
++				return -EINVAL;
++			ether = (struct usb_cdc_ether_desc *)buffer;
++			break;
++		case USB_CDC_CALL_MANAGEMENT_TYPE:
++			if (elength < sizeof(struct usb_cdc_call_mgmt_descriptor))
++				goto next_desc;
++			hdr->usb_cdc_call_mgmt_descriptor =
++				(struct usb_cdc_call_mgmt_descriptor *)buffer;
++			break;
++		case USB_CDC_DMM_TYPE:
++			if (elength < sizeof(struct usb_cdc_dmm_desc))
++				goto next_desc;
++			hdr->usb_cdc_dmm_desc =
++				(struct usb_cdc_dmm_desc *)buffer;
++			break;
++		case USB_CDC_MDLM_TYPE:
++			if (elength < sizeof(struct usb_cdc_mdlm_desc *))
++				goto next_desc;
++			if (desc)
++				return -EINVAL;
++			desc = (struct usb_cdc_mdlm_desc *)buffer;
++			break;
++		case USB_CDC_MDLM_DETAIL_TYPE:
++			if (elength < sizeof(struct usb_cdc_mdlm_detail_desc *))
++				goto next_desc;
++			if (detail)
++				return -EINVAL;
++			detail = (struct usb_cdc_mdlm_detail_desc *)buffer;
++			break;
++		case USB_CDC_NCM_TYPE:
++			if (elength < sizeof(struct usb_cdc_ncm_desc))
++				goto next_desc;
++			hdr->usb_cdc_ncm_desc = (struct usb_cdc_ncm_desc *)buffer;
++			break;
++		case USB_CDC_MBIM_TYPE:
++			if (elength < sizeof(struct usb_cdc_mbim_desc))
++				goto next_desc;
++
++			hdr->usb_cdc_mbim_desc = (struct usb_cdc_mbim_desc *)buffer;
++			break;
++		case USB_CDC_MBIM_EXTENDED_TYPE:
++			if (elength < sizeof(struct usb_cdc_mbim_extended_desc))
++				break;
++			hdr->usb_cdc_mbim_extended_desc =
++				(struct usb_cdc_mbim_extended_desc *)buffer;
++			break;
++		case CDC_PHONET_MAGIC_NUMBER:
++			hdr->phonet_magic_present = true;
++			break;
++		default:
++			/*
++			 * there are LOTS more CDC descriptors that
++			 * could legitimately be found here.
++			 */
++			dev_dbg(&intf->dev, "Ignoring descriptor: type %02x, length %ud\n",
++					buffer[2], elength);
++			goto next_desc;
++		}
++		cnt++;
++next_desc:
++		buflen -= elength;
++		buffer += elength;
++	}
++	hdr->usb_cdc_union_desc = union_header;
++	hdr->usb_cdc_header_desc = header;
++	hdr->usb_cdc_mdlm_detail_desc = detail;
++	hdr->usb_cdc_mdlm_desc = desc;
++	hdr->usb_cdc_ether_desc = ether;
++	return cnt;
++}
++
++EXPORT_SYMBOL(cdc_parse_cdc_header);
+diff --git a/drivers/usb/serial/option.c b/drivers/usb/serial/option.c
+old mode 100644
+new mode 100755
+index 876423b..e3e8d10
+--- a/drivers/usb/serial/option.c
++++ b/drivers/usb/serial/option.c
+@@ -48,7 +48,6 @@ static int  option_probe(struct usb_serial *serial,
+ 			const struct usb_device_id *id);
+ static int option_attach(struct usb_serial *serial);
+ static void option_release(struct usb_serial *serial);
+-static int option_send_setup(struct usb_serial_port *port);
+ static void option_instat_callback(struct urb *urb);
+ 
+ /* Vendor and product IDs */
+@@ -162,6 +161,8 @@ static void option_instat_callback(struct urb *urb);
+ #define NOVATELWIRELESS_PRODUCT_HSPA_EMBEDDED_HIGHSPEED	0x9001
+ #define NOVATELWIRELESS_PRODUCT_E362		0x9010
+ #define NOVATELWIRELESS_PRODUCT_E371		0x9011
++#define NOVATELWIRELESS_PRODUCT_U620L		0x9022
++#define NOVATELWIRELESS_PRODUCT_ENTERPRISE_U730L 0x9032 /* Novtel USB730L enterprize mode */
+ #define NOVATELWIRELESS_PRODUCT_G2		0xA010
+ #define NOVATELWIRELESS_PRODUCT_MC551		0xB001
+ 
+@@ -270,14 +271,28 @@ static void option_instat_callback(struct urb *urb);
+ #define TELIT_PRODUCT_CC864_SINGLE		0x1006
+ #define TELIT_PRODUCT_DE910_DUAL		0x1010
+ #define TELIT_PRODUCT_UE910_V2			0x1012
++#define TELIT_PRODUCT_LE922_USBCFG0		0x1042
++#define TELIT_PRODUCT_LE922_USBCFG3		0x1043
++#define TELIT_PRODUCT_LE922_USBCFG5		0x1045
+ #define TELIT_PRODUCT_LE920			0x1200
+ #define TELIT_PRODUCT_LE910			0x1201
++#define TELIT_PRODUCT_LE910_USBCFG4		0x1206
++#define TELIT_PRODUCT_LE920A4_1207		0x1207
++#define TELIT_PRODUCT_LE920A4_1208		0x1208
++#define TELIT_PRODUCT_LE920A4_1211		0x1211
++#define TELIT_PRODUCT_LE920A4_1212		0x1212
++#define TELIT_PRODUCT_LE920A4_1213		0x1213
++#define TELIT_PRODUCT_LE920A4_1214		0x1214
+ 
+ /* ZTE PRODUCTS */
+ #define ZTE_VENDOR_ID				0x19d2
+ #define ZTE_PRODUCT_MF622			0x0001
+ #define ZTE_PRODUCT_MF628			0x0015
+ #define ZTE_PRODUCT_MF626			0x0031
++#define ZTE_PRODUCT_ZM8620_X			0x0396
++#define ZTE_PRODUCT_ME3620_MBIM			0x0426
++#define ZTE_PRODUCT_ME3620_X			0x1432
++#define ZTE_PRODUCT_ME3620_L			0x1433
+ #define ZTE_PRODUCT_AC2726			0xfff1
+ #define ZTE_PRODUCT_MG880			0xfffd
+ #define ZTE_PRODUCT_CDMA_TECH			0xfffe
+@@ -311,6 +326,7 @@ static void option_instat_callback(struct urb *urb);
+ #define TOSHIBA_PRODUCT_G450			0x0d45
+ 
+ #define ALINK_VENDOR_ID				0x1e0e
++#define SIMCOM_PRODUCT_SIM7100E			0x9001 /* Yes, ALINK_VENDOR_ID */
+ #define ALINK_PRODUCT_PH300			0x9100
+ #define ALINK_PRODUCT_3GU			0x9200
+ 
+@@ -353,6 +369,7 @@ static void option_instat_callback(struct urb *urb);
+ /* This is the 4G XS Stick W14 a.k.a. Mobilcom Debitel Surf-Stick *
+  * It seems to contain a Qualcomm QSC6240/6290 chipset            */
+ #define FOUR_G_SYSTEMS_PRODUCT_W14		0x9603
++#define FOUR_G_SYSTEMS_PRODUCT_W100		0x9b01
+ 
+ /* iBall 3.5G connect wireless modem */
+ #define IBALL_3_5G_CONNECT			0x9605
+@@ -368,18 +385,22 @@ static void option_instat_callback(struct urb *urb);
+ #define HAIER_PRODUCT_CE81B			0x10f8
+ #define HAIER_PRODUCT_CE100			0x2009
+ 
+-/* Cinterion (formerly Siemens) products */
+-#define SIEMENS_VENDOR_ID				0x0681
+-#define CINTERION_VENDOR_ID				0x1e2d
++/* Gemalto's Cinterion products (formerly Siemens) */
++#define SIEMENS_VENDOR_ID			0x0681
++#define CINTERION_VENDOR_ID			0x1e2d
++#define CINTERION_PRODUCT_HC25_MDMNET		0x0040
+ #define CINTERION_PRODUCT_HC25_MDM		0x0047
+-#define CINTERION_PRODUCT_HC25_MDMNET	0x0040
++#define CINTERION_PRODUCT_HC28_MDMNET		0x004A /* same for HC28J */
+ #define CINTERION_PRODUCT_HC28_MDM		0x004C
+-#define CINTERION_PRODUCT_HC28_MDMNET	0x004A /* same for HC28J */
+ #define CINTERION_PRODUCT_EU3_E			0x0051
+ #define CINTERION_PRODUCT_EU3_P			0x0052
+ #define CINTERION_PRODUCT_PH8			0x0053
+ #define CINTERION_PRODUCT_AHXX			0x0055
+ #define CINTERION_PRODUCT_PLXX			0x0060
++#define CINTERION_PRODUCT_PH8_2RMNET		0x0082
++#define CINTERION_PRODUCT_PH8_AUDIO		0x0083
++#define CINTERION_PRODUCT_AHXX_2RMNET		0x0084
++#define CINTERION_PRODUCT_AHXX_AUDIO		0x0085
+ 
+ /* Olivetti products */
+ #define OLIVETTI_VENDOR_ID			0x0b3c
+@@ -507,6 +528,12 @@ static void option_instat_callback(struct urb *urb);
+ #define VIATELECOM_VENDOR_ID			0x15eb
+ #define VIATELECOM_PRODUCT_CDS7			0x0001
+ 
++/* WeTelecom products */
++#define WETELECOM_VENDOR_ID			0x22de
++#define WETELECOM_PRODUCT_WMD200		0x6801
++#define WETELECOM_PRODUCT_6802			0x6802
++#define WETELECOM_PRODUCT_WMD300		0x6803
++
+ struct option_blacklist_info {
+ 	/* bitmask of interface numbers blacklisted for send_setup */
+ 	const unsigned long sendsetup;
+@@ -518,6 +545,11 @@ static const struct option_blacklist_info four_g_w14_blacklist = {
+ 	.sendsetup = BIT(0) | BIT(1),
+ };
+ 
++static const struct option_blacklist_info four_g_w100_blacklist = {
++	.sendsetup = BIT(1) | BIT(2),
++	.reserved = BIT(3),
++};
++
+ static const struct option_blacklist_info alcatel_x200_blacklist = {
+ 	.sendsetup = BIT(0) | BIT(1),
+ 	.reserved = BIT(4),
+@@ -544,6 +576,18 @@ static const struct option_blacklist_info zte_mc2716_z_blacklist = {
+ 	.sendsetup = BIT(1) | BIT(2) | BIT(3),
+ };
+ 
++static const struct option_blacklist_info zte_me3620_mbim_blacklist = {
++	.reserved = BIT(2) | BIT(3) | BIT(4),
++};
++
++static const struct option_blacklist_info zte_me3620_xl_blacklist = {
++	.reserved = BIT(3) | BIT(4) | BIT(5),
++};
++
++static const struct option_blacklist_info zte_zm8620_x_blacklist = {
++	.reserved = BIT(3) | BIT(4) | BIT(5),
++};
++
+ static const struct option_blacklist_info huawei_cdc12_blacklist = {
+ 	.reserved = BIT(1) | BIT(2),
+ };
+@@ -585,6 +629,10 @@ static const struct option_blacklist_info zte_1255_blacklist = {
+ 	.reserved = BIT(3) | BIT(4),
+ };
+ 
++static const struct option_blacklist_info simcom_sim7100e_blacklist = {
++	.reserved = BIT(5) | BIT(6),
++};
++
+ static const struct option_blacklist_info telit_le910_blacklist = {
+ 	.sendsetup = BIT(0),
+ 	.reserved = BIT(1) | BIT(2),
+@@ -595,9 +643,23 @@ static const struct option_blacklist_info telit_le920_blacklist = {
+ 	.reserved = BIT(1) | BIT(5),
+ };
+ 
+-static const struct option_blacklist_info sierra_mc73xx_blacklist = {
+-	.sendsetup = BIT(0) | BIT(2),
+-	.reserved = BIT(8) | BIT(10) | BIT(11),
++static const struct option_blacklist_info telit_le920a4_blacklist_1 = {
++	.sendsetup = BIT(0),
++	.reserved = BIT(1),
++};
++
++static const struct option_blacklist_info telit_le922_blacklist_usbcfg0 = {
++	.sendsetup = BIT(2),
++	.reserved = BIT(0) | BIT(1) | BIT(3),
++};
++
++static const struct option_blacklist_info telit_le922_blacklist_usbcfg3 = {
++	.sendsetup = BIT(0),
++	.reserved = BIT(1) | BIT(2) | BIT(3),
++};
++
++static const struct option_blacklist_info cinterion_rmnet2_blacklist = {
++	.reserved = BIT(4) | BIT(5),
+ };
+ 
+ static const struct usb_device_id option_ids[] = {
+@@ -1044,6 +1106,8 @@ static const struct usb_device_id option_ids[] = {
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(NOVATELWIRELESS_VENDOR_ID, NOVATELWIRELESS_PRODUCT_MC551, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(NOVATELWIRELESS_VENDOR_ID, NOVATELWIRELESS_PRODUCT_E362, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(NOVATELWIRELESS_VENDOR_ID, NOVATELWIRELESS_PRODUCT_E371, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(NOVATELWIRELESS_VENDOR_ID, NOVATELWIRELESS_PRODUCT_U620L, 0xff, 0x00, 0x00) },
++    { USB_DEVICE_AND_INTERFACE_INFO(NOVATELWIRELESS_VENDOR_ID, NOVATELWIRELESS_PRODUCT_ENTERPRISE_U730L, 0xff, 0x00, 0x00) },
+ 
+ 	{ USB_DEVICE(AMOI_VENDOR_ID, AMOI_PRODUCT_H01) },
+ 	{ USB_DEVICE(AMOI_VENDOR_ID, AMOI_PRODUCT_H01A) },
+@@ -1094,13 +1158,13 @@ static const struct usb_device_id option_ids[] = {
+ 	{ USB_DEVICE(KYOCERA_VENDOR_ID, KYOCERA_PRODUCT_KPC650) },
+ 	{ USB_DEVICE(KYOCERA_VENDOR_ID, KYOCERA_PRODUCT_KPC680) },
+ 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, 0x6000)}, /* ZTE AC8700 */
++	{ USB_DEVICE_AND_INTERFACE_INFO(QUALCOMM_VENDOR_ID, 0x6001, 0xff, 0xff, 0xff), /* 4G LTE usb-modem U901 */
++	  .driver_info = (kernel_ulong_t)&net_intf3_blacklist },
+ 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, 0x6613)}, /* Onda H600/ZTE MF330 */
+ 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, 0x0023)}, /* ONYX 3G device */
+ 	{ USB_DEVICE(QUALCOMM_VENDOR_ID, 0x9000)}, /* SIMCom SIM5218 */
+-	{ USB_DEVICE_INTERFACE_CLASS(SIERRA_VENDOR_ID, 0x68c0, 0xff),
+-	  .driver_info = (kernel_ulong_t)&sierra_mc73xx_blacklist }, /* MC73xx */
+-	{ USB_DEVICE_INTERFACE_CLASS(SIERRA_VENDOR_ID, 0x9041, 0xff),
+-	  .driver_info = (kernel_ulong_t)&sierra_mc73xx_blacklist }, /* MC7305/MC7355 */
++	{ USB_DEVICE(QUALCOMM_VENDOR_ID, 0x9003), /* Quectel UC20 */
++	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+ 	{ USB_DEVICE(CMOTECH_VENDOR_ID, CMOTECH_PRODUCT_6001) },
+ 	{ USB_DEVICE(CMOTECH_VENDOR_ID, CMOTECH_PRODUCT_CMU_300) },
+ 	{ USB_DEVICE(CMOTECH_VENDOR_ID, CMOTECH_PRODUCT_6003),
+@@ -1148,10 +1212,28 @@ static const struct usb_device_id option_ids[] = {
+ 	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_CC864_SINGLE) },
+ 	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_DE910_DUAL) },
+ 	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_UE910_V2) },
++	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE922_USBCFG0),
++		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg0 },
++	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE922_USBCFG3),
++		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg3 },
++	{ USB_DEVICE_INTERFACE_CLASS(TELIT_VENDOR_ID, TELIT_PRODUCT_LE922_USBCFG5, 0xff),
++		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg0 },
+ 	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE910),
+ 		.driver_info = (kernel_ulong_t)&telit_le910_blacklist },
++	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE910_USBCFG4),
++		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg3 },
+ 	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920),
+ 		.driver_info = (kernel_ulong_t)&telit_le920_blacklist },
++	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1207) },
++	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1208),
++		.driver_info = (kernel_ulong_t)&telit_le920a4_blacklist_1 },
++	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1211),
++		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg3 },
++	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1212),
++		.driver_info = (kernel_ulong_t)&telit_le920a4_blacklist_1 },
++	{ USB_DEVICE_INTERFACE_CLASS(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1213, 0xff) },
++	{ USB_DEVICE(TELIT_VENDOR_ID, TELIT_PRODUCT_LE920A4_1214),
++		.driver_info = (kernel_ulong_t)&telit_le922_blacklist_usbcfg3 },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, ZTE_PRODUCT_MF622, 0xff, 0xff, 0xff) }, /* ZTE WCDMA products */
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x0002, 0xff, 0xff, 0xff),
+ 		.driver_info = (kernel_ulong_t)&net_intf1_blacklist },
+@@ -1562,7 +1644,79 @@ static const struct usb_device_id option_ids[] = {
+ 		.driver_info = (kernel_ulong_t)&net_intf3_blacklist },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x0178, 0xff, 0xff, 0xff),
+ 		.driver_info = (kernel_ulong_t)&net_intf3_blacklist },
+-	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffe9, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff42, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff43, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff44, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff45, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff46, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff47, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff48, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff49, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff4a, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff4b, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff4c, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff4d, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff4e, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff4f, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff50, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff51, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff52, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff53, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff54, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff55, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff56, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff57, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff58, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff59, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff5a, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff5b, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff5c, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff5d, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff5e, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff5f, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff60, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff61, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff62, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff63, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff64, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff65, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff66, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff67, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff68, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff69, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff6a, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff6b, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff6c, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff6d, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff6e, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff6f, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff70, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff71, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff72, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff73, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff74, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff75, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff76, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff77, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff78, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff79, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff7a, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff7b, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff7c, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff7d, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff7e, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff7f, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff80, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff81, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff82, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff83, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff84, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff85, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff86, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff87, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff88, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff89, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff8a, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff8b, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff8c, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff8d, 0xff, 0xff, 0xff) },
+@@ -1573,6 +1727,61 @@ static const struct usb_device_id option_ids[] = {
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff92, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff93, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff94, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff9f, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffa0, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffa1, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffa2, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffa3, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffa4, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffa5, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffa6, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffa7, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffa8, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffa9, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffaa, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffab, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffac, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffae, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffaf, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffb0, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffb1, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffb2, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffb3, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffb4, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffb5, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffb6, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffb7, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffb8, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffb9, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffba, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffbb, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffbc, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffbd, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffbe, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffbf, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffc0, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffc1, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffc2, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffc3, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffc4, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffc5, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffc6, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffc7, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffc8, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffc9, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffca, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffcb, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffcc, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffcd, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffce, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffcf, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffd0, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffd1, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffd2, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffd3, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffd4, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffd5, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffe9, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffec, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xffee, 0xff, 0xff, 0xff) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xfff6, 0xff, 0xff, 0xff) },
+@@ -1591,6 +1800,14 @@ static const struct usb_device_id option_ids[] = {
+ 	 .driver_info = (kernel_ulong_t)&zte_ad3812_z_blacklist },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, ZTE_PRODUCT_MC2716, 0xff, 0xff, 0xff),
+ 	 .driver_info = (kernel_ulong_t)&zte_mc2716_z_blacklist },
++	{ USB_DEVICE(ZTE_VENDOR_ID, ZTE_PRODUCT_ME3620_L),
++	 .driver_info = (kernel_ulong_t)&zte_me3620_xl_blacklist },
++	{ USB_DEVICE(ZTE_VENDOR_ID, ZTE_PRODUCT_ME3620_MBIM),
++	 .driver_info = (kernel_ulong_t)&zte_me3620_mbim_blacklist },
++	{ USB_DEVICE(ZTE_VENDOR_ID, ZTE_PRODUCT_ME3620_X),
++	 .driver_info = (kernel_ulong_t)&zte_me3620_xl_blacklist },
++	{ USB_DEVICE(ZTE_VENDOR_ID, ZTE_PRODUCT_ZM8620_X),
++	 .driver_info = (kernel_ulong_t)&zte_zm8620_x_blacklist },
+ 	{ USB_VENDOR_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff, 0x02, 0x01) },
+ 	{ USB_VENDOR_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff, 0x02, 0x05) },
+ 	{ USB_VENDOR_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0xff, 0x86, 0x10) },
+@@ -1609,6 +1826,8 @@ static const struct usb_device_id option_ids[] = {
+ 	{ USB_DEVICE(ALINK_VENDOR_ID, 0x9000) },
+ 	{ USB_DEVICE(ALINK_VENDOR_ID, ALINK_PRODUCT_PH300) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(ALINK_VENDOR_ID, ALINK_PRODUCT_3GU, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE(ALINK_VENDOR_ID, SIMCOM_PRODUCT_SIM7100E),
++	  .driver_info = (kernel_ulong_t)&simcom_sim7100e_blacklist },
+ 	{ USB_DEVICE(ALCATEL_VENDOR_ID, ALCATEL_PRODUCT_X060S_X200),
+ 	  .driver_info = (kernel_ulong_t)&alcatel_x200_blacklist
+ 	},
+@@ -1629,6 +1848,9 @@ static const struct usb_device_id option_ids[] = {
+ 	{ USB_DEVICE(LONGCHEER_VENDOR_ID, FOUR_G_SYSTEMS_PRODUCT_W14),
+   	  .driver_info = (kernel_ulong_t)&four_g_w14_blacklist
+   	},
++	{ USB_DEVICE(LONGCHEER_VENDOR_ID, FOUR_G_SYSTEMS_PRODUCT_W100),
++	  .driver_info = (kernel_ulong_t)&four_g_w100_blacklist
++	},
+ 	{ USB_DEVICE_INTERFACE_CLASS(LONGCHEER_VENDOR_ID, SPEEDUP_PRODUCT_SU9800, 0xff) },
+ 	{ USB_DEVICE(LONGCHEER_VENDOR_ID, ZOOM_PRODUCT_4597) },
+ 	{ USB_DEVICE(LONGCHEER_VENDOR_ID, IBALL_3_5G_CONNECT) },
+@@ -1656,9 +1878,15 @@ static const struct usb_device_id option_ids[] = {
+ 	{ USB_DEVICE(CINTERION_VENDOR_ID, CINTERION_PRODUCT_EU3_P) },
+ 	{ USB_DEVICE(CINTERION_VENDOR_ID, CINTERION_PRODUCT_PH8),
+ 		.driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+-	{ USB_DEVICE(CINTERION_VENDOR_ID, CINTERION_PRODUCT_AHXX) },
++	{ USB_DEVICE_INTERFACE_CLASS(CINTERION_VENDOR_ID, CINTERION_PRODUCT_AHXX, 0xff) },
+ 	{ USB_DEVICE(CINTERION_VENDOR_ID, CINTERION_PRODUCT_PLXX),
+ 		.driver_info = (kernel_ulong_t)&net_intf4_blacklist },
++	{ USB_DEVICE_INTERFACE_CLASS(CINTERION_VENDOR_ID, CINTERION_PRODUCT_PH8_2RMNET, 0xff),
++		.driver_info = (kernel_ulong_t)&cinterion_rmnet2_blacklist },
++	{ USB_DEVICE_INTERFACE_CLASS(CINTERION_VENDOR_ID, CINTERION_PRODUCT_PH8_AUDIO, 0xff),
++		.driver_info = (kernel_ulong_t)&net_intf4_blacklist },
++	{ USB_DEVICE_INTERFACE_CLASS(CINTERION_VENDOR_ID, CINTERION_PRODUCT_AHXX_2RMNET, 0xff) },
++	{ USB_DEVICE_INTERFACE_CLASS(CINTERION_VENDOR_ID, CINTERION_PRODUCT_AHXX_AUDIO, 0xff) },
+ 	{ USB_DEVICE(CINTERION_VENDOR_ID, CINTERION_PRODUCT_HC28_MDM) }, 
+ 	{ USB_DEVICE(CINTERION_VENDOR_ID, CINTERION_PRODUCT_HC28_MDMNET) },
+ 	{ USB_DEVICE(SIEMENS_VENDOR_ID, CINTERION_PRODUCT_HC25_MDM) },
+@@ -1765,11 +1993,17 @@ static const struct usb_device_id option_ids[] = {
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d02, 0xff, 0x00, 0x00) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d03, 0xff, 0x02, 0x01) },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x2001, 0x7d03, 0xff, 0x00, 0x00) },
++	{ USB_DEVICE_INTERFACE_CLASS(0x2001, 0x7e19, 0xff),			/* D-Link DWM-221 B1 */
++	  .driver_info = (kernel_ulong_t)&net_intf4_blacklist },
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x3e01, 0xff, 0xff, 0xff) }, /* D-Link DWM-152/C1 */
+ 	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x3e02, 0xff, 0xff, 0xff) }, /* D-Link DWM-156/C1 */
++	{ USB_DEVICE_AND_INTERFACE_INFO(0x07d1, 0x7e11, 0xff, 0xff, 0xff) }, /* D-Link DWM-156/A3 */
+ 	{ USB_DEVICE_INTERFACE_CLASS(0x2020, 0x4000, 0xff) },                /* OLICARD300 - MT6225 */
+ 	{ USB_DEVICE(INOVIA_VENDOR_ID, INOVIA_SEW858) },
+ 	{ USB_DEVICE(VIATELECOM_VENDOR_ID, VIATELECOM_PRODUCT_CDS7) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(WETELECOM_VENDOR_ID, WETELECOM_PRODUCT_WMD200, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(WETELECOM_VENDOR_ID, WETELECOM_PRODUCT_6802, 0xff, 0xff, 0xff) },
++	{ USB_DEVICE_AND_INTERFACE_INFO(WETELECOM_VENDOR_ID, WETELECOM_PRODUCT_WMD300, 0xff, 0xff, 0xff) },
+ 	{ } /* Terminating entry */
+ };
+ MODULE_DEVICE_TABLE(usb, option_ids);
+@@ -1811,10 +2045,6 @@ static struct usb_serial_driver * const serial_drivers[] = {
+ 	&option_1port_device, NULL
+ };
+ 
+-struct option_private {
+-	u8 bInterfaceNumber;
+-};
+-
+ module_usb_serial_driver(serial_drivers, option_ids);
+ 
+ static int option_probe(struct usb_serial *serial,
+@@ -1858,29 +2088,19 @@ static int option_attach(struct usb_serial *serial)
+ 	struct usb_interface_descriptor *iface_desc;
+ 	const struct option_blacklist_info *blacklist;
+ 	struct usb_wwan_intf_private *data;
+-	struct option_private *priv;
+ 
+ 	data = kzalloc(sizeof(struct usb_wwan_intf_private), GFP_KERNEL);
+ 	if (!data)
+ 		return -ENOMEM;
+ 
+-	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+-	if (!priv) {
+-		kfree(data);
+-		return -ENOMEM;
+-	}
+-
+ 	/* Retrieve blacklist info stored at probe. */
+ 	blacklist = usb_get_serial_data(serial);
+ 
+ 	iface_desc = &serial->interface->cur_altsetting->desc;
+ 
+-	priv->bInterfaceNumber = iface_desc->bInterfaceNumber;
+-	data->private = priv;
+-
+ 	if (!blacklist || !test_bit(iface_desc->bInterfaceNumber,
+ 						&blacklist->sendsetup)) {
+-		data->send_setup = option_send_setup;
++		data->use_send_setup = 1;
+ 	}
+ 	spin_lock_init(&data->susp_lock);
+ 
+@@ -1892,9 +2112,7 @@ static int option_attach(struct usb_serial *serial)
+ static void option_release(struct usb_serial *serial)
+ {
+ 	struct usb_wwan_intf_private *intfdata = usb_get_serial_data(serial);
+-	struct option_private *priv = intfdata->private;
+ 
+-	kfree(priv);
+ 	kfree(intfdata);
+ }
+ 
+@@ -1941,7 +2159,7 @@ static void option_instat_callback(struct urb *urb)
+ 	} else if (status == -ENOENT || status == -ESHUTDOWN) {
+ 		dev_dbg(dev, "%s: urb stopped: %d\n", __func__, status);
+ 	} else
+-		dev_err(dev, "%s: error %d\n", __func__, status);
++		dev_dbg(dev, "%s: error %d\n", __func__, status);
+ 
+ 	/* Resubmit urb so we continue receiving IRQ data */
+ 	if (status != -ESHUTDOWN && status != -ENOENT) {
+@@ -1953,40 +2171,6 @@ static void option_instat_callback(struct urb *urb)
+ 	}
+ }
+ 
+-/** send RTS/DTR state to the port.
+- *
+- * This is exactly the same as SET_CONTROL_LINE_STATE from the PSTN
+- * CDC.
+-*/
+-static int option_send_setup(struct usb_serial_port *port)
+-{
+-	struct usb_serial *serial = port->serial;
+-	struct usb_wwan_intf_private *intfdata = usb_get_serial_data(serial);
+-	struct option_private *priv = intfdata->private;
+-	struct usb_wwan_port_private *portdata;
+-	int val = 0;
+-	int res;
+-
+-	portdata = usb_get_serial_port_data(port);
+-
+-	if (portdata->dtr_state)
+-		val |= 0x01;
+-	if (portdata->rts_state)
+-		val |= 0x02;
+-
+-	res = usb_autopm_get_interface(serial->interface);
+-	if (res)
+-		return res;
+-
+-	res = usb_control_msg(serial->dev, usb_sndctrlpipe(serial->dev, 0),
+-				0x22, 0x21, val, priv->bInterfaceNumber, NULL,
+-				0, USB_CTRL_SET_TIMEOUT);
+-
+-	usb_autopm_put_interface(serial->interface);
+-
+-	return res;
+-}
+-
+ MODULE_AUTHOR(DRIVER_AUTHOR);
+ MODULE_DESCRIPTION(DRIVER_DESC);
+ MODULE_LICENSE("GPL");
+diff --git a/drivers/usb/serial/qcserial.c b/drivers/usb/serial/qcserial.c
+old mode 100644
+new mode 100755
+index ebcec8c..d9aa6f2
+--- a/drivers/usb/serial/qcserial.c
++++ b/drivers/usb/serial/qcserial.c
+@@ -22,6 +22,8 @@
+ #define DRIVER_AUTHOR "Qualcomm Inc"
+ #define DRIVER_DESC "Qualcomm USB Serial driver"
+ 
++#define QUECTEL_EC20_PID	0x9215
++
+ /* standard device layouts supported by this driver */
+ enum qcserial_layouts {
+ 	QCSERIAL_G2K = 0,	/* Gobi 2000 */
+@@ -143,9 +145,11 @@ static const struct usb_device_id id_table[] = {
+ 	{DEVICE_SWI(0x0f3d, 0x68a2)},	/* Sierra Wireless MC7700 */
+ 	{DEVICE_SWI(0x114f, 0x68a2)},	/* Sierra Wireless MC7750 */
+ 	{DEVICE_SWI(0x1199, 0x68a2)},	/* Sierra Wireless MC7710 */
++	{DEVICE_SWI(0x1199, 0x68c0)},	/* Sierra Wireless MC7304/MC7354 */
+ 	{DEVICE_SWI(0x1199, 0x901c)},	/* Sierra Wireless EM7700 */
+ 	{DEVICE_SWI(0x1199, 0x901f)},	/* Sierra Wireless EM7355 */
+ 	{DEVICE_SWI(0x1199, 0x9040)},	/* Sierra Wireless Modem */
++	{DEVICE_SWI(0x1199, 0x9041)},	/* Sierra Wireless MC7305/MC7355 */
+ 	{DEVICE_SWI(0x1199, 0x9051)},	/* Netgear AirCard 340U */
+ 	{DEVICE_SWI(0x1199, 0x9053)},	/* Sierra Wireless Modem */
+ 	{DEVICE_SWI(0x1199, 0x9054)},	/* Sierra Wireless Modem */
+@@ -153,12 +157,17 @@ static const struct usb_device_id id_table[] = {
+ 	{DEVICE_SWI(0x1199, 0x9056)},	/* Sierra Wireless Modem */
+ 	{DEVICE_SWI(0x1199, 0x9060)},	/* Sierra Wireless Modem */
+ 	{DEVICE_SWI(0x1199, 0x9061)},	/* Sierra Wireless Modem */
++	{DEVICE_SWI(0x1199, 0x9070)},	/* Sierra Wireless MC74xx */
++	{DEVICE_SWI(0x1199, 0x9071)},	/* Sierra Wireless MC74xx */
++	{DEVICE_SWI(0x1199, 0x9078)},	/* Sierra Wireless EM74xx */
++	{DEVICE_SWI(0x1199, 0x9079)},	/* Sierra Wireless EM74xx */
+ 	{DEVICE_SWI(0x413c, 0x81a2)},	/* Dell Wireless 5806 Gobi(TM) 4G LTE Mobile Broadband Card */
+ 	{DEVICE_SWI(0x413c, 0x81a3)},	/* Dell Wireless 5570 HSPA+ (42Mbps) Mobile Broadband Card */
+ 	{DEVICE_SWI(0x413c, 0x81a4)},	/* Dell Wireless 5570e HSPA+ (42Mbps) Mobile Broadband Card */
+ 	{DEVICE_SWI(0x413c, 0x81a8)},	/* Dell Wireless 5808 Gobi(TM) 4G LTE Mobile Broadband Card */
+ 	{DEVICE_SWI(0x413c, 0x81a9)},	/* Dell Wireless 5808e Gobi(TM) 4G LTE Mobile Broadband Card */
+ 	{DEVICE_SWI(0x413c, 0x81b1)},	/* Dell Wireless 5809e Gobi(TM) 4G LTE Mobile Broadband Card */
++	{DEVICE_SWI(0x413c, 0x81b3)},	/* Dell Wireless 5809e Gobi(TM) 4G LTE Mobile Broadband Card (rev3) */
+ 
+ 	/* Huawei devices */
+ 	{DEVICE_HWI(0x03f0, 0x581d)},	/* HP lt4112 LTE/HSPA+ Gobi 4G Modem (Huawei me906e) */
+@@ -167,6 +176,38 @@ static const struct usb_device_id id_table[] = {
+ };
+ MODULE_DEVICE_TABLE(usb, id_table);
+ 
++static int handle_quectel_ec20(struct device *dev, int ifnum)
++{
++	int altsetting = 0;
++
++	/*
++	 * Quectel EC20 Mini PCIe LTE module layout:
++	 * 0: DM/DIAG (use libqcdm from ModemManager for communication)
++	 * 1: NMEA
++	 * 2: AT-capable modem port
++	 * 3: Modem interface
++	 * 4: NDIS
++	 */
++	switch (ifnum) {
++	case 0:
++		dev_dbg(dev, "Quectel EC20 DM/DIAG interface found\n");
++		break;
++	case 1:
++		dev_dbg(dev, "Quectel EC20 NMEA GPS interface found\n");
++		break;
++	case 2:
++	case 3:
++		dev_dbg(dev, "Quectel EC20 Modem port found\n");
++		break;
++	case 4:
++		/* Don't claim the QMI/net interface */
++		altsetting = -1;
++		break;
++	}
++
++	return altsetting;
++}
++
+ static int qcprobe(struct usb_serial *serial, const struct usb_device_id *id)
+ {
+ 	struct usb_host_interface *intf = serial->interface->cur_altsetting;
+@@ -175,6 +216,11 @@ static int qcprobe(struct usb_serial *serial, const struct usb_device_id *id)
+ 	__u8 nintf;
+ 	__u8 ifnum;
+ 	int altsetting = -1;
++	bool sendsetup = false;
++
++	/* we only support vendor specific functions */
++	if (intf->desc.bInterfaceClass != USB_CLASS_VENDOR_SPEC)
++		goto done;
+ 
+ 	nintf = serial->dev->actconfig->desc.bNumInterfaces;
+ 	dev_dbg(dev, "Num Interfaces = %d\n", nintf);
+@@ -235,6 +281,12 @@ static int qcprobe(struct usb_serial *serial, const struct usb_device_id *id)
+ 			altsetting = -1;
+ 		break;
+ 	case QCSERIAL_G2K:
++		/* handle non-standard layouts */
++		if (nintf == 5 && id->idProduct == QUECTEL_EC20_PID) {
++			altsetting = handle_quectel_ec20(dev, ifnum);
++			goto done;
++		}
++
+ 		/*
+ 		 * Gobi 2K+ USB layout:
+ 		 * 0: QMI/net
+@@ -286,6 +338,7 @@ static int qcprobe(struct usb_serial *serial, const struct usb_device_id *id)
+ 			break;
+ 		case 3:
+ 			dev_dbg(dev, "Modem port found\n");
++			sendsetup = true;
+ 			break;
+ 		default:
+ 			/* don't claim any unsupported interface */
+@@ -295,29 +348,39 @@ static int qcprobe(struct usb_serial *serial, const struct usb_device_id *id)
+ 		break;
+ 	case QCSERIAL_HWI:
+ 		/*
+-		 * Huawei layout:
+-		 * 0: AT-capable modem port
+-		 * 1: DM/DIAG
+-		 * 2: AT-capable modem port
+-		 * 3: CCID-compatible PCSC interface
+-		 * 4: QMI/net
+-		 * 5: NMEA
++		 * Huawei devices map functions by subclass + protocol
++		 * instead of interface numbers. The protocol identify
++		 * a specific function, while the subclass indicate a
++		 * specific firmware source
++		 *
++		 * This is a blacklist of functions known to be
++		 * non-serial.  The rest are assumed to be serial and
++		 * will be handled by this driver
+ 		 */
+-		switch (ifnum) {
+-		case 0:
+-		case 2:
+-			dev_dbg(dev, "Modem port found\n");
+-			break;
+-		case 1:
+-			dev_dbg(dev, "DM/DIAG interface found\n");
+-			break;
+-		case 5:
+-			dev_dbg(dev, "NMEA GPS interface found\n");
+-			break;
+-		default:
+-			/* don't claim any unsupported interface */
++		switch (intf->desc.bInterfaceProtocol) {
++			/* QMI combined (qmi_wwan) */
++		case 0x07:
++		case 0x37:
++		case 0x67:
++			/* QMI data (qmi_wwan) */
++		case 0x08:
++		case 0x38:
++		case 0x68:
++			/* QMI control (qmi_wwan) */
++		case 0x09:
++		case 0x39:
++		case 0x69:
++			/* NCM like (huawei_cdc_ncm) */
++		case 0x16:
++		case 0x46:
++		case 0x76:
+ 			altsetting = -1;
+ 			break;
++		default:
++			dev_dbg(dev, "Huawei type serial port found (%02x/%02x/%02x)\n",
++				intf->desc.bInterfaceClass,
++				intf->desc.bInterfaceSubClass,
++				intf->desc.bInterfaceProtocol);
+ 		}
+ 		break;
+ 	default:
+@@ -337,17 +400,25 @@ done:
+ 		}
+ 	}
+ 
++	if (!retval)
++		usb_set_serial_data(serial, (void *)(unsigned long)sendsetup);
++
+ 	return retval;
+ }
+ 
+ static int qc_attach(struct usb_serial *serial)
+ {
+ 	struct usb_wwan_intf_private *data;
++	bool sendsetup;
+ 
+ 	data = kzalloc(sizeof(*data), GFP_KERNEL);
+ 	if (!data)
+ 		return -ENOMEM;
+ 
++	sendsetup = !!(unsigned long)(usb_get_serial_data(serial));
++	if (sendsetup)
++		data->use_send_setup = 1;
++
+ 	spin_lock_init(&data->susp_lock);
+ 
+ 	usb_set_serial_data(serial, data);
+diff --git a/drivers/usb/serial/usb-serial.c b/drivers/usb/serial/usb-serial.c
+old mode 100644
+new mode 100755
+index 46f1f13..fdbc906
+--- a/drivers/usb/serial/usb-serial.c
++++ b/drivers/usb/serial/usb-serial.c
+@@ -254,7 +254,7 @@ static int serial_open(struct tty_struct *tty, struct file *filp)
+  *
+  * Shut down a USB serial port. Serialized against activate by the
+  * tport mutex and kept to matching open/close pairs
+- * of calls by the ASYNCB_INITIALIZED flag.
++ * of calls by the initialized flag.
+  *
+  * Not called if tty is console.
+  */
+@@ -1077,7 +1077,8 @@ static int usb_serial_probe(struct usb_interface *interface,
+ 
+ 	serial->disconnected = 0;
+ 
+-	usb_serial_console_init(serial->port[0]->minor);
++	if (num_ports > 0)
++		usb_serial_console_init(serial->port[0]->minor);
+ exit:
+ 	module_put(type->driver.owner);
+ 	return 0;
+@@ -1432,7 +1433,7 @@ int usb_serial_register_drivers(struct usb_serial_driver *const serial_drivers[]
+ 
+ 	rc = usb_register(udriver);
+ 	if (rc)
+-		return rc;
++		goto failed_usb_register;
+ 
+ 	for (sd = serial_drivers; *sd; ++sd) {
+ 		(*sd)->usb_driver = udriver;
+@@ -1450,6 +1451,8 @@ int usb_serial_register_drivers(struct usb_serial_driver *const serial_drivers[]
+ 	while (sd-- > serial_drivers)
+ 		usb_serial_deregister(*sd);
+ 	usb_deregister(udriver);
++failed_usb_register:
++	kfree(udriver);
+ 	return rc;
+ }
+ EXPORT_SYMBOL_GPL(usb_serial_register_drivers);
+diff --git a/drivers/usb/serial/usb-wwan.h b/drivers/usb/serial/usb-wwan.h
+old mode 100644
+new mode 100755
+index f22dff5..44b25c0
+--- a/drivers/usb/serial/usb-wwan.h
++++ b/drivers/usb/serial/usb-wwan.h
+@@ -34,9 +34,9 @@ extern int usb_wwan_resume(struct usb_serial *serial);
+ struct usb_wwan_intf_private {
+ 	spinlock_t susp_lock;
+ 	unsigned int suspended:1;
++	unsigned int use_send_setup:1;
+ 	int in_flight;
+ 	unsigned int open_ports;
+-	int (*send_setup) (struct usb_serial_port *port);
+ 	void *private;
+ };
+ 
+diff --git a/drivers/usb/serial/usb_wwan.c b/drivers/usb/serial/usb_wwan.c
+old mode 100644
+new mode 100755
+index 2f805cb..141175b
+--- a/drivers/usb/serial/usb_wwan.c
++++ b/drivers/usb/serial/usb_wwan.c
+@@ -36,6 +36,40 @@
+ #include <linux/serial.h>
+ #include "usb-wwan.h"
+ 
++/*
++ * Generate DTR/RTS signals on the port using the SET_CONTROL_LINE_STATE request
++ * in CDC ACM.
++ */
++static int usb_wwan_send_setup(struct usb_serial_port *port)
++{
++	struct usb_serial *serial = port->serial;
++	struct usb_wwan_port_private *portdata;
++	int val = 0;
++	int ifnum;
++	int res;
++
++	portdata = usb_get_serial_port_data(port);
++
++	if (portdata->dtr_state)
++		val |= 0x01;
++	if (portdata->rts_state)
++		val |= 0x02;
++
++	ifnum = serial->interface->cur_altsetting->desc.bInterfaceNumber;
++
++	res = usb_autopm_get_interface(serial->interface);
++	if (res)
++		return res;
++
++	res = usb_control_msg(serial->dev, usb_sndctrlpipe(serial->dev, 0),
++				0x22, 0x21, val, ifnum, NULL, 0,
++				USB_CTRL_SET_TIMEOUT);
++
++	usb_autopm_put_interface(port->serial->interface);
++
++	return res;
++}
++
+ void usb_wwan_dtr_rts(struct usb_serial_port *port, int on)
+ {
+ 	struct usb_wwan_port_private *portdata;
+@@ -43,7 +77,7 @@ void usb_wwan_dtr_rts(struct usb_serial_port *port, int on)
+ 
+ 	intfdata = usb_get_serial_data(port->serial);
+ 
+-	if (!intfdata->send_setup)
++	if (!intfdata->use_send_setup)
+ 		return;
+ 
+ 	portdata = usb_get_serial_port_data(port);
+@@ -51,7 +85,7 @@ void usb_wwan_dtr_rts(struct usb_serial_port *port, int on)
+ 	portdata->rts_state = on;
+ 	portdata->dtr_state = on;
+ 
+-	intfdata->send_setup(port);
++	usb_wwan_send_setup(port);
+ }
+ EXPORT_SYMBOL(usb_wwan_dtr_rts);
+ 
+@@ -84,7 +118,7 @@ int usb_wwan_tiocmset(struct tty_struct *tty,
+ 	portdata = usb_get_serial_port_data(port);
+ 	intfdata = usb_get_serial_data(port->serial);
+ 
+-	if (!intfdata->send_setup)
++	if (!intfdata->use_send_setup)
+ 		return -EINVAL;
+ 
+ 	/* FIXME: what locks portdata fields ? */
+@@ -97,7 +131,7 @@ int usb_wwan_tiocmset(struct tty_struct *tty,
+ 		portdata->rts_state = 0;
+ 	if (clear & TIOCM_DTR)
+ 		portdata->dtr_state = 0;
+-	return intfdata->send_setup(port);
++	return usb_wwan_send_setup(port);
+ }
+ EXPORT_SYMBOL(usb_wwan_tiocmset);
+ 
+@@ -282,7 +316,7 @@ static void usb_wwan_indat_callback(struct urb *urb)
+ 	/* Resubmit urb so we continue receiving */
+ 	err = usb_submit_urb(urb, GFP_ATOMIC);
+ 	if (err) {
+-		if (err != -EPERM) {
++		if (err != -EPERM && err != -ENODEV) {
+ 			dev_err(dev, "%s: resubmit read urb failed. (%d)\n",
+ 				__func__, err);
+ 			/* busy also in error unless we are killed */
+@@ -430,7 +464,7 @@ void usb_wwan_close(struct usb_serial_port *port)
+ 
+ 	/*
+ 	 * Need to take susp_lock to make sure port is not already being
+-	 * resumed, but no need to hold it due to ASYNC_INITIALIZED.
++	 * resumed, but no need to hold it due to initialized
+ 	 */
+ 	spin_lock_irq(&intfdata->susp_lock);
+ 	if (--intfdata->open_ports == 0)
+diff --git a/include/linux/usb/cdc.h b/include/linux/usb/cdc.h
+new file mode 100644
+index 0000000..b5706f9
+--- /dev/null
++++ b/include/linux/usb/cdc.h
+@@ -0,0 +1,51 @@
++/*
++ * USB CDC common helpers
++ *
++ * Copyright (c) 2015 Oliver Neukum <oneukum@suse.com>
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * version 2 as published by the Free Software Foundation.
++ */
++#ifndef __LINUX_USB_CDC_H
++#define __LINUX_USB_CDC_H
++
++#include <uapi/linux/usb/cdc.h>
++
++/*
++ * inofficial magic numbers
++ */
++
++#define CDC_PHONET_MAGIC_NUMBER		0xAB
++
++/*
++ * parsing CDC headers
++ */
++
++struct usb_cdc_parsed_header {
++	struct usb_cdc_union_desc *usb_cdc_union_desc;
++	struct usb_cdc_header_desc *usb_cdc_header_desc;
++
++	struct usb_cdc_call_mgmt_descriptor *usb_cdc_call_mgmt_descriptor;
++	struct usb_cdc_acm_descriptor *usb_cdc_acm_descriptor;
++	struct usb_cdc_country_functional_desc *usb_cdc_country_functional_desc;
++	struct usb_cdc_network_terminal_desc *usb_cdc_network_terminal_desc;
++	struct usb_cdc_ether_desc *usb_cdc_ether_desc;
++	struct usb_cdc_dmm_desc *usb_cdc_dmm_desc;
++	struct usb_cdc_mdlm_desc *usb_cdc_mdlm_desc;
++	struct usb_cdc_mdlm_detail_desc *usb_cdc_mdlm_detail_desc;
++	struct usb_cdc_obex_desc *usb_cdc_obex_desc;
++	struct usb_cdc_ncm_desc *usb_cdc_ncm_desc;
++	struct usb_cdc_mbim_desc *usb_cdc_mbim_desc;
++	struct usb_cdc_mbim_extended_desc *usb_cdc_mbim_extended_desc;
++
++	bool phonet_magic_present;
++};
++
++struct usb_interface;
++int cdc_parse_cdc_header(struct usb_cdc_parsed_header *hdr,
++				struct usb_interface *intf,
++				u8 *buffer,
++				int buflen);
++
++#endif /* __LINUX_USB_CDC_H */
+diff --git a/include/linux/usb/cdc_ncm.h b/include/linux/usb/cdc_ncm.h
+old mode 100644
+new mode 100755
+index 7c9b484..00d2324
+--- a/include/linux/usb/cdc_ncm.h
++++ b/include/linux/usb/cdc_ncm.h
+@@ -80,6 +80,10 @@
+ #define CDC_NCM_TIMER_INTERVAL_MIN		5UL
+ #define CDC_NCM_TIMER_INTERVAL_MAX		(U32_MAX / NSEC_PER_USEC)
+ 
++/* Driver flags */
++#define CDC_NCM_FLAG_NDP_TO_END			0x02	/* NDP is placed at end of frame */
++#define CDC_MBIM_FLAG_AVOID_ALTSETTING_TOGGLE	0x04	/* Avoid altsetting toggle during init */
++
+ #define cdc_ncm_comm_intf_is_mbim(x)  ((x)->desc.bInterfaceSubClass == USB_CDC_SUBCLASS_MBIM && \
+ 				       (x)->desc.bInterfaceProtocol == USB_CDC_PROTO_NONE)
+ #define cdc_ncm_data_intf_is_mbim(x)  ((x)->desc.bInterfaceProtocol == USB_CDC_MBIM_PROTO_NTB)
+@@ -103,9 +107,11 @@ struct cdc_ncm_ctx {
+ 
+ 	spinlock_t mtx;
+ 	atomic_t stop;
++	int drvflags;
+ 
+ 	u32 timer_interval;
+ 	u32 max_ndp_size;
++	struct usb_cdc_ncm_ndp16 *delayed_ndp16;
+ 
+ 	u32 tx_timer_pending;
+ 	u32 tx_curr_frame_num;
+@@ -133,7 +139,8 @@ struct cdc_ncm_ctx {
+ };
+ 
+ u8 cdc_ncm_select_altsetting(struct usb_interface *intf);
+-int cdc_ncm_bind_common(struct usbnet *dev, struct usb_interface *intf, u8 data_altsetting);
++int cdc_ncm_change_mtu(struct net_device *net, int new_mtu);
++int cdc_ncm_bind_common(struct usbnet *dev, struct usb_interface *intf, u8 data_altsetting, int drvflags);
+ void cdc_ncm_unbind(struct usbnet *dev, struct usb_interface *intf);
+ struct sk_buff *cdc_ncm_fill_tx_frame(struct usbnet *dev, struct sk_buff *skb, __le32 sign);
+ int cdc_ncm_rx_verify_nth16(struct cdc_ncm_ctx *ctx, struct sk_buff *skb_in);
+diff --git a/include/uapi/linux/usb/cdc.h b/include/uapi/linux/usb/cdc.h
+old mode 100644
+new mode 100755
+index b6a9cdd..e2bc417
+--- a/include/uapi/linux/usb/cdc.h
++++ b/include/uapi/linux/usb/cdc.h
+@@ -6,8 +6,8 @@
+  * firmware based USB peripherals.
+  */
+ 
+-#ifndef __LINUX_USB_CDC_H
+-#define __LINUX_USB_CDC_H
++#ifndef __UAPI_LINUX_USB_CDC_H
++#define __UAPI_LINUX_USB_CDC_H
+ 
+ #include <linux/types.h>
+ 
+@@ -444,4 +444,4 @@ struct usb_cdc_ncm_ndp_input_size {
+ #define USB_CDC_NCM_CRC_NOT_APPENDED			0x00
+ #define USB_CDC_NCM_CRC_APPENDED			0x01
+ 
+-#endif /* __LINUX_USB_CDC_H */
++#endif /* __UAPI_LINUX_USB_CDC_H */

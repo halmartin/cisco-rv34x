@@ -1,0 +1,24 @@
+#2018-01-24: Krishna Chaitanya S<chaitanya.sakinam@nxp.com>
+# Clearing permanent bit from connection during its deletion.
+--- a/net/netfilter/nf_conntrack_netlink.c	2018-01-24 12:42:52.100668843 +0530
++++ b/net/netfilter/nf_conntrack_netlink.c	2018-01-24 12:54:55.072668813 +0530
+@@ -13,6 +13,10 @@
+  *
+  * This software may be used and distributed according to the terms
+  * of the GNU General Public License, incorporated herein by reference.
++ *
++ * 24/1/2018	chaitanya.sakinam@nxp.com
++ *			Clearing permanent bit from connection during its deletion. 
++ *
+  */
+ 
+ #include <linux/init.h>
+@@ -1184,7 +1188,7 @@
+ #ifdef CONFIG_CPE_FAST_PATH
+ 		/* if permanent bit is set in the connection then set the dying bit to remove it */
+ 		if (nf_ct_is_permanent(ct))
+-			set_bit(IPS_DYING_BIT, &ct->status);
++			clear_bit(IPS_PERMANENT_BIT, &ct->status);
+ #endif
+ 		nf_ct_delete(ct, NETLINK_CB(skb).portid, nlmsg_report(nlh));
+ 	}

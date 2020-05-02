@@ -1,0 +1,838 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2007-2012 OpenWrt.org
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+START=85
+
+SERVICE_USE_PID=1
+
+DNS_SERVERS=""
+DOMAIN=""
+
+ADD_LOCAL_DOMAIN=1
+ADD_LOCAL_HOSTNAME=1
+
+CONFIGFILE="/var/etc/dnsmasq.conf"
+
+xappend() {
+	local value="$1"
+
+	echo "${value#--}" >> $CONFIGFILE
+}
+
+dhcp_calc() {
+	local ip="$1"
+	local res=0
+
+	while [ -n "$ip" ]; do
+		part="${ip%%.*}"
+		res="$(($res * 256))"
+		res="$(($res + $part))"
+		[ "${ip%.*}" != "$ip" ] && ip="${ip#*.}" || ip=
+	done
+	echo "$res"
+}
+
+append_bool() {
+	local section="$1"
+	local option="$2"
+	local value="$3"
+	local _loctmp
+	config_get_bool _loctmp "$section" "$option" 0
+	[ $_loctmp -gt 0 ] && xappend "$value"
+}
+
+append_parm() {
+	local section="$1"
+	local option="$2"
+	local switch="$3"
+	local _loctmp
+	config_get _loctmp "$section" "$option"
+	[ -z "$_loctmp" ] && return 0
+	xappend "$switch=$_loctmp"
+}
+
+append_server() {
+	xappend "--server=$1"
+}
+
+append_rserver() {
+	#We get the DNS servers from resolve.conf to bypass these domains to WAN servers.
+	[ -n "$DNS4_ISP_1" ] && {
+		xappend "--server=/$1/$DNS4_ISP_1"
+		[ -n "$DNS4_ISP_2" ] && {
+			xappend "--server=/$1/$DNS4_ISP_2"
+		}
+	}
+}
+
+append_address() {
+	xappend "--address=$1"
+}
+
+append_interface() {
+	local ifname=$(uci_get_state network "$1" ifname "$1")
+	xappend "--interface=$ifname"
+}
+
+append_notinterface() {
+	local ifname=$(uci_get_state network "$1" ifname "$1")
+	xappend "--except-interface=$ifname"
+}
+
+append_addnhosts() {
+	xappend "--addn-hosts=$1"
+}
+
+append_bogusnxdomain() {
+       xappend "--bogus-nxdomain=$1"
+}
+
+dnsmasq() {
+	local cfg="$1"
+	append_bool "$cfg" authoritative "--dhcp-authoritative"
+	append_bool "$cfg" nodaemon "--no-daemon"
+	append_bool "$cfg" domainneeded "--domain-needed"
+	append_bool "$cfg" filterwin2k "--filterwin2k"
+	append_bool "$cfg" nohosts "--no-hosts"
+	append_bool "$cfg" nonegcache "--no-negcache"
+	append_bool "$cfg" strictorder "--strict-order"
+	append_bool "$cfg" logqueries "--log-queries"
+	append_bool "$cfg" noresolv "--no-resolv"
+	append_bool "$cfg" localise_queries "--localise-queries"
+	append_bool "$cfg" readethers "--read-ethers"
+	append_bool "$cfg" dbus "--enable-dbus"
+	append_bool "$cfg" boguspriv "--bogus-priv"
+	append_bool "$cfg" expandhosts "--expand-hosts"
+	append_bool "$cfg" enable_tftp "--enable-tftp"
+	append_bool "$cfg" nonwildcard "--bind-interfaces"
+	append_bool "$cfg" fqdn "--dhcp-fqdn"
+
+	append_parm "$cfg" dhcpscript "--dhcp-script"
+	append_parm "$cfg" cachesize "--cache-size"
+	append_parm "$cfg" dnsforwardmax "--dns-forward-max"
+	append_parm "$cfg" port "--port"
+	append_parm "$cfg" ednspacket_max "--edns-packet-max"
+	append_parm "$cfg" dhcpleasemax "--dhcp-lease-max"
+	append_parm "$cfg" "queryport" "--query-port"
+	append_parm "$cfg" "domain" "--domain"
+	append_parm "$cfg" "local" "--server"
+	config_list_foreach "$cfg" "server" append_server
+	config_list_foreach "$cfg" "um_server" append_server
+	config_list_foreach "$cfg" "um_vpn_server" append_server
+	config_list_foreach "$cfg" "address" append_address
+	config_list_foreach "$cfg" "interface" append_interface
+	config_list_foreach "$cfg" "notinterface" append_notinterface
+	config_list_foreach "$cfg" "addnhosts" append_addnhosts
+	config_list_foreach "$cfg" "bogusnxdomain" append_bogusnxdomain
+	append_parm "$cfg" "leasefile" "--dhcp-leasefile"
+	append_parm "$cfg" "resolvfile" "--resolv-file"
+	append_parm "$cfg" "tftp_root" "--tftp-root"
+	append_parm "$cfg" "dhcp_boot" "--dhcp-boot"
+	append_parm "$cfg" "local_ttl" "--local-ttl"
+
+	config_get DOMAIN "$cfg" domain
+
+	config_get_bool ADD_LOCAL_DOMAIN "$cfg" add_local_domain 1
+	config_get_bool ADD_LOCAL_HOSTNAME "$cfg" add_local_hostname 1
+
+	config_get_bool readethers "$cfg" readethers
+	[ "$readethers" = "1" -a \! -e "/etc/ethers" ] && touch /etc/ethers
+
+	config_get leasefile $cfg leasefile
+	[ -n "$leasefile" -a \! -e "$leasefile" ] && touch "$leasefile"
+	config_get_bool cachelocal "$cfg" cachelocal 1
+
+	config_get hostsfile "$cfg" dhcphostsfile
+	[ -e "$hostsfile" ] && xappend "--dhcp-hostsfile=$hostsfile"
+
+	local rebind
+	config_get_bool rebind "$cfg" rebind_protection 1
+	[ $rebind -gt 0 ] && {
+		logger -t dnsmasq \
+			"DNS rebinding protection is active," \
+			"will discard upstream RFC1918 responses!"
+		xappend "--stop-dns-rebind"
+
+		local rebind_localhost
+		config_get_bool rebind_localhost "$cfg" rebind_localhost 0
+		[ $rebind_localhost -gt 0 ] && {
+			logger -t dnsmasq "Allowing 127.0.0.0/8 responses"
+			xappend "--rebind-localhost-ok"
+		}
+
+		append_rebind_domain() {
+			logger -t dnsmasq "Allowing RFC1918 responses for domain $1"
+			xappend "--rebind-domain-ok=$1"
+		}
+
+		config_list_foreach "$cfg" rebind_domain append_rebind_domain
+	}
+
+	dhcp_option_add "$cfg" "" 0
+
+	echo >> $CONFIGFILE
+}
+
+dhcp_subscrid_add() {
+	local cfg="$1"
+
+	config_get networkid "$cfg" networkid
+	[ -n "$networkid" ] || return 0
+
+	config_get subscriberid "$cfg" subscriberid
+	[ -n "$subscriberid" ] || return 0
+
+	xappend "--dhcp-subscrid=$networkid,$subscriberid"
+
+	config_get_bool force "$cfg" force 0
+
+	dhcp_option_add "$cfg" "$networkid" "$force"
+}
+
+dhcp_remoteid_add() {
+	local cfg="$1"
+
+	config_get networkid "$cfg" networkid
+	[ -n "$networkid" ] || return 0
+
+	config_get remoteid "$cfg" remoteid
+	[ -n "$remoteid" ] || return 0
+
+	xappend "--dhcp-remoteid=$networkid,$remoteid"
+
+	config_get_bool force "$cfg" force 0
+
+	dhcp_option_add "$cfg" "$networkid" "$force"
+}
+
+dhcp_circuitid_add() {
+	local cfg="$1"
+
+	config_get networkid "$cfg" networkid
+	[ -n "$networkid" ] || return 0
+
+	config_get circuitid "$cfg" circuitid
+	[ -n "$circuitid" ] || return 0
+
+	xappend "--dhcp-circuitid=$networkid,$circuitid"
+
+	config_get_bool force "$cfg" force 0
+
+	dhcp_option_add "$cfg" "$networkid" "$force"
+}
+
+dhcp_userclass_add() {
+	local cfg="$1"
+
+	config_get networkid "$cfg" networkid
+	[ -n "$networkid" ] || return 0
+
+	config_get userclass "$cfg" userclass
+	[ -n "$userclass" ] || return 0
+
+	xappend "--dhcp-userclass=$networkid,$userclass"
+
+	config_get_bool force "$cfg" force 0
+
+	dhcp_option_add "$cfg" "$networkid" "$force"
+}
+
+dhcp_vendorclass_add() {
+	local cfg="$1"
+
+	config_get networkid "$cfg" networkid
+	[ -n "$networkid" ] || return 0
+
+	config_get vendorclass "$cfg" vendorclass
+	[ -n "$vendorclass" ] || return 0
+
+	xappend "--dhcp-vendorclass=$networkid,$vendorclass"
+
+	config_get_bool force "$cfg" force 0
+
+	dhcp_option_add "$cfg" "$networkid" "$force"
+}
+
+dhcp_host_add() {
+	local cfg="$1"
+
+	config_get_bool force "$cfg" force 0
+
+	config_get status "$cfg" status
+	[ -n "$status" -a "$status" = "enable" ] || return 0
+
+	config_get networkid "$cfg" networkid
+	[ -n "$networkid" ] && dhcp_option_add "$cfg" "$networkid" "$force"
+
+	config_get name "$cfg" name
+	config_get ip "$cfg" ip
+	[ -n "$ip" -o -n "$name" ] || return 0
+
+	macs=""
+	config_get mac "$cfg" mac
+	for m in $mac; do append macs "$m" ","; done
+	[ -n "$macs" ] || return 0
+
+	config_get tag "$cfg" tag
+	name="$name"
+	xappend "--dhcp-host=$macs${networkid:+,net:$networkid}${tag:+,set:$tag}${ip:+,$ip}${name:+,$name}"
+}
+
+dhcp_tag_add() {
+	local cfg="$1"
+
+	tag="$cfg"
+
+	[ -n "$tag" ] || return 0
+
+	config_get_bool force "$cfg" force 0
+	[ "$force" = "0" ] && force=
+
+	config_get option "$cfg" dhcp_option
+	for o in $option; do
+		xappend "--dhcp-option${force:+-force}=tag:$tag,$o"
+	done
+}
+
+dhcp_mac_add() {
+	local cfg="$1"
+
+	config_get networkid "$cfg" networkid
+	[ -n "$networkid" ] || return 0
+
+	config_get mac "$cfg" mac
+	[ -n "$mac" ] || return 0
+
+	xappend "--dhcp-mac=$networkid,$mac"
+
+	dhcp_option_add "$cfg" "$networkid"
+}
+
+dhcp_boot_add() {
+	local cfg="$1"
+
+	config_get networkid "$cfg" networkid
+
+	config_get filename "$cfg" filename
+	[ -n "$filename" ] || return 0
+
+	config_get servername "$cfg" servername
+	[ -n "$servername" ] || return 0
+
+	config_get serveraddress "$cfg" serveraddress
+	[ -n "$serveraddress" ] || return 0
+
+	xappend "--dhcp-boot=${networkid:+net:$networkid,}$filename,$servername,$serveraddress"
+
+	config_get_bool force "$cfg" force 0
+
+	dhcp_option_add "$cfg" "$networkid" "$force"
+}
+
+
+dhcp_add() {
+	local cfg="$1"
+	local start_ip
+	local end_ip
+	
+	config_get net "$cfg" interface
+	[ -n "$net" ] || return 0
+
+	config_get enabled "$cfg" enabled
+	[ -n "$enabled" -a "$enabled" = "1" ] || return 0
+	
+	config_get networkid "$cfg" networkid
+	[ -n "$networkid" ] || networkid="$net"
+
+	config_get ifname "$net" ifname
+	[ -n "$ifname" ] || return 0
+
+	for br_nw in $br_nws; do
+		br_ifnames=$(ls /sys/devices/virtual/net/br-${br_nw}/brif)
+		for br_ifname in $br_ifnames; do
+			[ "$ifname" = "$br_ifname" ] && return 0
+		done
+	done
+
+	config_get dnsserver "$net" dns
+	[ "$cachelocal" = "0" -a -n "$dnsserver" ] && {
+		DNS_SERVERS="$DNS_SERVERS $dnsserver"
+	}
+
+	append_bool "$cfg" ignore "--no-dhcp-interface=$ifname" && return 0
+
+	config_get proto "$net" proto
+	[ static = "$proto" ] || return 0
+
+	config_get ipaddr "$net" ipaddr
+	config_get netmask "$cfg" netmask
+	[ -n "$netmask" ] || config_get netmask "$net" netmask
+
+	config_get start_ip "$cfg" start_ip
+	config_get end_ip "$cfg" end_ip
+	config_get leasetime "$cfg" leasetime
+	config_get options "$cfg" options
+	config_get_bool dynamicdhcp "$cfg" dynamicdhcp 1
+	config_get dns_type "$cfg" dns_type
+	
+	if [ "$dynamicdhcp" = "0" ]; then END="static"; fi
+
+	[ -n "$start_ip" -a -n "$end_ip" -a -n "$leasetime" -a -n "$netmask" ] || return 0	
+	xappend "--dhcp-range=$networkid,$start_ip,$end_ip,$netmask,$leasetime${options:+ $options}"
+
+	dhcp_option_add "$cfg" "$networkid"
+
+	if [ "$dns_type" = "isp" -a -n "$DNS4_ISP_1" ];
+	then
+		if [ -n "$DNS4_ISP_2" ]
+		then
+		xappend "--dhcp-option=$networkid,6,$DNS4_ISP_1,$DNS4_ISP_2"
+		else
+		xappend "--dhcp-option=$networkid,6,$DNS4_ISP_1"
+		fi
+	fi
+
+}
+
+
+
+
+dhcp_option_add() {
+	local cfg="$1"
+	local networkid="$2"
+	local force="$3"
+
+	[ "$force" = "0" ] && force=
+
+	config_get dhcp_option "$cfg" dhcp_option
+	for o in $dhcp_option; do
+		local option_43=`echo "$o" | cut -d ',' -f 1`
+		if [ "$option_43" = "43" ]
+		then
+			local option_value=`echo "$o" | cut -d ',' -f 2-`
+			xappend "--dhcp-option${force:+-force}=43,$option_value"
+		else
+			xappend "--dhcp-option${force:+-force}=${networkid:+$networkid,}$o"
+		fi
+	done
+
+}
+
+dhcp_domain_add() {
+	local cfg="$1"
+	local ip name names
+
+	config_get names "$cfg" name "$2"
+	[ -n "$names" ] || return 0
+
+	config_get ip "$cfg" ip "$3"
+	[ -n "$ip" ] || return 0
+
+	local oIFS="$IFS"; IFS="."; set -- $ip; IFS="$oIFS"
+	local raddr="${4:+$4.$3.$2.$1.in-addr.arpa}"
+
+	for name in $names; do
+		local fqdn="$name"
+
+		[ "${fqdn%.*}" == "$fqdn" ] && \
+			fqdn="$fqdn${DOMAIN:+.$DOMAIN}"
+
+		xappend "--address=/$fqdn/$ip"
+
+		[ -n "$raddr" ] && {
+			xappend "--ptr-record=$raddr,$fqdn"
+			raddr=""
+		}
+	done
+}
+
+dhcp_srv_add() {
+	local cfg="$1"
+
+	config_get srv "$cfg" srv
+	[ -n "$srv" ] || return 0
+
+	config_get target "$cfg" target
+	[ -n "$target" ] || return 0
+
+	config_get port "$cfg" port
+	[ -n "$port" ] || return 0
+
+	config_get class "$cfg" class
+	config_get weight "$cfg" weight
+
+	local service="$srv,$target,$port${class:+,$class${weight:+,$weight}}"
+
+	xappend "--srv-host=$service"
+}
+
+dhcp_mx_add() {
+	local cfg="$1"
+	local domain relay pref
+
+	config_get domain "$cfg" domain
+	[ -n "$domain" ] || return 0
+
+	config_get relay "$cfg" relay
+	[ -n "$relay" ] || return 0
+
+	config_get pref "$cfg" pref 0
+
+	local service="$domain,$relay,$pref"
+
+	xappend "--mx-host=$service"
+}
+
+dhcp_cname_add() {
+	local cfg="$1"
+	local cname target
+
+	config_get cname "$cfg" cname
+	[ -n "$cname" ] || return 0
+
+	config_get target "$cfg" target
+	[ -n "$target" ] || return 0
+
+	xappend "--cname=${cname},${target}"
+}
+
+start() {
+	include /lib/network
+	scan_interfaces
+
+	local lanaddr
+	config_get lanaddr "lan" ipaddr
+
+#	nw_ifaces=$(uci show network | grep "=interface"  | cut -d'.' -f 2 | cut -d'=' -f 1)
+	nw_ifaces=$(ls /sys/devices/virtual/net/ | grep "br-" | sed -e 's/^br-//g')
+	br_nws=""
+	for nw_iface in $nw_ifaces; do
+		config_get type "$nw_iface" type
+		[ "bridge" = "$type" ] && br_nws="$br_nws $nw_iface"
+	done
+	config_load dhcp
+
+	# before we can call xappend
+	mkdir -p $(dirname $CONFIGFILE)
+
+	echo "# auto-generated config file from /etc/config/dhcp" > $CONFIGFILE
+
+	# if we did this last, we could override auto-generated config
+	[ -f /etc/dnsmasq.conf ] && {
+		xappend "--conf-file=/etc/dnsmasq.conf"
+	}
+
+	args=""
+	config_foreach dnsmasq dnsmasq
+	config_foreach dhcp_host_add host
+	echo >> $CONFIGFILE
+	config_foreach dhcp_boot_add boot
+	config_foreach dhcp_mac_add mac
+	config_foreach dhcp_tag_add tag
+	config_foreach dhcp_vendorclass_add vendorclass
+	config_foreach dhcp_userclass_add userclass
+	config_foreach dhcp_circuitid_add circuitid
+	config_foreach dhcp_remoteid_add remoteid
+	config_foreach dhcp_subscrid_add subscrid
+	config_foreach dhcp_domain_add domain
+	echo >> $CONFIGFILE
+	config_foreach dhcp_srv_add srvhost
+	config_foreach dhcp_mx_add mxhost
+	echo >> $CONFIGFILE
+	
+	[ -f /tmp/resolv.conf.auto ] && {
+
+	case "$__this_device" in
+	RV16*|RV26*)
+
+		DNS4=$(grep -A 2 -w "Interface wan1p" /tmp/resolv.conf.auto | grep -re "nameserver" | grep -ve ":\|127.0.0.1" | uniq | head -n 2  |  awk '{print $2}')
+		if [ "$DNS4" == "" ]; then
+			DNS4=$(grep -A 2 -w "Interface wan1" /tmp/resolv.conf.auto | grep -re "nameserver" | grep -ve ":\|127.0.0.1" | uniq | head -n 2  |  awk '{print $2}')
+			[ "$DNS4" == "" ] && {
+				DNS4=$(grep -A 2 "Interface usb" /tmp/resolv.conf.auto | grep -re "nameserver" | grep -ve ":\|127.0.0.1" | uniq | head -n 2  |  awk '{print $2}')
+			}
+		fi
+		DNS6=$(grep -re "nameserver" /tmp/resolv.conf.auto  | grep : | head -n 2 |  awk '{print $2}')
+	;;
+
+	*) #BB Platforms
+		DNS4=$(grep -re "nameserver" /tmp/resolv.conf.auto  | grep -ve ":\|127.0.0.1" | uniq | head -n 2  |  awk '{print $2}')
+		DNS6=$(grep -re "nameserver" /tmp/resolv.conf.auto  | grep : | head -n 2 |  awk '{print $2}')
+	;;
+	esac
+
+	}
+	
+	DNS4_ISP_1=""
+	DNS4_ISP_2=""
+	
+	DNS6_ISP_1=""
+	DNS6_ISP_2=""
+	
+	[ -n "$DNS4" ] && {
+	set $DNS4
+	DNS4_ISP_1=$1
+	DNS4_ISP_2=$2
+	}
+			
+	[ -n "$DNS6" ] && {
+	set $DNS6
+	DNS6_ISP_1=$1
+	DNS6_ISP_2=$2
+	}
+
+	local rservers=$(uci get dhcp.@dnsmasq[0].um_rserver 2>/dev/null)
+	for domain in $rservers
+	do
+		append_rserver $domain
+	done
+
+	config_foreach dhcp_add dhcp
+	echo >> $CONFIGFILE
+	config_foreach dhcp6_add dhcp6
+	echo >> $CONFIGFILE
+	config_foreach dhcp_option82_add option82
+	echo >> $CONFIGFILE
+	config_foreach dhcp_cname_add cname
+	echo >> $CONFIGFILE
+	config_foreach dhcp_relay_add dhcrelay
+	echo >> $CONFIGFILE
+
+	# add own hostname
+	[ $ADD_LOCAL_HOSTNAME -eq 1 ] && [ -n "$lanaddr" ] && {
+		local hostname="$(uci_get system.@system[0].hostname)"
+		dhcp_domain_add "" "${hostname:-OpenWrt}" "$lanaddr"
+	}
+
+	service_start /usr/sbin/dnsmasq -C $CONFIGFILE && {
+		rm -f /tmp/resolv.conf
+		[ $ADD_LOCAL_DOMAIN -eq 1 ] && [ -n "$DOMAIN" ] && {
+			echo "search $DOMAIN" >> /tmp/resolv.conf
+		}
+		DNS_SERVERS="$DNS_SERVERS 127.0.0.1"
+		for DNS_SERVER in $DNS_SERVERS ; do
+			echo "nameserver $DNS_SERVER" >> /tmp/resolv.conf
+		done
+		ln -sf /tmp/resolv.conf.auto /tmp/resolv.conf
+	}
+}
+
+stop() {
+	service_stop /usr/sbin/dnsmasq && {
+		[ -f /tmp/resolv.conf ] && {
+			rm -f /tmp/resolv.conf
+			ln -sf /tmp/resolv.conf.auto /tmp/resolv.conf
+		}
+	}
+}
+
+boot() {
+	start
+
+	#echo "#Checking lanwancheck work around" >/dev/console
+	logger -t system -p local0.notice "#Checking lanwancheck work around Here"
+	# Temporary check for lan/wan1 issue
+	sleep 2
+	/etc/init.d/lanwancheck  lan_wan_work_around
+}
+
+dhcp_option82_add() {
+
+	local cfg="$1"
+	local cid="n"
+	local rid="n"
+	local temp
+	local a
+	local o
+	local options_string
+	local start_ip
+	local end_ip
+
+	config_get circuitid "$cfg" circuitid
+	
+	[ -n "$circuitid" ] || return 0  
+	
+	config_get description "$cfg" description
+	config_get start_ip "$cfg" start_ip 
+	config_get end_ip "$cfg" end_ip                                                      
+        config_get leasetime "$cfg" leasetime	
+        config_get dns_type "$cfg" dns_type
+	[ -n "$start_ip" -a -n "$end_ip" -a -n "$leasetime" ] || return 0 
+
+	config_get options_string "$cfg" dhcp_option
+	for a in $options_string; do
+	{
+		temp=$a
+		local oIFS="$IFS"; IFS=","
+		set $temp
+		IFS="$oIFS"	
+		if [ $1 -eq 3 ]
+		then
+		gateway=$2
+		subnet=$3
+		fi
+	}
+	done
+	
+	ipaddr=$gateway
+	[ -n "$ipaddr" ] || return 0 	
+	netmask=$subnet
+	[ -n "$netmask" ] || return 0 
+
+	is_hex=${circuitid:0:2}
+	if [ "$is_hex" != "0x" ]
+	then
+        	temp=`echo -n $circuitid|hexdump -v -e '/1 "%02X"'`
+        	length=`echo -n $circuitid |wc -c`
+        	length_hex=`printf '%x\n' $length`
+        	if [ "$length" -lt "15" ]
+        	then
+                	length_hex="0$length_hex"
+        	fi
+        	circuitid="0x01$length_hex$temp"
+	fi
+	
+	[ -n "$circuitid" ] && xappend "--dhcp-circuitid=set:'$circuitid',$circuitid"
+		xappend "--dhcp-range=tag:'$circuitid',$start_ip,$end_ip,$netmask,$leasetime"  	
+	
+	for o in $options_string; do
+			temp=$o                                                 
+            local oIFS="$IFS"; IFS=","          
+            set $temp                           
+            IFS="$oIFS" 
+			if [ $1 -eq 3 ]
+			then
+			xappend "--dhcp-option=tag:'$circuitid',3,$gateway"
+			else			
+			xappend "--dhcp-option=tag:'$circuitid',$o"
+			fi
+	done
+		
+	if [ "$dns_type" = "isp" -a -n "$DNS4_ISP_1" ];
+	then
+	
+		if [ -n "$DNS4_ISP_2" ]
+		then 
+			xappend "--dhcp-option=tag:'$circuitid',6,$DNS4_ISP_1,$DNS4_ISP_2"
+		else
+			xappend "--dhcp-option=tag:'$circuitid',6,$DNS4_ISP_1"
+		fi
+		
+	fi
+
+}
+
+
+dhcp6_add() {
+	
+	local cfg=$1
+	local net
+	local leasetime
+	local interface
+	local dns
+	local temp
+	local start_ip
+	local end_ip
+	local enabled
+	local ip6addr
+	local ip6class
+	local prefix
+	local dns_type
+		
+	config_get enabled "$cfg" enabled
+	[ $enabled -eq 1 ] || return 0
+	
+	config_get interface "$cfg" interface
+	[ -n "$interface" ] || return 0
+	 
+	config_get net "$cfg" interface
+	config_get ip6addr "$net" ip6addr
+	config_get ip6class "$net" ip6class
+	config_get start_ip "$cfg" start_ip
+	config_get end_ip "$cfg" end_ip                                                        
+        config_get leasetime "$cfg" leasetime
+        config_get dns_type "$cfg" dns_type
+	config_get start_val "$cfg" start_val
+	config_get end_val "$cfg" end_val
+	[ -n "$start_ip" -a -n "$end_ip" -a -n "$leasetime" ] || [ -n "$start_val" -a -n "$end_val" -a -n "$leasetime" ] || return 0
+	[ -n "$ip6addr" ] || [ -n "$ip6class" ] || return 0
+	
+	temp=$ip6addr
+	local oIFS="$IFS"; IFS="/"
+	set $temp
+	IFS="$oIFS"
+	prefix=$2
+	[ -n "$prefix" ] || {
+		#It is the case of PD's DHCP. Get ip6assign which is the prefix
+		config_get prefix "$net" ip6assign
+		[ -n "$prefix" ] || return 0
+	}
+	[ $prefix -lt 64 ] && prefix=64
+
+	[ -n "$start_ip" ] || {
+		#If atleast on of start_ip and end_ip are null then it is the case of PD's DHCP
+		network_get_prefixes6_assignment assigned_prefix $interface
+		only_prefix=$(echo $assigned_prefix | awk -F '/' '{printf $1}')
+		start_val=$(echo $start_val | awk -F ':' '{printf $3}')
+		end_val=$(echo $end_val | awk -F ':' '{printf $3}')
+		start_ip=$(owipcalc $only_prefix network add 0x$start_val print)
+		end_ip=$(owipcalc $only_prefix network add 0x$end_val print)
+	}
+
+    if [[ -n "$start_ip"  &&  -n "$end_ip" ]]; then
+        xappend "--dhcp-range=$interface,$start_ip,$end_ip,$prefix,$leasetime"
+    else
+        return 0
+    fi
+	
+	if [ "$dns_type" = "static" -o "$dns_type" = "proxy" ]	
+	then
+	config_get dns "$cfg" dhcp_option
+	[ -n "$dns" ] || return 0	
+
+	local oIFS="$IFS"; IFS=","
+	set $dns
+	[ $1 -eq 6 ] || return 0
+	a=$2
+	b=$3
+        [ -n "$a" ] || return 0
+		
+	if [ -n "$b" ]          
+	then                                                       
+		xappend "--dhcp-option=$interface,option6:dns-server,[$a],[$b]" 
+	else	
+		xappend "--dhcp-option=$interface,option6:dns-server,[$a]" 
+	fi
+	IFS="$oIFS"
+	fi
+	
+	
+	if [ "$dns_type" = "isp" -a -n "$DNS6_ISP_1" ];
+	then	
+		
+		if [ -n "$DNS6_ISP_2" ]
+		then                                                       
+		xappend "--dhcp-option=$interface,option6:dns-server,[$DNS6_ISP_1],[$DNS6_ISP_2]" 
+		else	
+		xappend "--dhcp-option=$interface,option6:dns-server,[$DNS6_ISP_1]" 
+		fi
+	fi
+	
+}
+
+
+dhcp_relay_add() {
+
+	local cfg=$1
+	config_get net "$cfg" interface
+	config_get dhcpserver "$cfg" dhcpserver
+	config_get local_ip "$net" ipaddr
+
+	xappend "--dhcp-relay=$local_ip,$dhcpserver"
+
+
+}
+

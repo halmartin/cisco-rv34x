@@ -1,0 +1,128 @@
+diff -rauN a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2016-08-16 16:34:52.628951281 +0530
++++ b/src/source/rtdot1x.c	2016-08-16 16:36:01.660952577 +0530
+@@ -666,7 +666,7 @@
+ 	
+ }
+ 
+-static void Handle_usr1(int sig, void *eloop_ctx, void *signal_ctx)
++static void Handle_sig_hup(int sig, void *eloop_ctx, void *signal_ctx)
+ {
+ 	struct hapd_interfaces *rtapds = (struct hapd_interfaces *) eloop_ctx;
+ 	struct rtapd_config *newconf;
+@@ -674,7 +674,7 @@
+ 
+ 	DBGPRINT(RT_DEBUG_TRACE,"Reloading configuration\n");
+ 	for (i = 0; i < rtapds->count; i++)
+-    {
++	{
+ 		rtapd *rtapd = rtapds->rtapd[i];
+ #ifdef CONFIG_RV34X_8021X 
+ 		newconf = nk_Config_read(config_filename, rtapd->prefix_wlan_name);
+@@ -682,7 +682,7 @@
+ 		newconf = Config_read(rtapd->ioctl_sock, rtapd->prefix_wlan_name);
+ #endif
+ 		if (newconf == NULL)
+-        {
++		{
+ 			DBGPRINT(RT_DEBUG_ERROR,"Failed to read new configuration file - continuing with old.\n");
+ 			continue;
+ 		}
+@@ -693,7 +693,7 @@
+ 		Radius_client_flush(rtapd);
+ 		Config_free(rtapd->conf);
+ 		rtapd->conf = newconf;
+-        Apd_free_stas(rtapd);
++		Apd_free_stas(rtapd);
+ 
+ /* when reStartAP, no need to reallocate sock
+         for (i = 0; i < rtapd->conf->SsidNum; i++)
+@@ -716,16 +716,75 @@
+ 		rtapd->radius->auth_serv_sock = -1;
+ #endif
+ 
+-	    if (Radius_client_init(rtapd))
+-        {
++		if (Radius_client_init(rtapd))
++		{
+ 		    DBGPRINT(RT_DEBUG_ERROR,"RADIUS client initialization failed.\n");
+ 		    return;
+-	    }
++		}
+ #if MULTIPLE_RADIUS
+ 		for (i = 0; i < rtapd->conf->SsidNum; i++)
+ 			DBGPRINT(RT_DEBUG_TRACE, "auth_serv_sock[%d] = %d\n", i, rtapd->radius->mbss_auth_serv_sock[i]);
+ #else
+-        DBGPRINT(RT_DEBUG_TRACE,"rtapd->radius->auth_serv_sock = %d\n",rtapd->radius->auth_serv_sock);
++	        DBGPRINT(RT_DEBUG_TRACE,"rtapd->radius->auth_serv_sock = %d\n",rtapd->radius->auth_serv_sock);
++#endif
++	}
++}
++
++static void Handle_usr1(int sig, void *eloop_ctx, void *signal_ctx)
++{
++	struct hapd_interfaces *rtapds = (struct hapd_interfaces *) eloop_ctx;
++	struct rtapd_config *newconf;
++	int i;
++	struct sta_info *sta;
++
++	DBGPRINT(RT_DEBUG_TRACE,"Reloading configuration\n");
++	for (i = 0; i < rtapds->count; i++)
++	{
++		rtapd *rtapd = rtapds->rtapd[i];
++#ifdef CONFIG_RV34X_8021X 
++		newconf = nk_Config_read(config_filename, rtapd->prefix_wlan_name);
++#else
++		newconf = Config_read(rtapd->ioctl_sock, rtapd->prefix_wlan_name);
++#endif
++		if (newconf == NULL)
++		{
++			DBGPRINT(RT_DEBUG_ERROR,"Failed to read new configuration file - continuing with old.\n");
++			continue;
++		}
++
++		Radius_client_flush(rtapd);
++		Config_free(rtapd->conf);
++		rtapd->conf = newconf;
++
++#if MULTIPLE_RADIUS
++		for (i = 0; i < MAX_MBSSID_NUM; i++)
++			rtapd->radius->mbss_auth_serv_sock[i] = -1;
++#else
++		rtapd->radius->auth_serv_sock = -1;
++#endif
++
++		if (Radius_client_init(rtapd))
++		{
++		    DBGPRINT(RT_DEBUG_ERROR,"RADIUS client initialization failed.\n");
++		    return;
++		}
++#if MULTIPLE_RADIUS
++		for (i = 0; i < rtapd->conf->SsidNum; i++)
++			DBGPRINT(RT_DEBUG_TRACE, "auth_serv_sock[%d] = %d\n", i, rtapd->radius->mbss_auth_serv_sock[i]);
++#else
++	        DBGPRINT(RT_DEBUG_TRACE,"rtapd->radius->auth_serv_sock = %d\n",rtapd->radius->auth_serv_sock);
++
++        	sta = rtapd->sta_list;
++		while (sta)
++		{
++			if(sta->eapol_sm && (sta->eapol_sm->portControl == 2))
++			{
++				sta->eapol_sm->reAuthenticate = TRUE;
++				eapol_sm_step(sta->eapol_sm);
++				DBGPRINT(RT_DEBUG_TRACE,"Removing station " MACSTR "\n", MAC2STR(sta->addr));
++			}
++			sta = sta->next;
++		}
+ #endif
+ 	}
+ }
+@@ -1069,7 +1128,7 @@
+ #else
+         eloop_register_signal(SIGUSR1, Handle_usr1, NULL);
+ #endif
+-        eloop_register_signal(SIGHUP, Handle_usr1, NULL);
++        eloop_register_signal(SIGHUP, Handle_sig_hup, NULL);
+ 
+         interfaces.rtapd[0] = Apd_init(prefix_name);
+         if (!interfaces.rtapd[0])

@@ -1,0 +1,110 @@
+diff -rauN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-05-04 17:45:25.338933345 +0530
++++ b/src/source/ieee802_1x.c	2016-05-05 16:35:24.149524685 +0530
+@@ -156,8 +156,8 @@
+ 	memset(buf, 0, len);
+ 	hdr3 = (struct ieee8023_hdr *) buf;
+ 	memcpy(hdr3->dAddr, sta->addr, ETH_ALEN);
+-	memcpy(hdr3->sAddr, rtapd->own_addr[sta->ApIdx], ETH_ALEN);
+-
++	memcpy(hdr3->sAddr, rtapd->own_addr[0], ETH_ALEN);
++//	memcpy(hdr3->sAddr, rtapd->own_addr[sta->ApIdx], ETH_ALEN);
+ 	if (sta->ethertype == ETH_P_PRE_AUTH)
+ 		(hdr3->eth_type) = htons(ETH_P_PRE_AUTH);
+ 	else
+@@ -174,7 +174,6 @@
+ 
+ 	if (datalen > 0 && data != NULL)
+ 		memcpy(pos + LENGTH_8021X_HDR, data, datalen);
+-
+ 	if (sta->ethertype == ETH_P_PRE_AUTH)
+ 	{
+ 		if (send(sta->SockNum/*rtapd->eth_sock*/, buf, len, 0) < 0)
+@@ -240,7 +239,6 @@
+ 				UCHAR	MacAddr[MAC_ADDR_LEN];
+ 				
+ 				memcpy(MacAddr, sta->addr, MAC_ADDR_LEN);
+-
+ 				if (RT_ioctl(rtapd->ioctl_sock, 
+ 							 RT_PRIV_IOCTL, 
+ 							 (char *)&MacAddr, sizeof(MacAddr), 
+@@ -693,7 +691,7 @@
+ 	u8 type;
+ 
+ 	assert(sta->eapol_sm != NULL);
+-
++        
+ 	if (eap->identifier != sta->eapol_sm->currentId)
+ 	{
+ 		DBGPRINT(RT_DEBUG_INFO,"EAP Identifier of the Response-Identity from " MACSTR
+diff -rauN a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2016-05-04 17:45:39.930933095 +0530
++++ b/src/source/rtdot1x.c	2016-05-05 12:32:52.277774064 +0530
+@@ -390,10 +390,10 @@
+ 
+ int Apd_init_sockets(rtapd *rtapd)
+ {
+-    struct ifreq ifr;
++    	struct ifreq ifr;
+ 	struct sockaddr_ll addr;
+-    int i;
+-
++    	int i;
++	
+ 	// 1. init ethernet interface socket for pre-auth
+ 	for (i = 0; i < rtapd->conf->num_preauth_if; i++)
+ 	{
+@@ -471,9 +471,8 @@
+ 									ifr.ifr_name, rtapd->wlan_sock[i], addr.sll_ifindex);
+ 	}
+ 
+-    
+ 	// 3. Get wireless interface MAC address
+-    for(i = 0; i < rtapd->conf->SsidNum; i++)
++    for(i = 0; i < 1 /*rtapd->conf->SsidNum*/; i++)//NOT required for non-WLAN 802.1x
+     {
+ 		int s = -1;
+ 	
+@@ -486,31 +485,29 @@
+         }
+     
+     	memset(&ifr, 0, sizeof(ifr));
+-		sprintf(ifr.ifr_name, "%s%d",rtapd->prefix_wlan_name, i);
+-    	//sprintf(ifr.ifr_name, "ra%d", i);
+-    
+-		// Get MAC address
++	strcpy(ifr.ifr_name, rtapd->conf->eap_if_name[i]);
++ 
++	// Get MAC address
+     	if (ioctl(s, SIOCGIFHWADDR, &ifr) != 0)
+     	{
+-        	perror("ioctl(SIOCGIFHWADDR)");
+-			close(s);
++	       	perror("ioctl(SIOCGIFHWADDR)");
++		close(s);
+         	return -1;
+     	}
+ 
+     	DBGPRINT(RT_DEBUG_INFO," Device %s has ifr.ifr_hwaddr.sa_family %d\n",ifr.ifr_name, ifr.ifr_hwaddr.sa_family);
+-		if (ifr.ifr_hwaddr.sa_family != ARPHRD_ETHER)
++	if (ifr.ifr_hwaddr.sa_family != ARPHRD_ETHER)
+     	{
+-			DBGPRINT(RT_DEBUG_ERROR,"IF-%s : Invalid HW-addr family 0x%04x\n", ifr.ifr_name, ifr.ifr_hwaddr.sa_family);
+-			close(s);
+-			return -1;
+-		}
++		DBGPRINT(RT_DEBUG_ERROR,"IF-%s : Invalid HW-addr family 0x%04x\n", ifr.ifr_name, ifr.ifr_hwaddr.sa_family);
++		close(s);
++		return -1;
++	}
+ 
+ 		memcpy(rtapd->own_addr[i], ifr.ifr_hwaddr.sa_data, ETH_ALEN);
+     	DBGPRINT(RT_DEBUG_TRACE, "IF-%s MAC Address = " MACSTR "\n", ifr.ifr_name, MAC2STR(rtapd->own_addr[i]));
+ 
+ 		close(s);
+-	}	
+-
++	}
+ 
+ 	return 0;
+ }

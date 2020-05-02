@@ -1,0 +1,31 @@
+From 18e9ab0e75b27006c094b8c283dee71e7baef2fe Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Mon, 24 Aug 2015 16:24:30 +0530
+Subject: [PATCH 15/60] SBR-41 Updated MAC info passing to bootargs
+ Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+
+Updated boot-up logic based on latest understanding with ODM
+Including only 2 Scenarios : MAC from boardinfo OR MAC from default /env/config
+---
+ arch/arm/boards/comcerto-rv340/env/bin/boot | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/boot b/arch/arm/boards/comcerto-rv340/env/bin/boot
+index cceeb41..379be11 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/boot
++++ b/arch/arm/boards/comcerto-rv340/env/bin/boot
+@@ -82,11 +82,6 @@ elif [ "X$eth0_ethaddr" != "X" ] && [ "X$eth1_ethaddr" != "X" ] && [ "X$eth2_eth
+   echo "One or More MACs from Boardinfo are INVALID!!! Using defaults from /env/config ..."
+   echo "eth0mac = $eth0_ethaddr, eth1mac = $eth1_ethaddr, eth2mac = $eth2_ethaddr"
+   bootargs="$bootargs mac_addr=$eth0_ethaddr,$eth1_ethaddr,$eth2_ethaddr"
+-else
+-  echo "One or more MACs either from boardinfo OR default config are INVALID!!!"
+-  echo "Can not pass INVALID MAC IDs in bootargs!!!"
+-  echo "Please update manually required LAN, WAN1, WAN2 MACs either in flash boardinfo OR in default /env/config file!!!"
+-  exit 1
+ fi
+ echo "done"
+ 
+-- 
+2.7.4
+

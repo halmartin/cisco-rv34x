@@ -1,0 +1,111 @@
+--- syslog-ng-3.0.8_Orig/src/timeutils.h	2015-11-17 13:12:14.063459279 +0530
++++ syslog-ng-3.0.8/src/timeutils.h	2015-11-17 13:13:40.127461946 +0530
+@@ -27,6 +27,13 @@
+ #include "syslog-ng.h"
+ #include <time.h>
+ 
++typedef struct _GTimeVal_syslog GTimeVal_syslog;
++struct _GTimeVal_syslog
++{
++  gint64 tv_sec;
++  gint64 tv_usec;
++};
++
+ time_t cached_mktime(struct tm *tm);
+ void cached_localtime(time_t *when, struct tm *tm);
+ long get_local_timezone_ofs(time_t when);
+@@ -38,6 +45,7 @@ void cached_g_current_time(GTimeVal *res
+ int format_zone_info(gchar *buf, size_t buflen, long gmtoff);
+ long get_local_timezone_ofs(time_t when);
+ glong g_time_val_diff(GTimeVal *t1, GTimeVal *t2);
++void g_time_val_add_syslog (GTimeVal_syslog *time_, gint64 miliseconds);
+ 
+ typedef struct _ZoneInfo ZoneInfo;
+ typedef struct _TimeZoneInfo TimeZoneInfo;
+--- syslog-ng-3.0.8_Orig/src/timeutils.c	2015-11-17 13:12:14.063459279 +0530
++++ syslog-ng-3.0.8/src/timeutils.c	2015-11-17 13:13:15.587461186 +0530
+@@ -251,6 +251,55 @@ g_time_val_diff(GTimeVal *t1, GTimeVal *
+   return (t1->tv_sec - t2->tv_sec) * G_USEC_PER_SEC + (t1->tv_usec - t2->tv_usec);
+ }
+ 
++
++gint64
++g_time_val_diff_syslog(GTimeVal_syslog *t1, GTimeVal *t2)
++{
++  g_assert(t1);
++  g_assert(t2);
++  return (t1->tv_sec - t2->tv_sec) * G_USEC_PER_SEC + (t1->tv_usec - t2->tv_usec);
++}
++
++void
++g_time_val_add_syslog (GTimeVal_syslog *time_, gint64 microseconds)
++{
++  g_return_if_fail (time_->tv_usec >= 0 && time_->tv_usec < G_USEC_PER_SEC);
++
++  if (microseconds >= 0)
++    {
++      time_->tv_usec += microseconds % G_USEC_PER_SEC;
++      time_->tv_sec += microseconds / G_USEC_PER_SEC;
++      if (time_->tv_usec >= G_USEC_PER_SEC)
++       {
++         time_->tv_usec -= G_USEC_PER_SEC;
++         time_->tv_sec++;
++       }
++    }
++  else
++    {
++      microseconds *= -1;
++      time_->tv_usec -= microseconds % G_USEC_PER_SEC;
++      time_->tv_sec -= microseconds / G_USEC_PER_SEC;
++      if (time_->tv_usec < 0)
++       {
++         time_->tv_usec += G_USEC_PER_SEC;
++         time_->tv_sec--;
++       }
++    }
++}
++
++
++void
++g_source_get_current_time_syslog (GSource  *source,
++                           GTimeVal_syslog *timeval)
++{
++  GTimeVal tmp_timeval;
++  g_source_get_current_time (source, &tmp_timeval);
++  timeval->tv_sec = tmp_timeval.tv_sec;
++  timeval->tv_usec = tmp_timeval.tv_usec;
++}
++
++
+ /** Time zone file parser code **/
+ 
+ /*
+--- syslog-ng-3.0.8_Orig/src/logwriter.c	2015-11-17 13:12:14.059459279 +0530
++++ syslog-ng-3.0.8/src/logwriter.c	2015-11-17 13:12:51.251460432 +0530
+@@ -37,7 +37,7 @@ typedef struct _LogWriterWatch
+   GPollFD pollfd;
+   LogWriter *writer;
+   LogProto *proto;
+-  GTimeVal flush_target;
++  GTimeVal_syslog flush_target;
+   GTimeVal error_suspend_target;
+   GTimeVal last_throttle_check;
+   gboolean flush_waiting_for_timeout:1,
+@@ -153,13 +153,14 @@ log_writer_fd_prepare(GSource *source,
+           /* start waiting */
+ 
+           *timeout = self->writer->options->flush_timeout;
+-          g_source_get_current_time(source, &self->flush_target);
+-          g_time_val_add(&self->flush_target, *timeout * 1000);
++	  	  gint64 microsec = *timeout;
++          g_source_get_current_time_syslog(source, &self->flush_target);
++          g_time_val_add_syslog(&self->flush_target, microsec * 1000);
+           self->flush_waiting_for_timeout = TRUE;
+         }
+       else
+         {
+-          glong to = g_time_val_diff(&self->flush_target, &now) / 1000;
++          gint64 to = g_time_val_diff_syslog(&self->flush_target, &now) / 1000;
+           if (to <= 0)
+             {
+               /* timeout elapsed, start polling again */

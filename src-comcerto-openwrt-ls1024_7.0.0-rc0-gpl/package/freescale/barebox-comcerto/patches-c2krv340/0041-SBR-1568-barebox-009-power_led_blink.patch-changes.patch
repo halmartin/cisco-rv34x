@@ -1,0 +1,74 @@
+From b80938dc1ecde026f18f5ab90098abbdc7d3c39a Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy K <ganeshreddy@freescale.com>
+Date: Mon, 28 Mar 2016 04:05:18 +0530
+Subject: [PATCH 41/60] SBR-1568 barebox: 009-power_led_blink.patch changes
+
+Signed-off-by: Ganesh Reddy K <ganeshreddy@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/c2k_rv340.c  | 4 ++++
+ arch/arm/boards/comcerto-rv340/env/bin/boot | 5 +++++
+ arch/arm/boards/comcerto-rv340/env/bin/init | 4 ++++
+ arch/arm/boards/comcerto-rv340/env/config   | 1 +
+ 4 files changed, 14 insertions(+)
+
+diff --git a/arch/arm/boards/comcerto-rv340/c2k_rv340.c b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+index fa74ff6..06491e8 100755
+--- a/arch/arm/boards/comcerto-rv340/c2k_rv340.c
++++ b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+@@ -265,6 +265,10 @@ static int c2000_device_init(void)
+ 	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_47, COMCERTO_GPIO_EXT_OUTPUT_REG);
+ 	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_48, COMCERTO_GPIO_EXT_OUTPUT_REG);
+ 
++	//POWER_LED ON
++        writel(readl(COMCERTO_GPIO_EXT_OE_REG) & ~GPIO_52, COMCERTO_GPIO_EXT_OE_REG);
++        writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_52, COMCERTO_GPIO_EXT_OUTPUT_REG);
++
+ 	/* Config USB */
+ 	writel(0xb1331441, 0x90410004);
+ 
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/boot b/arch/arm/boards/comcerto-rv340/env/bin/boot
+index 9d5334e..d6eef74 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/boot
++++ b/arch/arm/boards/comcerto-rv340/env/bin/boot
+@@ -235,6 +235,11 @@ version
+ if [ -n $bootver ]; then
+   bootargs="$bootargs bareboxver="$bootver""
+ fi
++
++#POWER_LED ON
++gpio_direction_output $GPIO_LED_POWER $ON
++gpio_set_value $GPIO_LED_POWER $ON
++
+ echo "booting kernel of type $kernelimage_type from $kdev"
+ 
+ if [ x$kernelimage_type = xuimage ]; then
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/init b/arch/arm/boards/comcerto-rv340/env/bin/init
+index ea0e840..f8932ff 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/init
++++ b/arch/arm/boards/comcerto-rv340/env/bin/init
+@@ -55,6 +55,10 @@ if [ $? -eq 0 ]; then
+   fi
+ fi
+ 
++#POWER_LED OFF
++gpio_direction_output $GPIO_LED_POWER $ON
++gpio_set_value $GPIO_LED_POWER $OFF
++
+ echo
+ echo -n "Hit any key to stop autoboot: "
+ timeout -a $autoboot_timeout
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index e5740ff..0f0f6be 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -46,6 +46,7 @@ ROOTFS_PART1=4
+ ROOTFS_PART2=7
+ 
+ # GPIO Constants
++GPIO_LED_POWER=52
+ GPIO_LED_DIAG=50
+ ON=0
+ OFF=1
+-- 
+2.7.4
+

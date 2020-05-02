@@ -1,0 +1,7 @@
+#!/bin/sh
+. /lib/functions/network.sh
+
+interface="$1"
+
+sleep 5
+ifup "$1"

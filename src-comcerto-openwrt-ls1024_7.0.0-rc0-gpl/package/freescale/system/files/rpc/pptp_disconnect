@@ -1,0 +1,18 @@
+#!/bin/sh
+
+#logger -t pptpd Input arguments $@
+#pptp-disconnect tunnel-ip ($1) client-virtual ip($2) session-id($3) ppp_pid($4)
+
+local pptpctrl_pid  pppd_pid
+pppd_pid=$4
+
+pptpctrl_pid=$(cat /proc/$pppd_pid/stat | cut -d ' ' -f 4)
+
+#logger -t pptpd pptpctrl_pid value is $pptpctrl_pid
+logger -t pptpd Disconnecting client $2
+
+#	logger -t pptpd killing process pppd_pid is $pppd_pid
+#[ -n "$pppd_pid" ] && { kill $pppd_pid; }
+
+logger -t pptpd killing process pptpctrl_pid is $pptpctrl_pid
+[ -n "$pptpctrl_pid" ] && { kill $pptpctrl_pid; }

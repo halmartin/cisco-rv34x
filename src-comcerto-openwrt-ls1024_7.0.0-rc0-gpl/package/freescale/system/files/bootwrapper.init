@@ -1,0 +1,13 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+START=45
+start() {
+	/etc/init.d/firewall boot &
+}
+
+stop() {
+	/etc/init.d/firewall stop
+}

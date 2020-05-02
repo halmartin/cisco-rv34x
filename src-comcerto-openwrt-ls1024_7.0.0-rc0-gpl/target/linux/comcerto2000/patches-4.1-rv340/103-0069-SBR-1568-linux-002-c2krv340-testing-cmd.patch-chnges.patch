@@ -1,0 +1,386 @@
+diff -aurN '--exclude-from=/tmp/files' linux-4.1.8-orig/drivers/net/phy/phy.c linux-4.1.8/drivers/net/phy/phy.c
+--- linux-4.1.8-orig/drivers/net/phy/phy.c	2017-08-16 13:21:02.643730521 +0530
++++ linux-4.1.8/drivers/net/phy/phy.c	2017-08-16 13:23:40.783727515 +0530
+@@ -299,6 +299,42 @@
+ 
+ 	/* We make sure that we don't pass unsupported values in to the PHY */
+ 	cmd->advertising &= phydev->supported;
++        // [Po-Yao]: add a cmd for ethernet test mode.
++        if ( (ETH_TEST_MODE_1 == cmd->eth_test_mode) || (ETH_TEST_MODE_4 == cmd->eth_test_mode) )
++        {
++            phydev->eth_test_mode = cmd->eth_test_mode;
++            phy_set_eth_test_mode(phydev);
++            return 0;
++        }
++        // [Po-Yao]: add a cmd for ethernet mdix mode.
++        if ( (ETH_MDIX_MODE_MDI == cmd->eth_mdix_mode) || (ETH_MDIX_MODE_MDIX == cmd->eth_mdix_mode)  || (ETH_MDIX_MODE_AUTO == cmd->eth_mdix_mode) )
++        {
++            phydev->eth_mdix_mode = cmd->eth_mdix_mode;
++            phy_set_eth_mdix_mode(phydev);
++            return 0;
++        }
++        // [Po-Yao]: add a cmd for phy eee enable.
++        if ( (PHY_EEE_ENABLE_ENABLE == cmd->phy_eee_enable) || (PHY_EEE_ENABLE_DISABLE == cmd->phy_eee_enable) )
++        {
++            phydev->phy_eee_enable = cmd->phy_eee_enable;
++            phy_set_phy_eee_enable(phydev);
++            return 0;
++        }
++        // [Po-Yao]: add a cmd for phy ssc enable.
++        if ( (PHY_SSC_ENABLE_ENABLE == cmd->phy_ssc_enable) || (PHY_SSC_ENABLE_DISABLE == cmd->phy_ssc_enable) )
++        {
++            phydev->phy_ssc_enable = cmd->phy_ssc_enable;
++            phy_set_phy_ssc_enable(phydev);
++            return 0;
++        }
++
++        // [Po-Yao]: add a cmd for phy clkout enable.
++        if ( (PHY_CLKOUT_ENABLE_ENABLE == cmd->phy_clkout_enable) || (PHY_CLKOUT_ENABLE_DISABLE == cmd->phy_clkout_enable) )
++        {
++            phydev->phy_clkout_enable = cmd->phy_clkout_enable;
++            phy_set_phy_clkout_enable(phydev);
++            return 0;
++        }
+ 
+ 	/* Verify the settings we care about. */
+ 	if (cmd->autoneg != AUTONEG_ENABLE && cmd->autoneg != AUTONEG_DISABLE)
+@@ -481,6 +517,78 @@
+ }
+ EXPORT_SYMBOL(phy_start_aneg);
+ 
++// [Po-Yao]: add a cmd for ethernet test mode.
++int phy_set_eth_test_mode(struct phy_device *phydev)
++{
++        int err;
++
++        mutex_lock(&phydev->lock);
++
++        err = phydev->drv->config_eth_test_mode(phydev);
++
++        mutex_unlock(&phydev->lock);
++        return err;
++}
++EXPORT_SYMBOL(phy_set_eth_test_mode);
++
++// [Po-Yao]: add a cmd for ethernet mdix mode.
++int phy_set_eth_mdix_mode(struct phy_device *phydev)
++{
++        int err;
++
++        mutex_lock(&phydev->lock);
++
++        err = phydev->drv->config_eth_mdix_mode(phydev);
++
++        mutex_unlock(&phydev->lock);
++        return err;
++}
++EXPORT_SYMBOL(phy_set_eth_mdix_mode);
++
++// [Po-Yao]: add a cmd for phy eee enable.
++int phy_set_phy_eee_enable(struct phy_device *phydev)
++{
++        int err;
++
++        mutex_lock(&phydev->lock);
++
++        err = phydev->drv->config_phy_eee_enable(phydev);
++
++        mutex_unlock(&phydev->lock);
++        return err;
++}
++EXPORT_SYMBOL(phy_set_phy_eee_enable);
++
++// [Po-Yao]: add a cmd for phy ssc enable.
++int phy_set_phy_ssc_enable(struct phy_device *phydev)
++{
++        int err;
++
++        mutex_lock(&phydev->lock);
++
++        err = phydev->drv->config_phy_ssc_enable(phydev);
++
++        mutex_unlock(&phydev->lock);
++        return err;
++}
++EXPORT_SYMBOL(phy_set_phy_ssc_enable);
++
++// [Po-Yao]: add a cmd for phy clkout enable.
++int phy_set_phy_clkout_enable(struct phy_device *phydev)
++{
++        int err;
++
++        mutex_lock(&phydev->lock);
++
++        err = phydev->drv->config_phy_clkout_enable(phydev);
++
++        mutex_unlock(&phydev->lock);
++        return err;
++}
++EXPORT_SYMBOL(phy_set_phy_clkout_enable);
++
++void phy_change(struct work_struct *work);
++
+ /**
+  * phy_start_machine - start PHY state machine tracking
+  * @phydev: the phy_device struct
+diff -aurN '--exclude-from=/tmp/files' linux-4.1.8-orig/drivers/net/phy/phy_device.c linux-4.1.8/drivers/net/phy/phy_device.c
+--- linux-4.1.8-orig/drivers/net/phy/phy_device.c	2017-08-16 13:21:02.655730521 +0530
++++ linux-4.1.8/drivers/net/phy/phy_device.c	2017-08-16 13:26:09.439724689 +0530
+@@ -920,6 +920,150 @@
+ 	return 0;
+ }
+ 
++// [Po-Yao]: add a cmd for ethernet test mode.
++int genphy_config_eth_test_mode(struct phy_device *phydev)
++{
++        int value;
++
++        if ( ETH_TEST_MODE_1 == phydev->eth_test_mode )
++        {
++            value = 0x1b00;
++            phy_write(phydev, MII_BMCR, value);
++            value = 0x140;
++            phy_write(phydev, MII_BMCR, value);
++            value = 0x3b00;
++            phy_write(phydev, MII_CTRL1000, value);
++        } 
++        else if( ETH_TEST_MODE_4 == phydev->eth_test_mode )
++        {
++            value = 0x1b00;
++            phy_write(phydev, MII_BMCR, value);
++            value = 0x140;
++            phy_write(phydev, MII_BMCR, value);
++            value = 0x9b00;
++            phy_write(phydev, MII_CTRL1000, value);
++        }
++
++        return 0;
++}
++EXPORT_SYMBOL(genphy_config_eth_test_mode);
++// [Po-Yao]: add a cmd for ethernet mdix mode.
++int genphy_config_eth_mdix_mode(struct phy_device *phydev)
++{
++        int value;
++
++        if ( ETH_MDIX_MODE_MDI == phydev->eth_mdix_mode )
++        {
++            value = 0x300;
++            phy_write(phydev, MII_LBRERROR, value);
++        }
++        else if( ETH_MDIX_MODE_MDIX == phydev->eth_mdix_mode )
++        {
++            value = 0x200;
++            phy_write(phydev, MII_LBRERROR, value);
++        }
++        else if( ETH_MDIX_MODE_AUTO == phydev->eth_mdix_mode )
++        {
++            value = 0x000;
++            phy_write(phydev, MII_LBRERROR, value);
++        }
++
++
++        return 0;
++}
++EXPORT_SYMBOL(genphy_config_eth_mdix_mode);
++
++// [Po-Yao]: add a cmd for phy eee enable.
++int genphy_config_phy_eee_enable(struct phy_device *phydev)
++{
++        int value;
++
++        if ( PHY_EEE_ENABLE_ENABLE == phydev->phy_eee_enable )
++        {
++            value = 0x0863;
++            phy_write(phydev, MII_PHYADDR, value);
++        }
++        else if( PHY_EEE_ENABLE_DISABLE == phydev->phy_eee_enable )
++        {
++            value = 0x0843;
++            phy_write(phydev, MII_PHYADDR, value);
++        }
++
++        return 0;
++}
++EXPORT_SYMBOL(genphy_config_phy_eee_enable);
++
++// [Po-Yao]: add a cmd for phy ssc enable.
++int genphy_config_phy_ssc_enable(struct phy_device *phydev)
++{
++        int value;
++
++        value = phy_read(phydev, MII_PHYADDR);
++        printk("the origin data of register MII_PHYADDR is 0x%x\n",value);
++
++        if ( value & 0x0080 )
++            printk("origin ethernet ssc enable\n");
++        else
++            printk("origin ethernet ssc disable\n");
++
++        if ( PHY_SSC_ENABLE_ENABLE == phydev->phy_ssc_enable )
++        {
++            value = 0x08E3;
++            phy_write(phydev, MII_PHYADDR, value);
++        }
++        else if( PHY_SSC_ENABLE_DISABLE == phydev->phy_ssc_enable )
++        {
++            value = 0x0863;
++            phy_write(phydev, MII_PHYADDR, value);
++        }
++
++        value = phy_read(phydev, MII_PHYADDR);
++        printk("the current data of register MII_PHYADDR is 0x%x\n",value);
++
++        if ( value & 0x0080 )
++            printk("current ethernet ssc enable\n");
++        else
++            printk("current ethernet ssc disable\n");
++
++        return 0;
++}
++EXPORT_SYMBOL(genphy_config_phy_ssc_enable);
++
++// [Po-Yao]: add a cmd for phy clkout enable.
++int genphy_config_phy_clkout_enable(struct phy_device *phydev)
++{
++        int value;
++
++        value = phy_read(phydev, MII_PHYADDR);
++        printk("the origin data of register MII_PHYADDR is 0x%x\n",value);
++
++        if ( value & 0x0001 )
++            printk("origin ethernet clk out enable\n");
++        else
++            printk("origin ethernet clk out disable\n");
++
++        if ( PHY_CLKOUT_ENABLE_ENABLE == phydev->phy_clkout_enable )
++        {
++            value |= 0x0001;
++            phy_write(phydev, MII_PHYADDR, value);
++        }
++        else if( PHY_CLKOUT_ENABLE_DISABLE == phydev->phy_clkout_enable )
++        {
++            value &= ~(0x0001);
++            phy_write(phydev, MII_PHYADDR, value);
++        }
++
++        value = phy_read(phydev, MII_PHYADDR);
++        printk("the current data of register MII_PHYADDR is 0x%x\n",value);
++
++        if ( value & 0x0001 )
++            printk("current ethernet clk out enable\n");
++        else
++            printk("current ethernet clk out disable\n");
++
++        return 0;
++}
++EXPORT_SYMBOL(genphy_config_phy_clkout_enable);
+ /**
+  * genphy_update_link - update link status in @phydev
+  * @phydev: target phy_device struct
+@@ -1385,6 +1529,11 @@
+ 			  SUPPORTED_BNC,
+ 	.config_aneg	= genphy_config_aneg,
+ 	.aneg_done	= genphy_aneg_done,
++	.config_eth_test_mode	        = genphy_config_eth_test_mode,  // [Po-Yao]: add a cmd for ethernet test mode.
++	.config_eth_mdix_mode	        = genphy_config_eth_mdix_mode,  // [Po-Yao]: add a cmd for ethernet mdix mode.
++	.config_phy_eee_enable	        = genphy_config_phy_eee_enable, // [Po-Yao]: add a cmd for phy eee enable.
++	.config_phy_ssc_enable	        = genphy_config_phy_ssc_enable, // [Po-Yao]: add a cmd for phy ssc enable.
++	.config_phy_clkout_enable	= genphy_config_phy_clkout_enable, // [Po-Yao]: add a cmd for phy clkout enable.
+ 	.read_status	= genphy_read_status,
+ 	.suspend	= genphy_suspend,
+ 	.resume		= genphy_resume,
+diff -aurN '--exclude-from=/tmp/files' linux-4.1.8-orig/include/linux/phy.h linux-4.1.8/include/linux/phy.h
+--- linux-4.1.8-orig/include/linux/phy.h	2017-08-16 13:21:02.135730531 +0530
++++ linux-4.1.8/include/linux/phy.h	2017-08-16 15:14:20.339601281 +0530
+@@ -399,6 +399,11 @@
+ 	u32 lp_advertising;
+ 
+ 	int autoneg;
++	int eth_test_mode;  //[Po-Yao]: add a cmd for ethernet test mode.
++	int eth_mdix_mode;  //[Po-Yao]: add a cmd for ethernet mdix mode.
++	int phy_eee_enable; //[Po-Yao]: add a cmd for phy eee enable.
++	int phy_ssc_enable; //[Po-Yao]: add a cmd for phy ssc enable.
++	int phy_clkout_enable; //[Po-Yao]: add a cmd for phy clkout enable.
+ 
+ 	int link_timeout;
+ 
+@@ -486,6 +491,12 @@
+ 	/* Determines the auto negotiation result */
+ 	int (*aneg_done)(struct phy_device *phydev);
+ 
++	int (*config_eth_test_mode) (struct phy_device *phydev); // [Po-Yao]: add a cmd for ethernet test mode.
++	int (*config_eth_mdix_mode) (struct phy_device *phydev); // [Po-Yao]: add a cmd for ethernet mdix mode.
++	int (*config_phy_eee_enable)(struct phy_device *phydev); // [Po-Yao]: add a cmd for phy eee enable.
++	int (*config_phy_ssc_enable)(struct phy_device *phydev); // [Po-Yao]: add a cmd for phy ssc enable.
++	int (*config_phy_clkout_enable)(struct phy_device *phydev); // [Po-Yao]: add a cmd for phy clkout enable.
++
+ 	/* Determines the negotiated speed and duplex */
+ 	int (*read_status)(struct phy_device *phydev);
+ 
+@@ -733,6 +744,11 @@
+ void phy_start(struct phy_device *phydev);
+ void phy_stop(struct phy_device *phydev);
+ int phy_start_aneg(struct phy_device *phydev);
++int phy_set_eth_test_mode (struct phy_device *phydev); // [Po-Yao]: add a cmd for ethernet test mode.
++int phy_set_eth_mdix_mode (struct phy_device *phydev); // [Po-Yao]: add a cmd for ethernet mdix mode.
++int phy_set_phy_eee_enable(struct phy_device *phydev); // [Po-Yao]: add a cmd for phy eee enable.
++int phy_set_phy_ssc_enable(struct phy_device *phydev); // [Po-Yao]: add a cmd for phy ssc enable.
++int phy_set_phy_clkout_enable(struct phy_device *phydev); // [Po-Yao]: add a cmd for phy clkout enable.
+ 
+ int phy_stop_interrupts(struct phy_device *phydev);
+ 
+@@ -746,6 +762,11 @@
+ int genphy_restart_aneg(struct phy_device *phydev);
+ int genphy_config_aneg(struct phy_device *phydev);
+ int genphy_aneg_done(struct phy_device *phydev);
++int genphy_config_eth_test_mode (struct phy_device *phydev); // [Po-Yao]: add a cmd for ethernet test mode.
++int genphy_config_eth_mdix_mode (struct phy_device *phydev); // [Po-Yao]: add a cmd for ethernet mdix mode.
++int genphy_config_phy_eee_enable(struct phy_device *phydev); // [Po-Yao]: add a cmd for phy eee enable.
++int genphy_config_phy_ssc_enable(struct phy_device *phydev); // [Po-Yao]: add a cmd for phy ssc enable.
++int genphy_config_phy_clkout_enable(struct phy_device *phydev); // [Po-Yao]: add a cmd for phy clkout enable.
+ int genphy_update_link(struct phy_device *phydev);
+ int genphy_read_status(struct phy_device *phydev);
+ int genphy_suspend(struct phy_device *phydev);
+diff -aurN '--exclude-from=/tmp/files' linux-4.1.8-orig/include/uapi/linux/ethtool.h linux-4.1.8/include/uapi/linux/ethtool.h
+--- linux-4.1.8-orig/include/uapi/linux/ethtool.h	2017-08-16 13:21:02.183730530 +0530
++++ linux-4.1.8/include/uapi/linux/ethtool.h	2017-08-16 15:10:41.947605433 +0530
+@@ -108,6 +108,11 @@
+ 	__u8	eth_tp_mdix_ctrl;
+ 	__u32	lp_advertising;
+ 	__u32	reserved[2];
++	__u32	eth_test_mode;    /* [Po-Yao]: add a cmd for ethernet mdix mode */
++        __u32   eth_mdix_mode;    /* [Po-Yao]: add a cmd for ethernet test mode */
++        __u32   phy_eee_enable;   /* [Po-Yao]: add a cmd for phy eee enable */
++        __u32   phy_ssc_enable;   /* [Po-Yao]: add a cmd for phy ssc enable */
++        __u32   phy_clkout_enable;   /* [Po-Yao]: add a cmd for phy clkout enable */
+ };
+ 
+ static inline void ethtool_cmd_speed_set(struct ethtool_cmd *ep,
+@@ -1302,6 +1307,27 @@
+ #define AUTONEG_DISABLE		0x00
+ #define AUTONEG_ENABLE		0x01
+ 
++/* [Po-Yao]: add a cmd for ethernet mdix mode */
++#define ETH_MDIX_MODE_MDI    0x00
++#define ETH_MDIX_MODE_MDIX   0x01
++#define ETH_MDIX_MODE_AUTO   0x02
++
++/* [Po-Yao]: add a cmd for ethernet test mode */
++#define ETH_TEST_MODE_1         0x01
++#define ETH_TEST_MODE_4         0x04
++
++/* [Po-Yao]: add a cmd for phy eee enable */
++#define PHY_EEE_ENABLE_ENABLE          0x01
++#define PHY_EEE_ENABLE_DISABLE         0x00
++
++/* [Po-Yao]: add a cmd for phy ssc enable */
++#define PHY_SSC_ENABLE_ENABLE          0x01
++#define PHY_SSC_ENABLE_DISABLE         0x00
++
++/* [Po-Yao]: add a cmd for phy clk out enable */
++#define PHY_CLKOUT_ENABLE_ENABLE        0x01
++#define PHY_CLKOUT_ENABLE_DISABLE        0x00
++
+ /* MDI or MDI-X status/control - if MDI/MDI_X/AUTO is set then
+  * the driver is required to renegotiate link
+  */

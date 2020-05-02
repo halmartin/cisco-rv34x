@@ -1,0 +1,11 @@
+
+config firmware 'firminfo'
+	option active 'image1'
+	option md5sum 'NONE'
+	option inactive 'image2'
+	option inactive_md5sum 'NONE'
+	option barebox_version '1.0.00.06'
+	option version '1.0.01.01'
+	option inactive_version '0.0.00.18'
+	option bareboxver 'barebox 2011.06.0-dirty (Aug 24 2017 - 17:21:08)'
+

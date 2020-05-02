@@ -1,0 +1,39 @@
+
+config qos 'mode'
+	option type 'port'
+
+config qos 'port4'
+	option queue '1'
+	option q1_weight '1'
+	option q2_weight '2'
+	option q3_weight '4'
+	option q4_weight '8'
+
+config qos 'port3'
+	option queue '1'
+	option q1_weight '1'
+	option q2_weight '2'
+	option q3_weight '4'
+	option q4_weight '8'
+
+config qos 'port2'
+	option queue '1'
+	option q1_weight '1'
+	option q2_weight '2'
+	option q3_weight '4'
+	option q4_weight '8'
+
+config qos 'port1'
+	option queue '1'
+	option q1_weight '1'
+	option q2_weight '2'
+	option q3_weight '4'
+	option q4_weight '8'
+
+config qos 'lag1'
+	option queue '1'
+	option q1_weight '1'
+	option q2_weight '2'
+	option q3_weight '4'
+	option q4_weight '8'
+

@@ -1,0 +1,380 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/config/uci.sh
+
+ORIG_SYSLOG_FILE=/etc/syslog_config_template
+TMP_ORIG_SYSLOG_FILE=/tmp/etc/syslog_config_template
+TMP_SYSLOG_FILE=/tmp/syslog-ng.conf
+USB_DIR=/media/USB/USB
+LOG_OUTPUT_DIR="/tmp/Log"
+LOG_OUTPUT_FILE="/tmp/Log/syslog.log"
+
+START=10
+STOP=90
+SERVICE_USE_PID=1
+SYSLOGNG="/usr/sbin/syslog-ng"
+NAME="syslog-ng"
+SYSLOG_NG_VERSION="3.0.8"
+
+stop() {
+        start-stop-daemon -K -q -n "$NAME" -- -f $TMP_SYSLOG_FILE
+}
+
+syslog_reload () {
+	start-stop-daemon -K -s 1 -q -x "$SYSLOGNG" -- -f $TMP_SYSLOG_FILE
+}
+
+syslog_restart() {
+        start-stop-daemon -K -q -n "$NAME" -- -f $TMP_SYSLOG_FILE
+	sleep 1
+	start-stop-daemon -S -q -x "$SYSLOGNG" -- -f $TMP_SYSLOG_FILE
+}
+
+bootup_load_syslog () {
+	cp -f $TMP_ORIG_SYSLOG_FILE $TMP_SYSLOG_FILE
+	`sed -i '/ #ALL_DEFAULT_LOGS/c\log {source(src);source(kernel);destination(var_log_message);}; #ALL_DEFAULT_LOGS' $TMP_SYSLOG_FILE`
+}
+
+reload_syslog () {
+	usb_event="$1"
+	log_enable=`uci get syslog.log_server.enable`
+	cp -f $TMP_ORIG_SYSLOG_FILE $TMP_SYSLOG_FILE
+
+	if [ "$log_enable" = 0 ];then
+		`sed -i '/ #USPACE_DEFAULT_LOGS/c\log {source(src);destination(var_log_message);}; #USPACE_DEFAULT_LOGS' $TMP_SYSLOG_FILE`
+		return 0		
+	fi
+
+	log_buffer=`uci get syslog.log_server.log_size` 
+
+	# Change the size in bytes
+	log_buffer=`expr $log_buffer \* 1024`
+	`sed -i "/ #Buffer_Size/c\file_size_limit($log_buffer); #Buffer_Size" $TMP_SYSLOG_FILE`
+
+	log_severity=`uci get syslog.log_server.severity`
+
+	if [ "$log_severity" = 0 ];then
+		log_filter_level="filter SEVERITY_LOG_LEVEL {level(emergency);};"
+	elif [ "$log_severity" = 1 ];then
+		log_filter_level="filter SEVERITY_LOG_LEVEL {level(alert..emergency);};"
+	elif [ "$log_severity" = 2 ];then
+		log_filter_level="filter SEVERITY_LOG_LEVEL {level(critical..emergency);};"
+	elif [ "$log_severity" = 3 ];then
+		log_filter_level="filter SEVERITY_LOG_LEVEL {level(error..emergency);};"
+	elif [ "$log_severity" = 4 ];then
+		log_filter_level="filter SEVERITY_LOG_LEVEL {level(warning..emergency);};"
+	elif [ "$log_severity" = 5 ];then
+		log_filter_level="filter SEVERITY_LOG_LEVEL {level(notice..emergency);};"
+	elif [ "$log_severity" = 6 ];then
+		log_filter_level="filter SEVERITY_LOG_LEVEL {level(info..emergency);};"
+	elif [ "$log_severity" = 7 ];then
+		log_filter_level="filter SEVERITY_LOG_LEVEL {level(debug..emergency);};"
+	fi
+	# Update SEVERITY_LOG_LEVEL filter
+	`sed -i "/ #LOG_SEVERITY_LEVEL_FILTER/c\$log_filter_level #LOG_SEVERITY_LEVEL_FILTER" $TMP_SYSLOG_FILE`
+	# USB Logging
+	usb_enabled=`uci get syslog.log_server.log_save_to_usb`
+	if [ "$usb_enabled"  = 1 ];then
+		usb_value=`uci get syslog.log_server.usb_key`
+
+		if [ "$usb_value" = 0 ];then
+			# No usb is connected.
+			`sed -i "/ #USB_LOGS/c\destination usb_logs {}; #USB_LOGS" $TMP_SYSLOG_FILE`
+		else
+			# reload syslog based on usb plug-in plug-out event
+			if [ "$usb_event" = "usb_plugout" ]; then
+				`sed -i "/ #USB_LOGS/c\destination usb_logs {}; #USB_LOGS" $TMP_SYSLOG_FILE`
+			else
+				devicename=`uci get systeminfo.sysinfo.pid`
+				devicename=`echo $devicename | cut -d - -f 1`
+				
+				# check if the usb is mounted or not. 
+				if [ -d "${USB_DIR}${usb_value}" ];then
+					usb_log_file=$USB_DIR$usb_value/"$devicename"_syslog.log
+
+					# Update USB destination driver
+					`sed -i "/ #USB_LOGS/c\destination usb_logs {file(\"$usb_log_file\" suppress(300) template(\"\\$C_ISODATE <\\$LEVEL>\\$PROGRAM: \\$MSG \\\\\n\") template_escape(no));}; #USB_LOGS" $TMP_SYSLOG_FILE`
+				fi
+			fi
+		fi
+	else
+		`sed -i "/ #USB_LOGS/c\destination usb_logs {}; #USB_LOGS" $TMP_SYSLOG_FILE`
+	fi
+
+	# Category
+	cat_kernel=`uci get syslog.log_server.log_kernel`
+	cat_system=`uci get syslog.log_server.log_system`
+	cat_firewall=`uci get syslog.log_server.log_firewall`
+	cat_network=`uci get syslog.log_server.log_network`
+	cat_vpn=`uci get syslog.log_server.log_vpn`
+	cat_sslvpn=`uci get syslog.log_server.log_sslvpn`
+	cat_license=`uci get syslog.log_server.log_license`
+	cat_webfilter=`uci get syslog.log_server.log_web_filter`
+	cat_appctrl=`uci get syslog.log_server.log_application_control`
+	cat_av=`uci get syslog.log_server.log_av`
+	cat_ips=`uci get syslog.log_server.log_ips`
+	cat_users=`uci get syslog.log_server.log_users`
+	cat_3g4g=`uci get syslog.log_server.log_3g_4g`
+	cat_wireless=`uci get syslog.log_server.log_wireless`
+	cat_pnp=`uci get syslog.log_server.log_pnp`
+	cat_openvpn=`uci get syslog.log_server.log_openvpn 2>/dev/null`
+
+	if [ "$cat_kernel" -eq 1 -o "$cat_firewall" -eq 1 -o "$cat_appctrl" -eq 1 -o "$cat_av" -eq 1 -o "$cat_ips" -eq 1 ]; then
+		`sed -i '/ #ALL_DEFAULT_LOGS/c\log {source(src);source(kernel);destination(var_log_message);}; #ALL_DEFAULT_LOGS' $TMP_SYSLOG_FILE`
+	else
+		`sed -i '/ #USPACE_DEFAULT_LOGS/c\log {source(src);destination(var_log_message);}; #USPACE_DEFAULT_LOGS' $TMP_SYSLOG_FILE`
+	fi
+	
+	email_enable=`uci get syslog.email.enable`
+	if [ "$email_enable" = 1 ];then
+		email_severity=`uci get syslog.email.severity`
+		email_log_threshold=`uci get syslog.email.log_number_threshold`
+		email_time_threshold=`uci get syslog.email.time_threshold`
+		if [ "$email_time_threshold" = 0 ]; then
+			# Hourly
+			flush_timeout=3600000
+		elif [ "$email_time_threshold" = 1 ]; then
+			# Daily
+			flush_timeout=86400000
+		elif [ "$email_time_threshold" = 2 ]; then
+			# Weekly
+			flush_timeout=604800000
+		fi
+
+		`sed -i "/ #DEST_EMAIL_LOG/c\destination emaillogs {file(\"/var/log/SendEmailLogs\" suppress(300) template(\"\\$C_ISODATE <\\$LEVEL>\\$PROGRAM: \\$MSG \\\\\n\") template_escape(no)); program(\"sh /usr/bin/sendEmailLogs\" suppress(300) template(\"\\$C_ISODATE <\\$LEVEL>\\$PROGRAM: \\$MSG \\\\\n\") template_escape(no) flush_timeout($flush_timeout) flush_lines($email_log_threshold));}; #DEST_EMAIL_LOG" $TMP_SYSLOG_FILE`
+	
+		`sed -i "/ #DEST_RT_LOGS/c\destination realtimelogs {program(\"sh /usr/bin/sendEmailAlert\" suppress(300) template(\"\\$C_ISODATE <\\$LEVEL>\\$PROGRAM: \\$MSG \\\\\n\") template_escape(no));}; #DEST_RT_LOGS" $TMP_SYSLOG_FILE`
+
+		if [ "$email_severity" = 0 ];then
+			email_filter_level="filter EMAIL_LOG_LEVEL {level(emergency);};"
+		elif [ "$email_severity" = 1 ];then
+			email_filter_level="filter EMAIL_LOG_LEVEL {level(alert..emergency);};"
+		elif [ "$email_severity" = 2 ];then
+			email_filter_level="filter EMAIL_LOG_LEVEL {level(critical..emergency);};"
+		elif [ "$email_severity" = 3 ];then
+			email_filter_level="filter EMAIL_LOG_LEVEL {level(error..emergency);};"
+		elif [ "$email_severity" = 4 ];then
+			email_filter_level="filter EMAIL_LOG_LEVEL {level(warning..emergency);};"
+		elif [ "$email_severity" = 5 ];then
+			email_filter_level="filter EMAIL_LOG_LEVEL {level(notice..emergency);};"
+		elif [ "$email_severity" = 6 ];then
+			email_filter_level="filter EMAIL_LOG_LEVEL {level(info..emergency);};"
+		elif [ "$email_severity" = 7 ];then
+			email_filter_level="filter EMAIL_LOG_LEVEL {level(debug..emergency);};"
+		fi
+
+		# Update EMAIL_SEVERITY_LEVEL_FILTER
+		`sed -i "/ #EMAIL_SEVERITY_LEVEL_FILTER/c\$email_filter_level #EMAIL_SEVERITY_LEVEL_FILTER" $TMP_SYSLOG_FILE`
+
+		# Real Time Log
+		rt_log_wanup=`uci get syslog.real_time.wanup`
+		rt_log_wandown=`uci get syslog.real_time.wandown`
+		rt_log_usbup=`uci get syslog.real_time.usbup`
+		rt_log_usbdown=`uci get syslog.real_time.usbdown`
+		rt_log_failover=`uci get syslog.real_time.failover`
+		rt_log_startup=`uci get syslog.real_time.startup`
+		rt_log_s2svpnup=`uci get syslog.real_time.s2svpnup`
+		rt_log_s2svpndown=`uci get syslog.real_time.s2svpndown`
+		rt_log_poe=`uci get syslog.real_time.poe`
+		rt_log_unauthorized_login=`uci get syslog.real_time.unauthorized_login`
+
+		# Update Real Time Logs
+
+		if [ "$rt_log_wanup" = 1 ];then
+			if [ "$cat_network" = 1 ];then
+				`sed -i '/ #RT_WANUP_LOG/c\log {source(src);filter(RT_WANUP);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(var_log_syslog_network);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_WANUP_LOG' $TMP_SYSLOG_FILE`
+			else
+				`sed -i '/ #RT_WANUP_LOG/c\log {source(src);filter(RT_WANUP);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_WANUP_LOG' $TMP_SYSLOG_FILE`
+			fi
+		fi
+
+		if [ "$rt_log_wandown" = 1 ];then
+			if [ "$cat_network" = 1 ];then
+				`sed -i '/ #RT_WANDOWN_LOG/c\log {source(src);filter(RT_WANDOWN);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(var_log_syslog_network);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_WANDOWN_LOG' $TMP_SYSLOG_FILE`
+			else
+				`sed -i '/ #RT_WANDOWN_LOG/c\log {source(src);filter(RT_WANDOWN);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_WANDOWN_LOG' $TMP_SYSLOG_FILE`
+			fi
+		fi
+
+		if [ "$rt_log_usbup" = 1 ];then
+			if [ "$cat_3g4g" = 1 ];then
+				`sed -i '/ #RT_USBUP_LOG/c\log {source(src);filter(RT_USBUP);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(var_log_syslog_3g4g);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_USBUP_LOG' $TMP_SYSLOG_FILE`
+			else
+				`sed -i '/ #RT_USBUP_LOG/c\log {source(src);filter(RT_USBUP);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_USBUP_LOG' $TMP_SYSLOG_FILE`
+			fi
+		fi
+
+
+		if [ "$rt_log_usbdown" = 1 ];then
+			if [ "$cat_3g4g" = 1 ];then
+				`sed -i '/ #RT_USBDOWN_LOG/c\log {source(src);filter(RT_USBDOWN);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(var_log_syslog_3g4g);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_USBDOWN_LOG' $TMP_SYSLOG_FILE`
+			else
+				`sed -i '/ #RT_USBDOWN_LOG/c\log {source(src);filter(RT_USBDOWN);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_USBDOWN_LOG' $TMP_SYSLOG_FILE`
+			fi
+		fi
+
+
+		if [ "$rt_log_failover" = 1 ];then
+			if [ "$cat_network" = 1 ];then
+				`sed -i '/ #RT_WANFO_LOG/c\log {source(src);filter(RT_WANFO);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(var_log_syslog_network);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_WANFO_LOG' $TMP_SYSLOG_FILE`
+			else
+				`sed -i '/ #RT_WANFO_LOG/c\log {source(src);filter(RT_WANFO);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_WANFO_LOG' $TMP_SYSLOG_FILE`
+			fi
+		fi
+
+		if [ "$rt_log_startup" = 1 ];then
+			if [ "$cat_system" = 1 ];then
+				`sed -i '/ #RT_STARTUP_LOG/c\log {source(src);filter(RT_STARTUP);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(var_log_syslog_system);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_STARTUP_LOG' $TMP_SYSLOG_FILE`
+			else
+				`sed -i '/ #RT_STARTUP_LOG/c\log {source(src);filter(RT_STARTUP);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_STARTUP_LOG' $TMP_SYSLOG_FILE`
+			fi
+		fi
+
+		if [ "$rt_log_s2svpnup" = 1 ];then
+			if [ "$cat_vpn" = 1 ];then
+				`sed -i '/ #RT_S2SUP_LOG/c\log {source(src);filter(RT_S2SUP);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(var_log_syslog_vpn);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_S2SUP_LOG' $TMP_SYSLOG_FILE`
+			else
+				`sed -i '/ #RT_S2SUP_LOG/c\log {source(src);filter(RT_S2SUP);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_S2SUP_LOG' $TMP_SYSLOG_FILE`
+			fi
+		fi
+
+		if [ "$rt_log_s2svpndown" = 1 ];then
+			if [ "$cat_vpn" = 1 ];then
+				`sed -i '/ #RT_S2SDOWN_LOG/c\log {source(src);filter(RT_S2SDOWN);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(var_log_syslog_vpn);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_S2SDOWN_LOG' $TMP_SYSLOG_FILE`
+			else
+				`sed -i '/ #RT_S2SDOWN_LOG/c\log {source(src);filter(RT_S2SDOWN);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_S2SDOWN_LOG' $TMP_SYSLOG_FILE`
+			fi
+		fi
+
+		if [ "$rt_log_poe" = 1 ];then
+			if [ "$cat_system" = 1 ];then
+				`sed -i '/ #RT_POE_LOG/c\log {source(src);filter(RT_POE);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(var_log_syslog_system);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_POE_LOG' $TMP_SYSLOG_FILE`
+			else
+				`sed -i '/ #RT_POE_LOG/c\log {source(src);filter(RT_POE);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_POE_LOG' $TMP_SYSLOG_FILE`
+			fi
+		fi
+
+		if [ "$rt_log_unauthorized_login" = 1 ];then
+			if [ "$cat_users" = 1 ];then
+				`sed -i '/ #RT_AUTH_LOG/c\log {source(src);filter(RT_AUTH);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(var_log_syslog_users);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_AUTH_LOG' $TMP_SYSLOG_FILE`
+			else
+				`sed -i '/ #RT_AUTH_LOG/c\log {source(src);filter(RT_AUTH);rewrite(r_escape_quote);destination(realtimelogs);filter(SEVERITY_LOG_LEVEL);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #RT_AUTH_LOG' $TMP_SYSLOG_FILE`
+			fi
+		fi
+	else
+		`sed -i '/ #EMAIL_SEVERITY_LEVEL_FILTER/c\filter EMAIL_LOG_LEVEL {level(debug..emergency);}; #EMAIL_SEVERITY_LEVEL_FILTER' $TMP_SYSLOG_FILE`
+		`sed -i '/ #DEST_EMAIL_LOG/c\destination emaillogs {}; #DEST_EMAIL_LOG' $TMP_SYSLOG_FILE`
+		`sed -i '/ #DEST_RT_LOGS/c\destination realtimelogs {}; #DEST_RT_LOGS' $TMP_SYSLOG_FILE`
+	fi
+	
+	# Update Component Logs
+	if [ "$cat_kernel" = 1 ]; then
+		`sed -i '/ #KERNEL_LOG_ENABLE/c\log {source(kernel);filter(ONLY_KERNEL_LOGS);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_kernel);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #KERNEL_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+	
+	if [ "$cat_system" = 1 ]; then
+		`sed -i '/ #SYSTEM_LOG_ENABLE/c\log {source(src);filter(SYSTEM_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_system);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #SYSTEM_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_firewall" = 1 ]; then
+		`sed -i '/ #FIREWALL_LOG_ENABLE/c\log {source(kernel);source(src);filter(FIREWALL_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_firewall);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #FIREWALL_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_network" = 1 ]; then
+		`sed -i '/ #NETWORK_LOG_ENABLE/c\log {source(src);filter(NETWORK_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_network);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #NETWORK_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_vpn" = 1 ]; then
+		`sed -i '/ #VPN_LOG_ENABLE/c\log {source(src);filter(VPN_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_vpn);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #VPN_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_sslvpn" = 1 ]; then
+		`sed -i '/ #SSLVPN_LOG_ENABLE/c\log {source(src);filter(SSLVPN_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_sslvpn);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #SSLVPN_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_openvpn" = 1 ]; then
+		`sed -i '/ #OPENVPN_LOG_ENABLE/c\log {source(src);filter(OPENVPN_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_openvpn);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #OPENVPN_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_license" = 1 ]; then
+		`sed -i '/ #LICENSE_LOG_ENABLE/c\log {source(src);filter(LICENSE_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_license);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #LICENSE_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_webfilter" = 1 ]; then
+		`sed -i '/ #WEBFIL_LOG_ENABLE/c\log {source(src);filter(WEBFIL_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_wf);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #WEBFIL_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_pnp" = 1 ]; then
+		`sed -i '/ #PNP_LOG_ENABLE/c\log {source(src);filter(PNP_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_pnp);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #PNP_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_appctrl" = 1 ]; then
+		`sed -i '/ #AC_LOG_ENABLE/c\log {source(kernel);filter(AC_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_appctrl);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #AC_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_av" = 1 ]; then
+		`sed -i '/ #AV_LOG_ENABLE/c\log {source(kernel);filter(AV_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_av);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #AV_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_ips" = 1 ]; then
+		`sed -i '/ #IPS_LOG_ENABLE/c\log {source(kernel);filter(IPS_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_ips);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #IPS_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_users" = 1 ]; then
+		`sed -i '/ #USERS_LOG_ENABLE/c\log {source(src);filter(USERS_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_users);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #USERS_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_3g4g" = 1 ]; then
+		`sed -i '/ #3G4G_LOG_ENABLE/c\log {source(src);filter(3G4G_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_3g4g);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #3G4G_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	if [ "$cat_wireless" = 1 ]; then
+		`sed -i '/ #WIRELESS_LOG_ENABLE/c\log {source(src);source(kernel);filter(WIRELESS_FILTER);filter(SEVERITY_LOG_LEVEL);rewrite(r_escape_quote);destination(var_log_syslog_wireless);destination(usb_logs);destination(remote_logs);filter(EMAIL_LOG_LEVEL);destination(emaillogs);flags(final);}; #WIRELESS_LOG_ENABLE' $TMP_SYSLOG_FILE`
+	fi
+
+	remote_enable=`uci get syslog.remote_server.enable`
+	if [ "$remote_enable" = 1 ];then
+		remote_server1=`uci get syslog.remote_server.server1`
+		remote_server1_port=`uci get syslog.remote_server.port1`
+		remote_server1_proto=`uci get syslog.remote_server.proto1`
+		remote_server2=""
+		second_server=`uci show syslog | grep server2`
+		if [ -n "$second_server" ];then
+			remote_server2=`uci get syslog.remote_server.server2`
+			remote_server2_port=`uci get syslog.remote_server.port2`
+			remote_server2_proto=`uci get syslog.remote_server.proto2`
+		fi
+
+		if [ -n "$remote_server1" ];then
+			`sed -i "/ #DEST_REMOTE_LOG/c\destination remote_logs {syslog(\"$remote_server1\" transport(\"$remote_server1_proto\") port($remote_server1_port) suppress(300));}; #DEST_REMOTE_LOG" $TMP_SYSLOG_FILE`
+		fi
+		if [ -n "$remote_server2" ];then
+			 `sed -i "/ #DEST_REMOTE_LOG/c\destination remote_logs {syslog("$remote_server1" transport("$remote_server1_proto") port($remote_server1_port) suppress(300));syslog("$remote_server2" transport("$remote_server2_proto") port($remote_server2_port) suppress(300));}; #DEST_REMOTE_LOG" $TMP_SYSLOG_FILE`
+		fi
+	else
+		`sed -i "/ #DEST_REMOTE_LOG/c\destination remote_logs {}; #DEST_REMOTE_LOG" $TMP_SYSLOG_FILE`
+	fi
+}
+
+reload () {
+	reload_syslog $1
+	syslog_reload
+}
+
+restart() {
+	reload_syslog $1
+	syslog_restart
+}
+
+start() {
+	mkdir -p $LOG_OUTPUT_DIR
+	touch $LOG_OUTPUT_FILE
+	cp $ORIG_SYSLOG_FILE $TMP_ORIG_SYSLOG_FILE
+	bootup_load_syslog
+	start-stop-daemon -S -q -x "$SYSLOGNG" -- -f $TMP_SYSLOG_FILE
+	log_enable=`uci get syslog.log_server.enable`
+	if [ "$log_enable" -eq 1 ];then
+		logger -t system -p local0.notice "syslog-ng version:$SYSLOG_NG_VERSION started"
+	fi
+}
+

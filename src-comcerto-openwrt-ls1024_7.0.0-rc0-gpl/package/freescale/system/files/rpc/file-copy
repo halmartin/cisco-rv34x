@@ -1,0 +1,1837 @@
+#!/bin/sh
+. /usr/bin/syserr_codes
+
+errcode=1
+errstring="Invalid Arguments"
+TMP_CERTS_OUT="/tmp/out_certs"
+TMP_CERTS_IN="/tmp/in_certs"
+USB_MOUNT="/media/USB"
+USB1_MOUNT="/media/USB/USB1"
+USB2_MOUNT="/media/USB/USB2"
+CERT_URL="FILE://Certificate/"
+USB_FILE="FILE://USB"
+USB_FILE1="FILE://USB1"
+USB_FILE2="FILE://USB2"
+CERT_TMP_UCI="/tmp/.uci/certificate"
+LOG_OUTPUT_FILE="/tmp/Log/syslog.log"
+TMP_LOGOUTPUT="/tmp/tmpOutLog"
+EXPORT_LOG="/tmp/exportLog"
+USB_PORT=
+FILE_CONFIGURATION="FILE://Configuration"
+CONFIG_LOCATION="/tmp/configuration"
+CISCO_URL="http://cisco.com"
+DOWNLOAD_FIRMWARE="sh /usr/bin/sw_dwnlod_apply.sh firmware 0.0.0.1 download"
+DOWNLOAD_SIGNATURE="sh /usr/bin/sw_dwnlod_apply.sh signatures 0.0.0.1 download"
+DOWNLOAD_DRIVER="sh /usr/bin/sw_dwnlod_apply.sh drivers 0.0.0.1 download"
+FIRMWARE_DL_PATH="/tmp/firmware"
+SIG_DL_PATH="/tmp/signature"
+DRIVER_DL_PATH="/tmp/3g-4g-driver"
+LANG_DL_PATH="/tmp/language-pack"
+FILE_PATH=
+INSTALL_USB_DRIVERS="sh /usr/bin/install_usb_drivers"
+INSTALL_FIRMWARE="sh /usr/bin/rv340_fw_unpack.sh"
+INSTALL_SIGNATURE="sh /usr/bin/lcsig.sh"
+FILE_FIRMWARE="FILE://Firmware"
+FILE_SIGNATURE="FILE://Signature"
+FILE_DRIVER="FILE://3g-4g-driver"
+FILE_LANGUAGE="FILE://language-pack"
+ASDSTATUS="/tmp/asdclientstatus"
+MTD_ENV=2
+REPLACE_CSR="_REPLACE_CSR"
+DELETE_CERT="/usr/bin/delete_certificates"
+asd_action="dwld_apply"
+preinstalled_cert=0
+
+
+pid=`uci get systeminfo.sysinfo.pid`
+current_time=`date +%Y%m%d-%Hh%Mm%Ss`
+tech_report_file1="TechReport_$pid"
+tech_report_file2="_$current_time"
+TECH_REPORT_FILE="$tech_report_file1$tech_report_file2"
+EXPORT_TECH_REPORT="sh /usr/bin/exportReport.sh"
+LOG_LOCATION="/tmp/log"
+
+PEM_EXT="pem"
+CRT_EXT="crt"
+CERT_DIR="/etc/ssl/certs"
+
+filetype=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "fileType") {print $(I+1)};}'`
+certificate_name=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "certificate-name") {print $(I+1)};}'`
+cert_type=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "format") {print $(I+1)};}'`
+format=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "format") {print $(I+1)};}'`
+password=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "password") {print $(I+1)};}'`
+user_name=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "user-name") {print $(I+1)};}'`
+
+CONFIG_SCRIPT="config_mgmt.sh"
+TRIGGER_REBOOT=0
+
+exitwith_errorcode() {
+   local ercode=$1
+   errstring=`geterrorstr $ercode`
+   echo "error-message \"$errstring\""
+   exit $ercode
+}
+
+#check download process when downloading firmware from cisco.com
+check_upgrade_progress() {
+        local ps_out=0
+        ps |grep "file-copy" | grep "fileType firm" | grep -v "grep">/tmp/upgrade_progress
+        ps_out=$(cat /tmp/upgrade_progress | wc -l)
+        rm -f /tmp/upgrade_progress
+          if [ "$ps_out" -ge 2 ];then
+              errcode=$ER_FRM_UPGRD_IN_PROGRESS
+              #errstring="Firmware upgrade is in progress."
+              errstring=`geterrorstr $errcode`
+              echo "error-message \"$errstring\""
+              exit 0
+          fi
+}
+
+upgrade_signature() {
+	local code=1
+	DEVOS_XMLFILE=device-os-types_init.xml
+	AVCMETA_XMLFILE=avc-meta-data_init.xml
+	WEBFILTERMETA_XMLFILE=webfilter-meta-data_init.xml
+
+	/usr/bin/avc-metadata.sh /tmp/$AVCMETA_XMLFILE
+
+	/usr/bin/avc-deviceos-metadata.sh /tmp/$DEVOS_XMLFILE
+
+	/usr/bin/webfilter-metadata.sh /tmp/$WEBFILTERMETA_XMLFILE
+
+	if [ "$?" = 0 ]; then
+	    # unset two ENV value for avoid attaching to existing session
+	    unset CONFD_MAAPI_USID
+	    unset CONFD_MAAPI_THANDLE
+
+		/usr/bin/confd_load -dd -l -r -p /avc-meta-data /tmp/$AVCMETA_XMLFILE
+		if [ "$?" = 0 ]; then
+			cp /tmp/$AVCMETA_XMLFILE /etc/confd/cdb/$AVCMETA_XMLFILE
+			code=0
+		fi
+
+		/usr/bin/confd_load -dd -l -r -p /device-os-types /tmp/$DEVOS_XMLFILE
+		if [ "$?" = 0 ]; then
+			cp /tmp/$DEVOS_XMLFILE /etc/confd/cdb/$DEVOS_XMLFILE
+			code=0
+		fi
+
+		/usr/bin/confd_load -dd -l -r -p /webfilter-meta-data /tmp/$WEBFILTERMETA_XMLFILE
+		if [ "$?" = 0 ]; then
+			cp /tmp/$WEBFILTERMETA_XMLFILE /etc/confd/cdb/$WEBFILTERMETA_XMLFILE
+			code=0
+		fi
+	fi
+
+	echo $code
+}
+
+reboot_to_image() {
+        img_selected="$1"
+	logger -t system -p local0.alert "Rebooting the system .."
+	active_firmware=`uci get firmware.firminfo.version`
+	inactive_firmware=`uci get firmware.firminfo.inactive_version`
+        if [ "$img_selected" = "inactive" ];then
+                curr_img=`uci get firmware.firminfo.active`
+                if [ "$curr_img" = "image1" ];then
+                        `uci set firmware.firminfo.active=image2`
+                        echo 2 > /tmp/active
+                        flash_erase -q /dev/mtd$MTD_ENV 0 0
+                        nandwrite -p -q /dev/mtd$MTD_ENV /tmp/active
+                else
+                        `uci set firmware.firminfo.active=image1`
+                        echo 1 > /tmp/active
+                        flash_erase -q /dev/mtd$MTD_ENV 0 0
+                        nandwrite -p -q /dev/mtd$MTD_ENV /tmp/active
+                fi
+                uci commit firmware
+		logger -t system -p local0.alert "System will boot with inactive image (version $inactive_firmware) after reboot."
+        else
+		logger -t system -p local0.alert "System will boot with active image (version $active_firmware) after reboot."
+	fi
+        TRIGGER_REBOOT=1
+        # Firmware upgrade
+        echo 3 > /mnt/configcert/config/rebootstate
+        errstring="Success"
+        errcode=0
+}
+
+
+source_location_url=`echo $@ | awk '{
+					for (I=1;I<=NF;I=I+2) 
+					{
+						if ($I == "source") 
+						{
+							if ($(I+1) == "__BEGIN") {
+								for (J=I+2;J<=NF;J=J+2) {
+									if ($J == "location-url") {
+										{print $(J+1)};
+										break;
+									}
+									if ($J == "source") {
+										if ($(J+1) == "__END") {
+											break;
+										}
+									}
+								}
+							}
+						}
+					}
+				    }'`
+
+destination_location_url=`echo $@ | awk '{
+					for (I=1;I<=NF;I=I+2) 
+					{
+						if ($I == "destination") 
+						{
+							if ($(I+1) == "__BEGIN") {
+								for (J=I+2;J<=NF;J=J+2) {
+									if ($J == "location-url") {
+										{print $(J+1)};
+										break;
+									}
+									if ($J == "destination") {
+										if ($(J+1) == "__END") {
+											break;
+										}
+									}
+								}
+							}
+						}
+					}
+				    }'`
+
+if [ "$filetype" = "log" ];then
+#{
+	# Copy the log file from pre-defined location (/tmp/Log/syslog.log) to USB1/USB2
+	if [ -n "$destination_location_url" ];then
+		usbcheck=`echo $destination_location_url | grep "$USB_FILE1"`
+		if [ -n "$usbcheck" ];then
+			USB_PORT="USB1"
+		else
+			usbcheck=`echo $destination_location_url | grep "$USB_FILE2"`
+			if [ -n "$usbcheck" ];then
+				USB_PORT="USB2"
+			fi
+		fi
+		if [ -n "$USB_PORT" ];then
+			# Check if the destination USB directory exists or not
+			if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+				errstring="USB device is not mounted."
+			else
+				# Prepare Log File Name
+				`date > /tmp/tmpUsbDate`
+				`sed -i "s/  */ /g" /tmp/tmpUsbDate`
+				month=`cat /tmp/tmpUsbDate | cut -d " " -f 2`
+				case "$month" in
+					Jan) month=01 ;;
+					Feb) month=02 ;;
+					Mar) month=03 ;;
+					Apr) month=04 ;;
+					May) month=05 ;;
+					Jun) month=06 ;;
+					Jul) month=07 ;;
+					Aug) month=08 ;;
+					Sep) month=09 ;;
+					Oct) month=10 ;;
+					Nov) month=11 ;;
+					Dec) month=12 ;;
+				esac
+				day=`cat /tmp/tmpUsbDate | cut -d " " -f 3`
+				day_len=`echo $day| wc -c`
+				if [ "$day_len" = 2 ];then
+					day=0$day
+				fi
+				year=`cat /tmp/tmpUsbDate | cut -d " " -f 6`
+				devicename=`uci get systeminfo.sysinfo.pid`
+				devicename=`echo $devicename | cut -d - -f 1`
+				usb_log_file=$USB_MOUNT/$USB_PORT/"$devicename"_syslog_"$year$month$day".log
+								
+				# Copy file to normal format from syslog format.
+				`awk 'NF{NF-=2};1' <$LOG_OUTPUT_FILE >$TMP_LOGOUTPUT` >/dev/null 2>&1
+				`awk '{$1=""; $2=""; $3="" ;$5="" ;$7 ="";$8 ="";$9="";sub("  ", " ");$2="<"$2">";sub(" \"","");sub("\"$","");print}' $TMP_LOGOUTPUT > $EXPORT_LOG` >/dev/null 2>&1						
+				cp -f "$EXPORT_LOG" "$usb_log_file"
+				rm -rf $EXPORT_LOG $TMP_LOGOUTPUT
+				logger -t system -p local0.info "Logs exported to $USB_PORT"
+				errstring="Success"
+				errcode=0
+			fi
+		else
+			errstring="Invalid destination url"
+		fi
+	else
+		errstring="Please provide destination url"	
+	fi
+#}
+fi
+
+if [ "$filetype" = "certificate" ];then
+#{
+	# Check Export (no source url) and Import (no destination url) case
+	# Export to USB case
+	if [ -n "$destination_location_url" ] && [ -z "$source_location_url" ];then
+	#{
+		usbcheck=`echo $destination_location_url | grep "$USB_FILE1"`
+		if [ -n "$usbcheck" ];then
+			USB_PORT="USB1"
+		else
+			usbcheck=`echo $destination_location_url | grep "$USB_FILE2"`
+			if [ -n "$usbcheck" ];then
+				USB_PORT="USB2"
+			fi
+		fi
+		
+	 	checkCertType=$(openssl req -in $CERT_DIR/$certificate_name.$PEM_EXT  -noout -text | grep "Certificate Request")
+                if [ -n "$checkCertType" ]; then                                                        
+                        cert_type="certificate-sign-request"                                            
+                else                                                                                                 
+		#{
+                        checkCertType=`openssl x509 -in $CERT_DIR/$certificate_name.$PEM_EXT  -noout -text | grep "CA:TRUE"`
+                        if [ -n "$checkCertType" ];then                                                              
+                                IsImported=$(uci get certificate.$certificate_name.is_imported)                    
+                                if [ "$IsImported" = "0" ];then
+                                       cert_type="CA"          
+                                else                                                                                       
+                                        errstring=" Exporting "Imported CAs" not allowed "                                 
+                                        exit 1                                                                             
+                                fi                                                                                         
+                        else                                                                                               
+				if [ -e $CERT_DIR/$certificate_name.$PEM_EXT ]
+				then
+					checkCertType=`openssl x509 -in $CERT_DIR/$certificate_name.$PEM_EXT  -noout -text | grep "CA:TRUE"`
+				else
+					checkCertType=`openssl x509 -in $CERT_DIR/$certificate_name.$CRT_EXT  -noout -text | grep "CA:TRUE"`
+				fi
+
+				if [ -n "$checkCertType" ];then
+					cert_type="CA"			
+					preinstalled_cert=1
+				else
+
+                                	checkCertType=`openssl x509 -in $CERT_DIR/$certificate_name.$PEM_EXT  -noout -text | grep "Certificate"`
+	                                if [ -n "$checkCertType" ]; then                                                           
+        	                                cert_type="certificate"                                                            
+                	                fi                                                                                           
+				fi
+                        fi                                                                                                   
+		#}
+                fi                         
+		
+		if [ -n "$USB_PORT" ];then
+		#{
+			# Check if the destination USB directory exists or not
+			if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+			#{
+				errstring="USB device is not mounted."
+			#}
+			else
+			#{
+				if [ "$cert_type" = "ca-certification" ] || [ "$cert_type" = "pkcs12" ];then
+				#{
+					errstring="Only local and CSR can be exported"
+				#}
+				else
+				#{
+					if [ -n "$certificate_name" ] && [ -n "$format" ];then
+					#{
+						if [ "$format" = "pem" ] || [ "$format" = "pkcs12" ];then
+						#{
+							if [ "$format" = "pkcs12" ] && [ -z "$password" ];then
+							#{
+								errstring="Please provide password to export certificate in pkcs12 format"
+							#}
+							else
+							#{
+								if [ "$cert_type" = "certification-sign-request" ] && [ "$format" = "pkcs12" ];then
+								#{
+									errstring="certification-sign-request cab be downloaded in pem format only"
+								#}
+								else
+								#{
+									if [ "$preinstalled_cert" = 1 ] && [ "$format" = "pkcs12" ];then
+										errstring="PreInstalled certs cannot be exported in PKCS12 format"
+										exit 1
+									fi
+									if [ "$format" = "pem" ];then
+										format=0
+									else
+										format=1
+									fi
+									`uci set certificate.$certificate_name=exported_certificate >/dev/null 2>&1` || {
+									errstring="Invalid Certificate Name"
+									}
+								
+									`uci set certificate.$certificate_name.format=$format >/dev/null 2>&1`
+									if [ "$format" = 1 ];then
+										`uci set certificate.$certificate_name.password=$password`
+									fi
+									`uci set certificate.$certificate_name.preinstalled_cert=$preinstalled_cert >/dev/null 2>&1`
+									
+									`/etc/init.d/config_update.sh certificate >/dev/null 2>&1`
+									
+									errcode=$?
+									if [ "$errcode" -ne 0 ];then
+										errstring="Certificate Export Failed"
+										logger -t system -p local0.error "Certificate export failed for $certificate_name."
+									else
+										filename=`ls $TMP_CERTS_OUT`
+										cert_file="$TMP_CERTS_OUT/$filename"
+										
+										path=${destination_location_url#*/}
+										path=${path%/*}
+										cp -f $cert_file $USB_MOUNT/$path/
+										errstring="Success"
+										logger -t system -p local0.info "Certificate $certificate_name exported successfully."
+									fi
+								#}
+								fi
+							#}
+							fi
+						#}
+						else
+						#{
+							errstring="Certificate Can be exported in pem or pkcs12 format only"
+						#}
+						fi
+					#}
+					else
+					#{
+						errstring="Please provide Certificate name, type and download format"
+					#}
+					fi
+				#}
+				fi
+			#}
+				fi
+		#}
+		else
+		#{
+			errstring="Invalid destination url"
+		#}
+		fi
+	#}
+	fi
+	if [ -z "$destination_location_url" ] && [ -n "$source_location_url" ];then
+	#{
+		# we need certificate name, certificate-file-name, type as arguments
+		if [ -n "$certificate_name" ] && [ -n "$cert_type" ];then
+		#{
+			# Possible certificate format der  pem  pkcs7  pkcs12
+			if [ "$cert_type" = "der" ] || [ "$cert_type" = "pem" ] || [ "$cert_type" = "pkcs12" ] || [ "$cert_type" = "pkcs7" ];then
+			#{
+				if [ "$cert_type" = "pkcs12" ] || [ "$cert_type" = "pkcs7" ] && [ -z "$password" ];then
+				#{
+					errstring="Please provide password to import certificate in pkcs12/pkcs7 format"
+				#}
+				else
+				#{
+					tmp=`echo $source_location_url | grep $CERT_URL`
+					if [ -n "$tmp" ];then
+					#{
+						orig_cert_file=`basename $tmp`
+						# This file must exist in certificate import directory location
+						tmp=`ls $TMP_CERTS_IN`
+						if [ "$orig_cert_file" = "$tmp" ];then
+						#{
+							if [ "$cert_type" = "pem" ] || [ "$cert_type" = "der" ];then
+								format=0
+							elif [ "$cert_type" = "ca-certification" ];then
+								format=1
+							elif [ "$cert_type" = "pkcs12" ] || [ "$cert_type" = "pkcs7" ];then
+								format=2
+							fi
+							# Cleanup
+							echo "" > $CERT_TMP_UCI
+							orig_certificatename=$certificate_name	
+							# It is assumed that pem & der format is used only to import signed certificates
+							if [ "$format" = 0 ];then
+								`uci rename certificate.$certificate_name=$certificate_name$REPLACE_CSR >/dev/null 2>&1`	
+							fi	
+
+							`uci set certificate.$certificate_name=imported_certificate >/dev/null 2>&1` || {
+							errstring="Invalid Certificate Name"
+							}
+						
+							`uci set certificate.$certificate_name.cert_name=$certificate_name >/dev/null 2>&1` || {
+							errstring="Invalid Certificate Name"
+							}
+							
+							`uci set certificate.$certificate_name.filename=$orig_cert_file >/dev/null 2>&1` || {
+							errstring="Invalid Certificate file Name"
+							}
+
+							`uci set certificate.$certificate_name.format=$format >/dev/null 2>&1`
+							if [ "$format" = 2 ];then
+								`uci set certificate.$certificate_name.password=$password`
+							fi
+							#The certificate is imported , therefore is_imported is 1.
+							#Other values for is_imported are 0 - Locally Generated
+							#				  2 - Pre-Installed		
+							`uci set certificate.$certificate_name.is_imported=1`
+							`/etc/init.d/config_update.sh certificate >/dev/null 2>&1`
+							
+							errcode=$?
+							if [ "$errcode" -ne 0 ];then
+								errstring="Certificate Import Failed"
+								logger -t system -p local0.error "Certificate import failed for $orig_certificatename."
+							else
+								errstring="Certificate Imported Successfully"
+								logger -t system -p local0.info "Certificate $orig_certificatename imported successfully."
+							fi
+						#}
+						else
+						#{
+							errstring="Invalid certificate file"		
+						#}
+						fi
+					#}
+					else
+					#{
+						tmp=`echo $source_location_url | grep $USB_FILE1`
+						if [ -n "$tmp" ];then
+						#{
+				                        USB_PORT="USB1"
+						#}
+				                else
+						#{
+				                        tmp=`echo $source_location_url | grep "$USB_FILE2"`
+				                        if [ -n "$tmp" ];then
+				                                USB_PORT="USB2"
+				                        fi
+						#}
+				                fi
+						if [ -n "$USB_PORT" ];then
+						#{
+							orig_filename=${source_location_url#*$USB_PORT}
+							orig_filename_name=`basename $orig_filename`
+							`cp -f $USB_MOUNT/$USB_PORT/$orig_filename $TMP_CERTS_IN/ 1>/dev/null 2>/dev/null`
+							if [ "$?" -eq 0 ];then
+							#{
+								if [ "$cert_type" = "pem" ] || [ "$cert_type" = "der" ];then
+									format=0
+								elif [ "$cert_type" = "ca-certification" ];then
+									format=1
+								elif [ "$cert_type" = "pkcs12" ] || [ "$cert_type" = "pkcs7" ];then
+									format=2
+								fi
+								# Cleanup
+								echo "" > $CERT_TMP_UCI
+								orig_certificatename=$certificate_name	
+								
+								if [ "$format" = 0 ];then
+									`uci rename certificate.$certificate_name=$certificate_name$REPLACE_CSR >/dev/null 2>&1`	
+								fi
+	
+								`uci set certificate.$certificate_name=imported_certificate >/dev/null 2>&1` || {
+								errstring="Invalid Certificate Name"
+								}
+							
+								`uci set certificate.$certificate_name.cert_name=$certificate_name >/dev/null 2>&1` || {
+								errstring="Invalid Certificate Name"
+								}
+								
+								`uci set certificate.$certificate_name.filename=$orig_filename_name >/dev/null 2>&1` || {
+								errstring="Invalid Certificate file Name"
+								}
+
+								`uci set certificate.$certificate_name.format=$format >/dev/null 2>&1`
+								if [ "$format" = 2 ];then
+									`uci set certificate.$certificate_name.password=$password`
+								fi
+								
+								#The certificate is imported , therefore is_imported is 1.
+								#Other values for is_imported are 0 - Locally Generated
+								#				  2 - Pre-Installed		
+								`uci set certificate.$certificate_name.is_imported=1`
+								`/etc/init.d/config_update.sh certificate >/dev/null 2>&1`
+								
+								errcode=$?
+								if [ "$errcode" -ne 0 ];then
+									logger -t system -p local0.error "Certificate import failed for $orig_certificatename."
+									errstring="Certificate Import Failed"
+								else
+									logger -t system -p local0.info "Certificate $orig_certificatename imported successfully."
+									errstring="Certificate Imported Successfully"
+								fi
+							#}
+							else
+							#{
+								errstring="Certificate not found"		
+							#}
+							fi
+						#}
+						else
+						#{
+							errstring="Invalid source url"
+						#}
+						fi
+					#}
+					fi
+				#}
+				fi
+			#}
+			else
+			#{
+				errstring="Only local, CA-Certificate and pkcs12 format certificates can be imported."
+			#}
+			fi
+		#}
+		else
+		#{
+			errstring="Please provide certificate_name and type"
+		#}
+		fi	
+	#}
+	fi
+#}
+fi
+
+# Config Backup Cases
+if [ "$filetype" = "configuration" ];then
+	source_config_type=`echo $@ | awk '{
+						for (I=1;I<=NF;I=I+2) 
+						{
+							if ($I == "source") 
+							{
+								if ($(I+1) == "__BEGIN") {
+									for (J=I+2;J<=NF;J=J+2) {
+										if ($J == "config-type") {
+											{print $(J+1)};
+											break;
+										}
+										if ($J == "source") {
+											if ($(J+1) == "__END") {
+												break;
+											}
+										}
+									}
+								}
+							}
+						}
+					    }'`
+			
+	destination_config_type=`echo $@ | awk '{
+						for (I=1;I<=NF;I=I+2) 
+						{
+							if ($I == "destination") 
+							{
+								if ($(I+1) == "__BEGIN") {
+									for (J=I+2;J<=NF;J=J+2) {
+										if ($J == "config-type") {
+											{print $(J+1)};
+											break;
+										}
+										if ($J == "destination") {
+											if ($(J+1) == "__END") {
+												break;
+											}
+										}
+									}
+								}
+							}
+						}
+					    }'`
+
+	# Running to startup
+	if [ "$source_config_type" = "config-running" ] && [ "$destination_config_type" = "config-startup" ];then
+		$CONFIG_SCRIPT "copy" "config-running" "config-startup"
+		errcode=$?
+		if [ "$errcode" -ne 0 ];then
+			errstring="Failed to save running configuration to startup configuration"
+		else
+			errstring="Running configuration saved to startup configuration"
+		fi
+	fi
+
+	# Running to backup
+	if [ "$source_config_type" = "config-running" ] && [ "$destination_config_type" = "config-backup" ];then
+		$CONFIG_SCRIPT "copy" "config-running" "config-backup"
+		errcode=$?
+		if [ "$errcode" -ne 0 ];then
+			errstring="Failed to save running configuration to backup configuration"
+		else
+			errstring="Running configuration saved to backup configuration"
+		fi
+	fi
+	
+	# Running to usb
+	if [ "$source_config_type" = "config-running" ] && [ -n "$destination_location_url" ];then
+		usbcheck=`echo $destination_location_url | grep "$USB_FILE1"`
+		if [ -n "$usbcheck" ];then
+                        USB_PORT="USB1"
+                else
+                        usbcheck=`echo $destination_location_url | grep "$USB_FILE2"`
+                        if [ -n "$usbcheck" ];then
+                                USB_PORT="USB2"
+                        fi
+                fi
+	
+		if [ -n "$USB_PORT" ];then
+                        # Check if the destination USB directory exists or not
+                        if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+                                errstring="USB device is not mounted."
+                        else
+				$CONFIG_SCRIPT "export" "config-running" "$destination_location_url"
+				errcode=$?
+				if [ "$errcode" -ne 0 ];then
+					errstring="Failed to save running configuration to $USB_PORT"
+				else
+					errstring="Running configuration saved to $USB_PORT"
+				fi
+                        fi
+                else
+                        errstring="Invalid destination url"
+                fi
+	fi
+
+	
+	# Startup to backup
+	if [ "$source_config_type" = "config-startup" ] && [ "$destination_config_type" = "config-backup" ];then
+		$CONFIG_SCRIPT "copy" "config-startup" "config-backup"
+		errcode=$?
+		if [ "$errcode" -ne 0 ];then
+			errstring="Failed to save startup configuration to backup configuration"
+		else
+			errstring="Startup configuration saved to backup configuration"
+		fi
+	fi
+	
+	# Startup to running
+	if [ "$source_config_type" = "config-startup" ] && [ "$destination_config_type" = "config-running" ];then
+		$CONFIG_SCRIPT "copy" "config-startup" "config-running"
+		errcode=$?
+		if [ "$errcode" -ne 0 ];then
+			errstring="Failed to load startup configuration to running configuration"
+		else
+			errstring="Startup configuration loaded to running configuration"
+		fi
+	fi
+	
+	# Startup to usb
+	if [ "$source_config_type" = "config-startup" ] && [ -n "$destination_location_url" ];then
+		usbcheck=`echo $destination_location_url | grep "$USB_FILE1"`
+		if [ -n "$usbcheck" ];then
+                        USB_PORT="USB1"
+                else
+                        usbcheck=`echo $destination_location_url | grep "$USB_FILE2"`
+                        if [ -n "$usbcheck" ];then
+                                USB_PORT="USB2"
+                        fi
+                fi
+	
+		if [ -n "$USB_PORT" ];then
+                        # Check if the destination USB directory exists or not
+                        if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+                                errstring="USB device is not mounted."
+                        else
+				$CONFIG_SCRIPT "export" "config-startup" "$destination_location_url"
+				errcode=$?
+				if [ "$errcode" -ne 0 ];then
+					errstring="Failed to save startup configuration to $USB_PORT"
+				else
+					errstring="Startup configuration saved to $USB_PORT"
+				fi
+                        fi
+                else
+                        errstring="Invalid destination url"
+                fi
+	fi
+	
+	# Backup to startup
+	if [ "$source_config_type" = "config-backup" ] && [ "$destination_config_type" = "config-startup" ];then
+		$CONFIG_SCRIPT "copy" "config-backup" "config-startup"
+		errcode=$?
+		if [ "$errcode" -ne 0 ];then
+			errstring="Failed to save backup configuration to startup configuration"
+		else
+			errstring="Backup configuration saved to startup configuration"
+		fi
+	fi
+
+	# Backup to running
+	if [ "$source_config_type" = "config-backup" ] && [ "$destination_config_type" = "config-running" ];then
+		$CONFIG_SCRIPT "copy" "config-backup" "config-running"
+		errcode=$?
+		if [ "$errcode" -ne 0 ];then
+			errstring="Failed to load backup configuration to running configuration"
+		else
+			errstring="Backup configuration loaded to running configuration"
+		fi
+	fi
+
+	# Backup to USB
+	if [ "$source_config_type" = "config-backup" ] && [ -n "$destination_location_url" ];then
+		usbcheck=`echo $destination_location_url | grep "$USB_FILE1"`
+		if [ -n "$usbcheck" ];then
+                        USB_PORT="USB1"
+                else
+                        usbcheck=`echo $destination_location_url | grep "$USB_FILE2"`
+                        if [ -n "$usbcheck" ];then
+                                USB_PORT="USB2"
+                        fi
+                fi
+	
+		if [ -n "$USB_PORT" ];then
+                        # Check if the destination USB directory exists or not
+                        if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+                                errstring="USB device is not mounted."
+                        else
+				$CONFIG_SCRIPT "export" "config-backup" "$destination_location_url"
+				errcode=$?
+				if [ "$errcode" -ne 0 ];then
+					errstring="Failed to save backup configuration to $USB_PORT"
+				else
+					errstring="Backup configuration saved to $USB_PORT"
+				fi
+                        fi
+                else
+                        errstring="Invalid destination url"
+                fi
+	fi
+
+	# Mirror to Startup
+	if [ "$source_config_type" = "config-mirror" ] && [ "$destination_config_type" = "config-startup" ];then
+		$CONFIG_SCRIPT "copy" "config-mirror" "config-startup"
+		errcode=$?
+		if [ "$errcode" -ne 0 ];then
+			errstring="Failed to save mirror configuration to startup configuration"
+		else
+			errstring="Mirror configuration saved to startup configuration"
+		fi
+	fi
+
+	# Mirror to running
+	if [ "$source_config_type" = "config-mirror" ] && [ "$destination_config_type" = "config-running" ];then
+		$CONFIG_SCRIPT "copy" "config-mirror" "config-running"
+		errcode=$?
+		if [ "$errcode" -ne 0 ];then
+			errstring="Failed to load mirror configuration to running configuration"
+		else
+			errstring="Mirror configuration loaded to running configuration"
+		fi
+	fi
+
+	# Mirror to Backup
+	if [ "$source_config_type" = "config-mirror" ] && [ "$destination_config_type" = "config-backup" ];then
+		$CONFIG_SCRIPT "copy" "config-mirror" "config-backup"
+		errcode=$?
+		if [ "$errcode" -ne 0 ];then
+			errstring="Failed to save mirror configuration to backup configuration"
+		else
+			errstring="Mirror configuration saved to backup configuration"
+		fi
+	fi
+
+	# Mirror to usb
+	if [ "$source_config_type" = "config-mirror" ] && [ -n "$destination_location_url" ];then
+		usbcheck=`echo $destination_location_url | grep "$USB_FILE1"`
+		if [ -n "$usbcheck" ];then
+                        USB_PORT="USB1"
+                else
+                        usbcheck=`echo $destination_location_url | grep "$USB_FILE2"`
+                        if [ -n "$usbcheck" ];then
+                                USB_PORT="USB2"
+                        fi
+                fi
+	
+		if [ -n "$USB_PORT" ];then
+                        # Check if the destination USB directory exists or not
+                        if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+                                errstring="USB device is not mounted."
+                        else
+				$CONFIG_SCRIPT "export" "config-mirror" "$destination_location_url"
+				errcode=$?
+				if [ "$errcode" -ne 0 ];then
+					errstring="Failed to save mirror configuration to $USB_PORT"
+				else
+					errstring="Mirror configuration saved to $USB_PORT"
+				fi
+                        fi
+                else
+                        errstring="Invalid destination url"
+                fi
+	fi
+
+	# Check source location url (USB/PC)
+	if [ $(echo $source_location_url | grep "^$USB_FILE") ];then
+		# Source as usb cases
+		case $source_location_url in 
+			${USB_FILE}*)
+				case $destination_config_type in
+					config-running)
+						# usb to running
+						$CONFIG_SCRIPT "import" "$source_location_url" "config-running"
+						errcode=$?
+						if [ "$errcode" -ne 0 ];then
+							errstring="Failed to load configuration from USB to running configuration"
+						else
+							errstring="Configuration from USB loaded to running configuration"
+						fi
+					;;	
+					config-backup)
+						# usb to backup
+						$CONFIG_SCRIPT "import" "$source_location_url" "config-backup"
+						errcode=$?
+						if [ "$errcode" -ne 0 ];then
+							errstring="Failed to save Configuration from USB to backup configuration"
+						else
+							errstring="Configuration from USB saved to backup configuration"
+						fi
+					;;
+					config-mirror)
+						# usb to mirror
+						$CONFIG_SCRIPT "import" "$source_location_url" "config-mirror"
+						errcode=$?
+						if [ "$errcode" -ne 0 ];then
+							errstring="Failed to save Configuration from USB to mirror configuration"
+						else
+							errstring="Configuration from USB saved to mirror configuration"
+						fi
+					;;
+					config-startup)
+						# usb to startup
+						$CONFIG_SCRIPT "import" "$source_location_url" "config-startup"
+						errcode=$?
+						if [ "$errcode" -ne 0 ];then
+							errstring="Failed to load Configuration from USB to startup configuration"
+						else
+							errstring="Configuration from USB loaded to startup configuration"
+						fi
+					;;
+				esac
+			;;
+		esac
+	elif [ $(echo $source_location_url | grep "^$FILE_CONFIGURATION") ];then
+		# PC to startup
+		if [ -n "$source_location_url" ] && [ "$destination_config_type" = "config-startup" ];then
+			# Check for proper source location url
+			locationcheck=`echo $source_location_url | grep "$FILE_CONFIGURATION"`
+			if [ -n "$locationcheck" ];then	
+				$CONFIG_SCRIPT "import" "$source_location_url" "config-startup"
+				errcode=$?
+				if [ "$errcode" -ne 0 ];then
+					errstring="Failed to save configuration from PC to startup configuration"
+				else
+					errstring="Configuration from PC saved to startup configuration"
+				fi
+			else
+				errstring="Invalid source url"
+			fi
+		fi
+	
+		# PC to running
+		if [ -n "$source_location_url" ] && [ "$destination_config_type" = "config-running" ];then
+			# Check for proper source location url
+			locationcheck=`echo $source_location_url | grep "$FILE_CONFIGURATION"`
+			if [ -n "$locationcheck" ];then	
+				$CONFIG_SCRIPT "import" "$source_location_url" "config-running"
+				errcode=$?
+				if [ "$errcode" -ne 0 ];then
+					errstring="Failed to load configuration from PC to running configuration"
+				else
+					errstring="Configuration from PC loaded to running configuration"
+				fi
+			else
+				errstring="Invalid source url"
+			fi
+		fi
+	
+		# PC to backup
+		if [ -n "$source_location_url" ] && [ "$destination_config_type" = "config-backup" ];then
+			# Check for proper source location url
+			locationcheck=`echo $source_location_url | grep "$FILE_CONFIGURATION"`
+			if [ -n "$locationcheck" ];then	
+				$CONFIG_SCRIPT "import" "$source_location_url" "config-backup"
+				errcode=$?
+				if [ "$errcode" -ne 0 ];then
+					errstring="Failed to save configuration from PC to backup configuration"
+				else
+					errstring="Configuration from PC saved to backup configuration"
+				fi
+			else
+				errstring="Invalid source url"
+			fi
+		fi
+	
+		# PC to usb
+		if [ -n "$source_location_url" ] && [ -n "$destination_location_url" ];then
+			# Check for proper source location url
+			locationcheck=`echo $source_location_url | grep "$FILE_CONFIGURATION"`
+			if [ -n "$locationcheck" ];then
+				usbcheck=`echo $destination_location_url | grep "$USB_FILE1"`
+				if [ -n "$usbcheck" ];then
+	                        	USB_PORT="USB1"
+	                	else
+	                        	usbcheck=`echo $destination_location_url | grep "$USB_FILE2"`
+	                        	if [ -n "$usbcheck" ];then
+	                                USB_PORT="USB2"
+	                        	fi
+	                	fi
+				if [ -n "$USB_PORT" ];then
+					# Check if the destination USB directory exists or not
+					if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+						errstring="USB device is not mounted."
+					else
+						cp -f $CONFIG_LOCATION/* $USB_MOUNT/$USB_PORT/
+						rm -rf $CONFIG_LOCATION/*
+						errcode=0
+						errstring="Configuration from PC saved to $USB_PORT"
+					fi
+				else
+					errstring="Invalid destination url"
+				fi
+			else
+				errstring="Invalid source url"
+			fi	
+		fi
+
+	#Download configuration from remote server using http/https
+	elif [ $(echo $source_location_url | grep "^http") ];then
+		if [ -n "$user_name" ] && [ -n "$password" ]; then
+			curl -u $user_name:$password -o $CONFIG_LOCATION/config.xml -O $source_location_url
+		else
+			curl -o $CONFIG_LOCATION/config.xml -O $source_location_url
+	fi
+		errcode=$?
+		if [ "$errcode" -ne 0 ]; then
+			errstring="Failed to download configuration file from remote server $source_location_url"
+		else
+		# import configuration from remote server to running configuration
+			if [ -n "$source_location_url" ] && [ "$destination_config_type" = "config-running" ];then
+				# Check for proper source location url
+				locationcheck=`echo $source_location_url | grep "http"`
+				if [ -n "$locationcheck" ];then
+					$CONFIG_SCRIPT "import" "$FILE_CONFIGURATION/config.xml" "config-running"
+					errcode=$?
+					if [ "$errcode" -ne 0 ];then
+						errstring="Failed to save configuration from Remote server to running configuration"
+					else
+						errstring="Configuration from Remote Server saved to running configuration"
+					fi
+				else
+					errstring="Invalid source url"
+				fi
+					rm -f $CONFIG_LOCATION/*
+			fi
+
+		# import configuration from remote server to startup configuration
+			if [ -n "$source_location_url" ] && [ "$destination_config_type" = "config-startup" ];then
+				# Check for proper source location url
+				locationcheck=`echo $source_location_url | grep "http"`
+				if [ -n "$locationcheck" ];then
+					$CONFIG_SCRIPT "import" "$FILE_CONFIGURATION/config.xml" "config-startup"
+					errcode=$?
+					if [ "$errcode" -ne 0 ];then
+						errstring="Failed to save configuration from Remote server to startup configuration"
+					else
+						errstring="Configuration from Remote Server saved to startup configuration"
+					fi
+				else
+					errstring="Invalid source url"
+				fi
+					rm -f $CONFIG_LOCATION/*
+			fi
+		fi
+
+	#Download configuration from remote server using tftp
+	elif [ $(echo $source_location_url | grep "^tftp") ];then
+		original_filename=`basename $source_location_url`
+		remote_ip=`echo $source_location_url | cut -d "/" -f3`
+		cd $CONFIG_LOCATION
+		tftp -g $remote_ip -r $original_filename
+		errcode=$?
+		if [ "$errcode" -ne 0 ]; then
+			errstring="Failed to download configuration file from remote server $source_location_url"
+		else
+			if [ -n "$source_location_url" ] && [ "$destination_config_type" = "config-running" ];then
+				# Check for proper source location url
+				locationcheck=`echo $source_location_url | grep "tftp"`
+				if [ -n "$locationcheck" ];then
+					$CONFIG_SCRIPT "import" "$FILE_CONFIGURATION/$original_filename" "config-running"
+					errcode=$?
+					if [ "$errcode" -ne 0 ];then
+						errstring="Failed to save configuration from Remote server to running configuration"
+					else
+						errstring="Configuration from Remote Server saved to running configuration"
+					fi
+				else
+					errstring="Invalid source url"
+				fi
+					rm -f $CONFIG_LOCATION/*
+			fi
+
+		# import configuration from remote server to startup configuraiton
+			if [ -n "$source_location_url" ] && [ "$destination_config_type" = "config-startup" ];then
+				# Check for proper source location url
+				locationcheck=`echo $source_location_url | grep "tftp"`
+				if [ -n "$locationcheck" ];then
+					$CONFIG_SCRIPT "import" "$FILE_CONFIGURATION/$original_filename" "config-startup"
+					errcode=$?
+					if [ "$errcode" -ne 0 ];then
+						errstring="Failed to save configuration from Remote server to startup configuration"
+					else
+						errstring="Configuration from Remote Server saved to startup configuration"
+					fi
+				else
+					errstring="Invalid source url"
+				fi
+					rm -f $CONFIG_LOCATION/*
+			fi
+		fi
+	fi
+
+	if [ "$errcode" -ne 0 ];then
+		logger -t system -p local0.error "$errstring"
+	else
+		logger -t system -p local0.info "$errstring"
+	fi
+fi
+
+if [ "$filetype" = "firmware" ] || [ "$filetype" = "signature" ] || [ "$filetype" = "3g-4g-driver" ];then
+	if [ "$filetype" = "firmware" ];then
+		reboot_type=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "reboot-type") {print $(I+1)};}'`
+		destination_firmwate_state=`echo $@ | awk '{
+								for (I=1;I<=NF;I=I+2) 
+								{
+									if ($I == "destination") 
+									{
+										if ($(I+1) == "__BEGIN") {
+											for (J=I+2;J<=NF;J=J+2) {
+												if ($J == "firmware-state") {
+													{print $(J+1)};
+													break;
+												}
+												if ($J == "destination") {
+													if ($(J+1) == "__END") {
+														break;
+													}
+												}
+											}
+										}
+									}
+								}
+				    			}'`
+		# For now, we are hardcoding to 'inactive' partition to update. Later we need to change it
+		firmware_state="inactive"
+	fi
+
+	# Check upgrade vs only download case
+	check_download=`echo $destination_location_url | grep "USB"`
+	[ -n "$check_download" ] && asd_action="only_dwld"
+
+	# Cisco.com case
+	check_upgrade_progress
+	checkcisco=`echo $source_location_url | grep "$CISCO_URL"`
+	if [ -n "$checkcisco" ];then
+		echo 1 > $ASDSTATUS
+		# Check Download to USB case (we will have destination url)
+		if [ -n "$destination_location_url" ];then
+			usbcheck=`echo $destination_location_url | grep "$USB_FILE1"`
+			if [ -n "$usbcheck" ];then
+                	        USB_PORT="USB1"
+         	        else
+                        	usbcheck=`echo $destination_location_url | grep "$USB_FILE2"`
+                        	if [ -n "$usbcheck" ];then
+                                	USB_PORT="USB2"
+                        	fi
+                	fi
+			if [ -n "$USB_PORT" ];then
+				if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+					#errstring="USB device is not mounted."
+				    errcode=$ER_USB_DEVICE_NOT_MOUNTED
+                                    exitwith_errorcode $errcode
+				else
+					download_path=${destination_location_url#*$USB_PORT/}
+					# Check existence of directory
+					if [ ! -d "$USB_MOUNT/$USB_PORT/$download_path" ];then
+						errstring="$USB_MOUNT/$USB_PORT/$download_path directory does not exists"
+					else
+						# Run the asd script with proper parameters
+						if [ "$filetype" = "firmware" ];then
+							# Currently we are flashing inactive image, later we need to change according to destination_firmwate_state
+							`$DOWNLOAD_FIRMWARE $USB_MOUNT/$USB_PORT/$download_path $asd_action 2>/dev/null 1>/dev/null`
+						elif [ "$filetype" = "signature" ];then
+							`$DOWNLOAD_SIGNATURE $USB_MOUNT/$USB_PORT/$download_path $asd_action 2>/dev/null 1>/dev/null`
+						elif [ "$filetype" = "3g-4g-driver" ];then
+							`$DOWNLOAD_DRIVER $USB_MOUNT/$USB_PORT/$download_path $asd_action 2>/dev/null 1>/dev/null`
+						fi
+
+						errcode=$?
+						#if [ "$asd_action" = "dwld_apply" ];then
+						#	errcode=`cat $ASDSTATUS` 2>/dev/null
+						#fi
+
+						if [ "$errcode" -ne 0 ];then
+							if [ "$asd_action" = "dwld_apply" ];then
+								logger -t system -p local0.error "Update failed for $filetype from cisco.com"
+								errstring="Update Failed"
+							else
+								logger -t system -p local0.error "Download failed for $filetype from cisco.com"
+								errstring="Download Failed"
+							fi
+                                                        exitwith_errorcode $errcode
+						else
+							errstring="Success"
+							if [ "$asd_action" = "dwld_apply" ];then
+								logger -t system -p local0.info "$filetype updated from cisco.com"
+							else
+								logger -t system -p local0.info "$filetype downloaded from cisco.com"
+							fi
+
+							# We have flashed correct partition, now if reboot to given firmware_state (default inactive)
+							if [ "$filetype" = "firmware" ] && [ -n "$reboot_type" ];then
+								# Reboot the device
+								if [ "$reboot_type" = "factory-default-config" ] || [ "$reboot_type" = "factory-default-config-certificate" ];then
+									rm -f /mnt/configcert/b_count
+									rm -f /mnt/configcert/umbrella/device-id
+									$CONFIG_SCRIPT "factory-default"
+									if [ "$reboot_type" = "factory-default-config" ];then
+										$DELETE_CERT "factory_default"
+									else
+										$DELETE_CERT "factory_default_with_cert"
+									fi
+								else
+									$CONFIG_SCRIPT "upgrade" "startup"
+								fi
+								# For now we are taking reboot as default case
+								reboot_to_image $firmware_state
+							fi
+						fi
+					fi
+				fi
+			else
+				errstring="Invalid destination url"
+			fi
+		else
+			# Run the asd script with proper parameters
+			if [ "$filetype" = "firmware" ];then
+				# Currently we are flashing inactive image, later we need to change according to destination_firmwate_state
+				`$DOWNLOAD_FIRMWARE $FIRMWARE_DL_PATH $asd_action 2>/dev/null 1>/dev/null`
+			elif [ "$filetype" = "signature" ];then
+				`$DOWNLOAD_SIGNATURE $SIG_DL_PATH $asd_action 2>/dev/null 1>/dev/null`
+			elif [ "$filetype" = "3g-4g-driver" ];then
+				`$DOWNLOAD_DRIVER $DRIVER_DL_PATH $asd_action 2>/dev/null 1>/dev/null`
+			fi
+			
+			errcode=$?
+			#errcode=`cat $ASDSTATUS` 2>/dev/null
+			if [ "$errcode" -ne 0 ];then
+				logger -t system -p local0.error "Update failed for $filetype from cisco.com"
+				#errstring="Update Failed"
+				rm -rf $FIRMWARE_DL_PATH/*
+				rm -rf $SIG_DL_PATH/*
+				rm -rf $DRIVER_DL_PATH/*
+                                exitwith_errorcode $errcode
+			else
+				logger -t system -p local0.info "$filetype updated from cisco.com"
+				errstring="Success"
+				if [ "$filetype" = "firmware" ] && [ -n "$reboot_type" ];then
+					# Reboot the device
+					if [ "$reboot_type" = "factory-default-config" ] || [ "$reboot_type" = "factory-default-config-certificate" ];then
+						rm -f /mnt/configcert/b_count
+						$CONFIG_SCRIPT "factory-default"
+						if [ "$reboot_type" = "factory-default-config" ];then
+							$DELETE_CERT "factory_default"
+						else
+							$DELETE_CERT "factory_default_with_cert"
+						fi
+					else
+						$CONFIG_SCRIPT "upgrade" "startup"
+					fi
+					# For now we are taking reboot as default case
+					reboot_to_image $firmware_state
+				fi
+			fi		
+			rm -rf $FIRMWARE_DL_PATH/*
+			rm -rf $SIG_DL_PATH/*
+			rm -rf $DRIVER_DL_PATH/*
+		fi	
+	fi
+
+	# Check USB case
+	usbcheck=`echo $source_location_url | grep "^FILE://USB"`
+	if [ -n "$usbcheck" ];then
+		USB_PORT=
+		usbcheck=`echo $source_location_url | grep "$USB_FILE1"`
+		if [ -n "$usbcheck" ];then
+	        	USB_PORT="USB1"
+	        else
+	                usbcheck=`echo $source_location_url | grep "$USB_FILE2"`
+	                if [ -n "$usbcheck" ];then
+	                         USB_PORT="USB2"
+	                fi
+	        fi
+		
+		if [ -n "$USB_PORT" ];then
+			# Parse the filename
+			orig_filename=${source_location_url#*$USB_PORT/}
+			
+			# Check USB mount
+			if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+				errstring="USB device is not mounted."
+			else
+				
+				if [ -e "$USB_MOUNT/$USB_PORT/$orig_filename" ];then
+					if [ "$filetype" = "firmware" ];then
+						# Currently we are flashing inactive image, later we need to change according to destination_firmwate_state
+						`$INSTALL_FIRMWARE $USB_MOUNT/$USB_PORT/$orig_filename 2>/dev/null 1>/dev/null`
+						errcode=$?
+					elif [ "$filetype" = "signature" ];then
+						`$INSTALL_SIGNATURE $USB_MOUNT/$USB_PORT/$orig_filename 2>/dev/null 1>/dev/null`
+						errcode=$?
+						if [ "$errcode" = 0 ]; then
+							`upgrade_signature 2>/dev/null 1>/dev/null`
+						fi
+					elif [ "$filetype" = "3g-4g-driver" ];then
+						`$INSTALL_USB_DRIVERS $USB_MOUNT/$USB_PORT/$orig_filename 2>/dev/null 1>/dev/null`
+						errcode=$?
+					fi
+
+					if [ "$errcode" -ne 0 ];then
+						logger -t system -p local0.error "Update failed for $filetype from $USB_PORT"
+						errstring="Update Failed"
+					else
+						logger -t system -p local0.info "$filetype updated from $USB_PORT"
+						errstring="Success"
+						if [ "$filetype" = "firmware" ] && [ -n "$reboot_type" ];then
+							# Reboot the device
+							if [ "$reboot_type" = "factory-default-config" ] || [ "$reboot_type" = "factory-default-config-certificate" ];then
+								rm -f /mnt/configcert/b_count
+								$CONFIG_SCRIPT "factory-default"
+								if [ "$reboot_type" = "factory-default-config" ];then
+									$DELETE_CERT "factory_default"
+								else
+									$DELETE_CERT "factory_default_with_cert"
+								fi
+							else
+								$CONFIG_SCRIPT "upgrade" "startup"
+							fi
+							# For now we are taking reboot as default case
+							reboot_to_image $firmware_state
+						fi
+					fi		
+				else
+					errstring="$USB_MOUNT/$USB_PORT/$orig_filename does not exists"
+				fi	
+			fi
+		fi
+	fi
+	
+	# Download from PC case
+	checkPC=`echo $source_location_url | grep "^FILE://"`
+	if [ -n "$checkPC" ];then
+		# Download firmware from PC case
+		if [ "$filetype" = "firmware" ];then
+			checkPC=`echo $source_location_url | grep "$FILE_FIRMWARE"`
+			if [ -n "$checkPC" ];then
+				orig_filename=`basename $source_location_url`
+				# We assume that web server will put the file to correct location before calling this RPC
+				if [ -e "$FIRMWARE_DL_PATH/$orig_filename" ];then
+					# Currently we are flashing inactive image, later we need to change according to destination_firmwate_state
+					`$INSTALL_FIRMWARE $FIRMWARE_DL_PATH/$orig_filename 2>/dev/null 1>/dev/null`
+					errcode=$?
+					if [ "$errcode" -ne 0 ];then
+						if [ "$errcode" -eq 10 ];then
+							logger -t system -p local0.error "Update failed for $filetype from PC"
+							errstring="Update Failed - Insufficient memory space for download, please reboot the device and try again"
+						elif [ "$errcode" -eq 11 ];then
+							logger -t system -p local0.error "Update failed for $filetype from PC"
+							errstring="Update Failed - img file not found"
+						elif [ "$errcode" -eq 12 ];then
+							logger -t system -p local0.error "Update failed for $filetype from PC"
+							errstring="Update Failed - Invalid image content"
+						elif [ "$errcode" -eq 13 ];then
+							logger -t system -p local0.error "Update failed for $filetype from PC"
+							errstring="Update Failed - md5sum check Failed"
+						elif [ "$errcode" -eq 14 ];then
+							logger -t system -p local0.error "Update failed for $filetype from PC"
+							errstring="Update Failed - Firmware version is not higher than current firmware version"
+						elif [ "$errcode" -eq 15 ];then
+							logger -t system -p local0.error "Update failed for $filetype from PC"
+							errstring="Update Failed - Image flashing error"
+						else
+							logger -t system -p local0.error "Update failed for $filetype from PC"
+							errstring="Update Failed"
+						fi
+					else
+						# Reboot the device
+						if [ -n "$reboot_type" ];then
+							if [ "$reboot_type" = "factory-default-config" ] || [ "$reboot_type" = "factory-default-config-certificate" ];then
+								rm -f /mnt/configcert/b_count
+								$CONFIG_SCRIPT "factory-default"
+								if [ "$reboot_type" = "factory-default-config" ];then
+									$DELETE_CERT "factory_default"
+								else
+									$DELETE_CERT "factory_default_with_cert"
+								fi
+							else
+								$CONFIG_SCRIPT "upgrade" "startup"
+							fi
+							# For now we are taking reboot as default case
+							reboot_to_image $firmware_state
+						fi
+						logger -t system -p local0.info "$filetype updated from PC"
+						errstring="Success"
+					fi		
+					rm -rf $FIRMWARE_DL_PATH/*
+				else
+					errstring="$FIRMWARE_DL_PATH/$orig_filename does not exists"
+				fi	
+			fi
+		fi
+		
+		#Download language pack from PC
+		if [ "$filetype" = "language-pack" ]; then
+			isFormBase=`echo $source_location_url | grep "$FILE_LANGUAGE"`
+			if [ -n "$isFormBase" ]; then
+				orig_filename=`basename $source_location_url`
+				if [ -e "$LANG_DL_PATH/$orig_filename" ];then
+					`/usr/bin/update_language "$LANG_DL_PATH/$orig_filename" 2>/dev/null 1>/dev/null`
+					errcode=$?
+					if [ "$errcode" -ne 0 ]; then
+						errstring="Failed to upgrade langauge table"
+					fi
+					rm -rf $LANG_DL_PATH/*
+				fi
+			fi
+		fi
+
+		# Download signature from PC case	
+		if [ "$filetype" = "signature" ];then
+			checkPC=`echo $source_location_url | grep "$FILE_SIGNATURE"`
+			if [ -n "$checkPC" ];then
+				orig_filename=`basename $source_location_url`
+				# We assume that web server will put the file to correct location before calling this RPC
+				if [ -e "$SIG_DL_PATH/$orig_filename" ];then
+					`$INSTALL_SIGNATURE $SIG_DL_PATH/$orig_filename 2>/dev/null 1>/dev/null`
+					errcode=$?
+					if [ "$errcode" = 0 ]; then
+						`upgrade_signature 2>/dev/null 1>/dev/null`
+					fi
+
+					if [ "$errcode" -eq 1 ];then
+						logger -t system -p local0.error "Update failed for $filetype from PC.File corrupted"
+						errstring="Update Failed. File corrupted"
+					elif [ "$errcode" -eq 2 ];then
+						logger -t system -p local0.error "Update failed for $filetype from PC.Signature file compatibilitye error."
+						errstring="Update Failed.Signature file compatibilitye error.Use bundlded signature"
+					elif [ "$errcode" -ne 0 ];then
+						logger -t system -p local0.error "Update failed for $filetype from PC"
+						errstring="Update Failed"
+					else
+						logger -t system -p local0.info "$filetype updated from PC"
+						errstring="Success"
+					fi		
+					rm -rf $SIG_DL_PATH/*
+				else
+					errstring="$SIG_DL_PATH/$orig_filename does not exists"
+				fi	
+			fi
+		fi
+		
+		# Download drivers from PC case	
+		if [ "$filetype" = "3g-4g-driver" ];then
+			checkPC=`echo $source_location_url | grep "$FILE_DRIVER"`
+			if [ -n "$checkPC" ];then
+				orig_filename=`basename $source_location_url`
+				# We assume that web server will put the file to correct location before calling this RPC
+				if [ -e "$DRIVER_DL_PATH/$orig_filename" ];then
+					`$INSTALL_USB_DRIVERS $DRIVER_DL_PATH/$orig_filename 2>/dev/null 1>/dev/null`
+					errcode=$?
+					if [ "$errcode" -ne 0 ];then
+						logger -t system -p local0.error "Update failed for $filetype from PC"
+						errstring="Update Failed"
+					else
+						logger -t system -p local0.info "$filetype updated from PC"
+						errstring="Success"
+					fi		
+					rm -rf $DRIVER_DL_PATH/*
+				else
+					errstring="$DRIVER_DL_PATH/$orig_filename does not exists"
+				fi	
+			fi
+		fi
+	fi	
+	
+	#Download from Remote server using http/https
+	checkRemote=`echo $source_location_url | grep "^http"`
+	if [ -n "$checkRemote" ];then
+		# Download firmware from Remote server case
+		if [ "$filetype" = "firmware" ];then
+			checkcisco=`echo $source_location_url | grep "$CISCO_URL"`
+			if [ -z "$checkcisco" ];then
+				orig_filename=`basename $source_location_url`
+				if [ -n "$user_name" ] && [ -n "$password" ]; then
+					curl -u $user_name:$password -o $FIRMWARE_DL_PATH/$orig_filename -O $source_location_url
+				else
+					curl -o $FIRMWARE_DL_PATH/$orig_filename -O $source_location_url
+				fi
+				errcode=$?
+				if [ "$errcode" -ne 0 ]; then
+					errstring="Failed to download configuration file from remote server $source_location_url"
+				else
+					if [ -e "$FIRMWARE_DL_PATH/$orig_filename" ];then
+						# Currently we are flashing inactive image, later we need to change according to destination_firmwate_state
+						`$INSTALL_FIRMWARE $FIRMWARE_DL_PATH/$orig_filename 2>/dev/null 1>/dev/null`
+						errcode=$?
+						if [ "$errcode" -ne 0 ];then
+							if [ "$errcode" -eq 10 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - Insufficient memory space for download, please reboot the device and try again"
+							elif [ "$errcode" -eq 11 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - img file not found"
+							elif [ "$errcode" -eq 12 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - Invalid image content"
+							elif [ "$errcode" -eq 13 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - md5sum check Failed"
+							elif [ "$errcode" -eq 14 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - Firmware version is not higher than current firmware version"
+							elif [ "$errcode" -eq 15 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - Image flashing error"
+							else
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed"
+							fi
+						else
+							# Reboot the device
+							if [ -n "$reboot_type" ];then
+								if [ "$reboot_type" = "factory-default-config" ] || [ "$reboot_type" = "factory-default-config-certificate" ];then
+									$CONFIG_SCRIPT "factory-default"
+									if [ "$reboot_type" = "factory-default-config" ];then
+										$DELETE_CERT "factory_default"
+									else
+										$DELETE_CERT "factory_default_with_cert"
+									fi
+								else
+									$CONFIG_SCRIPT "upgrade" "startup"
+								fi
+								# For now we are taking reboot as default case
+								reboot_to_image $firmware_state
+							fi
+							logger -t system -p local0.info "$filetype updated from remote server"
+							errstring="Success"
+						fi
+						rm -rf $FIRMWARE_DL_PATH/*
+					else
+						errstring="$FIRMWARE_DL_PATH/$orig_filename does not exists"
+					fi
+				fi
+			fi
+		fi
+
+		#Download language pack from remote server
+		if [ "$filetype" = "language-pack" ]; then
+			isFormBase=`echo $source_location_url | grep "http"`
+			if [ -n "$isFormBase" ]; then
+				orig_filename=`basename $source_location_url`
+				if [ -n "$user_name" ] && [ -n "$password" ]; then
+					curl -u $user_name:$password -o $LANG_DL_PATH/$orig_filename -O $source_location_url
+					errcode=$?
+				else
+					curl -o $LANG_DL_PATH/$orig_filename -O $source_location_url
+					errcode=$?
+				fi
+				if [ "$errcode" -ne 0 ]; then
+					errstring="Failed to download configuration file from remote server $source_location_url"
+				else
+					if [ -e "$LANG_DL_PATH/$orig_filename" ];then
+						`/usr/bin/update_language "$LANG_DL_PATH/$orig_filename" 2>/dev/null 1>/dev/null`
+						errcode=$?
+						if [ "$errcode" -ne 0 ]; then
+							errstring="Failed to upgrade langauge table"
+						fi
+						rm -rf $LANG_DL_PATH/*
+					fi
+				fi
+			fi
+		fi
+
+		# Download signature from Remote server using http/https case
+		if [ "$filetype" = "signature" ];then
+			checkPC=`echo $source_location_url | grep "http"`
+			if [ -n "$checkPC" ];then
+				orig_filename=`basename $source_location_url`
+				if [ -n "$user_name" ] && [ -n "$password" ]; then
+					curl -u $user_name:$password -o $SIG_DL_PATH/$orig_filename -O $source_location_url
+					errcode=$?
+				else
+					curl -o $SIG_DL_PATH/$orig_filename -O $source_location_url
+					errcode=$?
+				fi
+				if [ "$errcode" -ne 0 ]; then
+					errstring="Failed to download configuration file from remote server $source_location_url"
+				else
+					if [ -e "$SIG_DL_PATH/$orig_filename" ];then
+						`$INSTALL_SIGNATURE $SIG_DL_PATH/$orig_filename 2>/dev/null 1>/dev/null`
+						errcode=$?
+						if [ "$errcode" = 0 ]; then
+							`upgrade_signature 2>/dev/null 1>/dev/null`
+						fi
+						if [ "$errcode" -ne 0 ];then
+							logger -t system -p local0.error "Update failed for $filetype from remote server"
+							errstring="Update Failed"
+						else
+							logger -t system -p local0.info "$filetype updated from remote server"
+							errstring="Success"
+						fi
+						rm -rf $SIG_DL_PATH/*
+					else
+						errstring="$SIG_DL_PATH/$orig_filename does not exists"
+					fi
+				fi
+			fi
+		fi
+
+		# Download drivers from remote server case
+		if [ "$filetype" = "3g-4g-driver" ];then
+			checkPC=`echo $source_location_url | grep "http"`
+			if [ -n "$checkPC" ];then
+				orig_filename=`basename $source_location_url`
+				if [ -n "$user_name" ] && [ -n "$password" ]; then
+					curl -u $user_name:$password -o $DRIVER_DL_PATH/$orig_filename -O $source_location_url
+					errcode=$?
+				else
+					curl -o $DRIVER_DL_PATH/$orig_filename -O $source_location_url
+					errcode=$?
+				fi
+				if [ "$errcode" -ne 0 ]; then
+					errstring="Failed to download configuration file from remote server $source_location_url"
+				else
+					if [ -e "$DRIVER_DL_PATH/$orig_filename" ];then
+						`$INSTALL_USB_DRIVERS $DRIVER_DL_PATH/$orig_filename 2>/dev/null 1>/dev/null`
+						errcode=$?
+						if [ "$errcode" -ne 0 ];then
+							logger -t system -p local0.error "Update failed for $filetype from Remote server"
+							errstring="Update Failed"
+						else
+							logger -t system -p local0.info "$filetype updated from remote server"
+							errstring="Success"
+						fi
+						rm -rf $DRIVER_DL_PATH/*
+					else
+						errstring="$DRIVER_DL_PATH/$orig_filename does not exists"
+					fi
+				fi
+			fi
+		fi
+	fi
+
+	#Download from Remote server using tftp
+	checktftp=`echo $source_location_url | grep "^tftp"`
+	if [ -n "$checktftp" ];then
+		# Download firmware from Remote server case
+		if [ "$filetype" = "firmware" ];then
+			checkPC=`echo $source_location_url | grep "tftp"`
+			if [ -n "$checkPC" ];then
+				original_filename=`basename $source_location_url`
+				remote_ip=`echo $source_location_url | cut -d "/" -f3`
+				cd $FIRMWARE_DL_PATH
+				tftp -g $remote_ip -r $original_filename
+				errcode=$?
+				if [ "$errcode" -ne 0 ]; then
+					errstring="Failed to download firmware file from remote server $source_location_url"
+				else
+					if [ -e "$FIRMWARE_DL_PATH/$orig_filename" ];then
+						# Currently we are flashing inactive image, later we need to change according to destination_firmwate_state
+						`$INSTALL_FIRMWARE $FIRMWARE_DL_PATH/$orig_filename 2>/dev/null 1>/dev/null`
+						errcode=$?
+						if [ "$errcode" -ne 0 ];then
+							if [ "$errcode" -eq 10 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - Insufficient memory space for download, please reboot the device and try again"
+							elif [ "$errcode" -eq 11 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - img file not found"
+							elif [ "$errcode" -eq 12 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - Invalid image content"
+							elif [ "$errcode" -eq 13 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - md5sum check Failed"
+							elif [ "$errcode" -eq 14 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - Firmware version is not higher than current firmware version"
+							elif [ "$errcode" -eq 15 ];then
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed - Image flashing error"
+							else
+								logger -t system -p local0.error "Update failed for $filetype from remote server"
+								errstring="Update Failed"
+							fi
+						else
+							# Reboot the device
+							if [ -n "$reboot_type" ];then
+								if [ "$reboot_type" = "factory-default-config" ] || [ "$reboot_type" = "factory-default-config-certificate" ];then
+									$CONFIG_SCRIPT "factory-default"
+									if [ "$reboot_type" = "factory-default-config" ];then
+										$DELETE_CERT "factory_default"
+									else
+										$DELETE_CERT "factory_default_with_cert"
+									fi
+								else
+									$CONFIG_SCRIPT "upgrade" "startup"
+								fi
+								# For now we are taking reboot as default case
+								reboot_to_image $firmware_state
+							fi
+							logger -t system -p local0.info "$filetype updated from remote server"
+							errstring="Success"
+						fi
+						rm -f $FIRMWARE_DL_PATH/*
+					else
+						errstring="$FIRMWARE_DL_PATH/$original_filename does not exists"
+					fi
+				fi
+			fi
+		fi
+
+		# Download language pack from Remote server using tftp case
+		if [ "$filetype" = "language-pack" ]; then
+			isFormBase=`echo $source_location_url | grep "tftp"`
+			if [ -n "$isFormBase" ]; then
+				original_filename=`basename $source_location_url`
+				remote_ip=`echo $source_location_url | cut -d "/" -f3`
+				cd $LANG_DL_PATH
+				tftp -g $remote_ip -r $original_filename
+				errcode=$?
+				if [ "$errcode" -ne 0 ]; then
+					errstring="Failed to download language file from remote server $source_location_url"
+				else
+					if [ -e "$LANG_DL_PATH/$orig_filename" ];then
+						`/usr/bin/update_language "$LANG_DL_PATH/$orig_filename" 2>/dev/null 1>/dev/null`
+						errcode=$?
+						if [ "$errcode" -ne 0 ]; then
+							errstring="Failed to upgrade langauge table"
+						fi
+						rm -f $LANG_DL_PATH/*
+					fi
+				fi
+			fi
+		fi
+
+		# Download signature from Remote server using tftp case
+		if [ "$filetype" = "signature" ];then
+			checkPC=`echo $source_location_url | grep "tftp"`
+			if [ -n "$checkPC" ];then
+				orig_filename=`basename $source_location_url`
+				# We assume that web server will put the file to correct location before calling this RPC
+				remote_ip=`echo $source_location_url | cut -d "/" -f3`
+				cd $SIG_DL_PATH
+				tftp -g $remote_ip -r $orig_filename
+				errcode=$?
+				if [ "$errcode" -ne 0 ]; then
+					errstring="Failed to download language file from remote server $source_location_url"
+				else
+					if [ -e "$SIG_DL_PATH/$orig_filename" ];then
+						`$INSTALL_SIGNATURE $SIG_DL_PATH/$orig_filename 2>/dev/null 1>/dev/null`
+						errcode=$?
+						if [ "$errcode" = 0 ]; then
+							`upgrade_signature 2>/dev/null 1>/dev/null`
+						fi
+						if [ "$errcode" -ne 0 ];then
+							logger -t system -p local0.error "Update failed for $filetype from remote server"
+							errstring="Update Failed"
+						else
+							logger -t system -p local0.info "$filetype updated from remote server"
+							errstring="Success"
+						fi
+						rm -f $SIG_DL_PATH/*
+					else
+						errstring="$SIG_DL_PATH/$orig_filename does not exists"
+					fi
+				fi
+			fi
+		fi
+
+		# Download drivers from remote server case
+		if [ "$filetype" = "3g-4g-driver" ];then
+			checkPC=`echo $source_location_url | grep "tftp"`
+			if [ -n "$checkPC" ];then
+				orig_filename=`basename $source_location_url`
+				remote_ip=`echo $source_location_url | cut -d "/" -f3`
+				cd $DRIVER_DL_PATH
+				tftp -g $remote_ip -r $orig_filename
+				errcode=$?
+				if [ "$errcode" -ne 0 ]; then
+					errstring="Failed to download dongle driver file from remote server $source_location_url"
+				else
+					if [ -e "$DRIVER_DL_PATH/$orig_filename" ];then
+						`$INSTALL_USB_DRIVERS $DRIVER_DL_PATH/$orig_filename 2>/dev/null 1>/dev/null`
+						errcode=$?
+						if [ "$errcode" -ne 0 ];then
+							logger -t system -p local0.error "Update failed for $filetype from remote server"
+							errstring="Update Failed"
+						else
+							logger -t system -p local0.info "$filetype updated from remote server"
+							errstring="Success"
+						fi
+						rm -rf $DRIVER_DL_PATH/*
+					else
+						errstring="$DRIVER_DL_PATH/$orig_filename does not exists"
+					fi
+				fi
+			fi
+		fi
+	fi
+fi
+
+if [ "$filetype" = "tech-report" ]; then
+
+	if [ -n "$destination_location_url" ];then
+		usbcheck=`echo $destination_location_url | grep "$USB_FILE1"`
+		if [ -n "$usbcheck" ];then
+			USB_PORT="USB1"
+		else
+			usbcheck=`echo $destination_location_url | grep "$USB_FILE2"`
+			if [ -n "$usbcheck" ];then
+				USB_PORT="USB2"
+			fi
+		fi
+		if [ -n "$USB_PORT" ];then
+			# Check if the destination USB directory exists or not
+			if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+				errcode=1
+				errstring="USB device is not mounted."
+			else
+				rm -f $LOG_LOCATION/TechReport*
+			# invoke export technical report and copy the same into the respective USB
+				`$EXPORT_TECH_REPORT $TECH_REPORT_FILE 2>/dev/null 1>/dev/null`
+				cp -f $LOG_LOCATION/$TECH_REPORT_FILE.bin $USB_MOUNT/$USB_PORT/
+				errcode=$?
+				errstring="Successfully exported technical reports."
+				logger -t system -p local0.alert "Successfully copied technical reports to $USB_PORT"
+				rm -f $LOG_LOCATION/$TECH_REPORT_FILE.bin
+			fi
+		else
+			#email diagnostic reports
+			rm -f $LOG_LOCATION/TechReport*
+			`$EXPORT_TECH_REPORT $TECH_REPORT_FILE 2>/dev/null 1>/dev/null`
+			`sh /usr/bin/email_diagnostics $TECH_REPORT_FILE.bin $destination_location_url 2>/dev/null 1>/dev/null`
+			errcode=$?
+			if [ "$errcode" -ne 0 ]; then
+				errstring="Failed to send email $destination_location_url"
+				logger -t system -p local0.alert "Failed to send technical reports to $destination_location_url"
+			else
+				logger -t system -p local0.alert "Successfully sent technical reports to $destination_location_url"
+			fi
+		fi
+	else
+		errstring="Invalid destination url $destination_location_url"
+	fi
+fi
+
+[ $TRIGGER_REBOOT = 1 ] && {
+	reboot &
+}
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errstring\""
+	exit 1
+else
+	exit 0
+fi

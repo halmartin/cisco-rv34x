@@ -1,0 +1,13 @@
+# 2017-02-20: harry.lin <harry.lin@deltaww.com>
+# fix bug75170 wan led is not matching ETRD requirememnt.
+--- linux-4.1.8/drivers/net/phy/broadcom.c.org	2017-07-20 08:57:37.827547330 +0800
++++ linux-4.1.8/drivers/net/phy/broadcom.c	2017-07-20 09:15:59.600670774 +0800
+@@ -258,6 +258,8 @@
+ 		phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) | (6 << 0)));
+ 		phy_write(phydev, 0x1e, 0x1a);
+ 		phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) | (1 << 8) | (3 << 5) | (1 << 4) | (15 << 0)));
++		phy_write(phydev, 0x1e, 0x1e);
++		phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) & ~(15 << 0) | (10 << 0)));
+ 	}
+ 
+ 	return 0;

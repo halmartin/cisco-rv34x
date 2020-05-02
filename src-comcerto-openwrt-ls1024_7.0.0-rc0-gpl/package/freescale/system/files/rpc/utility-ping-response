@@ -1,0 +1,47 @@
+#!/bin/sh
+
+
+UTILITY_NAME="/tmp/utility-ping"
+PING_UTILITY=
+counter=0
+count=0
+
+job_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "job-id") {print $(I+1)};}'`
+
+outfile="$UTILITY_NAME"_"$job_id"
+
+ if [ -f $outfile ]; then
+	readline=$(head -n 1 $outfile ); 
+	target=`echo $readline | cut -d " " -f 2 | cut -d " " -f1`
+	echo "address \"$target\""
+
+	sed -i "1d" $outfile
+	sed -i "s/  */ /g" $outfile
+	
+	while read line
+	do
+		value=`echo $line | grep seq`
+		if [ -n "$value" ];then
+			count=`expr $count + 1`		
+		fi
+	done <$outfile
+	
+	while read line
+	do
+		if [ "$counter" -lt "$count" ];then
+			value=`echo $line | grep seq`
+			if [ -n "$value" ];then
+				ttl=`echo $line | cut -d " " -f 6 | cut -d = -f 2`
+				time=`echo $line | cut -d " " -f 7 | cut -d = -f 2`
+				echo "data __BEGIN icmp-seq $counter ttl $ttl time $time data __END"
+			else
+				echo "data __BEGIN icmp-seq $counter data __END"
+			fi
+			counter=`expr $counter + 1`
+		else
+			break
+		fi
+		
+	done <$outfile
+       rm -f $outfile
+ fi

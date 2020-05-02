@@ -1,0 +1,49 @@
+From d532e21880ff318b3b43333e540bb822ffd87d11 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Wed, 30 May 2018 14:53:13 +0530
+Subject: [PATCH 2/2] Changed logging level to informational Signed-off-by:
+ nageshkoneti <b47094@freescale.com>
+
+---
+ auth.c    |    4 ++--
+ logging.c |    2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/auth.c b/auth.c
+index 0895531..69fc6eb 100644
+--- a/auth.c
++++ b/auth.c
+@@ -748,7 +748,7 @@ pamk5_password_auth(struct pam_args *args, const char *service,
+     if (ctx->princ == NULL) {
+         retval = parse_name(args);
+         if (retval != 0) {
+-            putil_err_krb5(args, retval, "parse_name failed");
++            putil_info(args, "parse_name failed");
+             return PAM_SERVICE_ERR;
+         }
+     }
+@@ -1016,7 +1016,7 @@ pamk5_authenticate(struct pam_args *args)
+         }
+     }
+     if (pamret != PAM_SUCCESS) {
+-        putil_log_failure(args, "authentication failure");
++        putil_info(args, "authentication failure");
+         goto done;
+     }
+ 
+diff --git a/pam-util/logging.c b/pam-util/logging.c
+index 1923914..50bab0c 100644
+--- a/pam-util/logging.c
++++ b/pam-util/logging.c
+@@ -189,7 +189,7 @@ LOG_FUNCTION(crit,   LOG_CRIT)
+ LOG_FUNCTION(err,    LOG_ERR)
+ LOG_FUNCTION(notice, LOG_NOTICE)
+ LOG_FUNCTION(debug,  LOG_DEBUG)
+-
++LOG_FUNCTION(info,   LOG_INFO)
+ 
+ /*
+  * Report entry into a function.  Takes the PAM arguments, the function name,
+-- 
+1.7.9.5
+

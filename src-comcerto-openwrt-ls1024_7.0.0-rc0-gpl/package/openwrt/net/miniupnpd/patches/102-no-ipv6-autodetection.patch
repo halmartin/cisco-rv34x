@@ -1,0 +1,20 @@
+--- a/Makefile.linux	2016-01-29 10:44:04.975554900 +0530
++++ b/Makefile.linux	2016-01-29 10:48:17.527566174 +0530
+@@ -70,7 +70,6 @@ CPPFLAGS += -DIPTABLES_143
+ endif
+ 
+ CFLAGS  += $(shell $(PKG_CONFIG) --cflags libiptc)
+-LDLIBS  += $(shell $(PKG_CONFIG) --static --libs-only-l libiptc)
+ LDFLAGS += $(shell $(PKG_CONFIG) --libs-only-L libiptc)
+ LDFLAGS += $(shell $(PKG_CONFIG) --libs-only-other libiptc)
+ else
+--- a/netfilter/Makefile	2016-01-29 10:44:59.519557327 +0530
++++ b/netfilter/Makefile	2016-01-29 10:47:29.167564099 +0530
+@@ -38,7 +38,6 @@ endif
+ endif
+ endif
+ 
+-LIBS +=  /lib/libip4tc.so /lib/libip6tc.so
+ 
+ all:	iptcrdr.o testiptcrdr iptpinhole.o \
+         testiptcrdr_peer testiptcrdr_dscp test_nfct_get

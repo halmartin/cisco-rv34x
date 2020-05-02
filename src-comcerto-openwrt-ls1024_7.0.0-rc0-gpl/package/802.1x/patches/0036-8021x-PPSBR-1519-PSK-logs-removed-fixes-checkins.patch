@@ -1,0 +1,86 @@
+From 5ba007e3d7636c7756cd40abdd26bd008f0ee3c3 Mon Sep 17 00:00:00 2001
+From: Manish Tiwari <manish.tiwari@nxp.com>
+Date: Tue, 19 Dec 2017 12:25:24 +0530
+Subject: [PATCH] PPSBR-1519 PSK logs removed fixes checkins
+
+---
+ src/source/config.c |   16 ++++++++--------
+ src/source/radius.c |    6 +++++-
+ 2 files changed, 13 insertions(+), 9 deletions(-)
+
+diff --git a/src/source/config.c b/src/source/config.c
+index 9338382..9b550e0 100644
+--- a/src/source/config.c
++++ b/src/source/config.c
+@@ -1,3 +1,7 @@
++/* 19/12/2017   
++* Manish Tiwari <manish.tiwari@nxp.com>
++* PSK logs removed from syslog
++*/
+ 
+ #include <stdlib.h>
+ #include <stdio.h>
+@@ -221,8 +225,7 @@ BOOLEAN Query_config_from_driver(int ioctl_sock, char *prefix_name, struct rtapd
+ 					radius_key_count++;
+ 					conf->mbss_auth_server[i]->shared_secret = (u8 *)strdup((const char *)pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_key);            
+ 	    	        conf->mbss_auth_server[i]->shared_secret_len = pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_key_len;
+-					DBGPRINT(RT_DEBUG_TRACE,"(no.%d) Radius key: '%s', key_len: %d for %s%d \n", 
+-						conf->mbss_num_auth_servers[i], conf->mbss_auth_server[i]->shared_secret, conf->mbss_auth_server[i]->shared_secret_len, prefix_name, i);	
++					//DBGPRINT(RT_DEBUG_TRACE,"(no.%d) Radius key: '%s', key_len: %d for %s%d \n",conf->mbss_num_auth_servers[i], conf->mbss_auth_server[i]->shared_secret, conf->mbss_auth_server[i]->shared_secret_len, prefix_name, i);	
+ 				}
+ 				else
+ 					DBGPRINT(RT_DEBUG_ERROR, "(no.%d) Radius key is invalid for %s%d\n", conf->mbss_num_auth_servers[i], prefix_name, i);
+@@ -261,8 +264,7 @@ BOOLEAN Query_config_from_driver(int ioctl_sock, char *prefix_name, struct rtapd
+ 					radius_key_count++;
+ 					conf->auth_server->shared_secret = (u8 *)strdup((const char *)pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_key);            
+ 		        	conf->auth_server->shared_secret_len = pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_key_len;
+-					DBGPRINT(RT_DEBUG_TRACE,"(no.%d) Radius key: '%s', key_len: %d \n", conf->num_auth_servers, 
+-					conf->auth_server->shared_secret, conf->auth_server->shared_secret_len);	
++				//DBGPRINT(RT_DEBUG_TRACE,"(no.%d) Radius key: '%s', key_len: %d \n", conf->num_auth_servers,conf->auth_server->shared_secret, conf->auth_server->shared_secret_len);	
+ 				} 
+ 				else
+ 					DBGPRINT(RT_DEBUG_ERROR, "(no.%d) Radius key is invalid\n", conf->num_auth_servers);
+@@ -815,8 +817,7 @@ BOOLEAN nk_Config_parse(char *config_filename, char *prefix_name, struct rtapd_c
+ 					radius_key_count++;
+ 					conf->mbss_auth_server[i]->shared_secret = (u8 *)strdup((const char *)pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_key);            
+ 	    	        conf->mbss_auth_server[i]->shared_secret_len = pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_key_len;
+-					DBGPRINT(RT_DEBUG_TRACE,"(no.%d) Radius key: '%s', key_len: %d for %s%d \n", 
+-						conf->mbss_num_auth_servers[i], conf->mbss_auth_server[i]->shared_secret, conf->mbss_auth_server[i]->shared_secret_len, prefix_name, i);	
++				//DBGPRINT(RT_DEBUG_TRACE,"(no.%d) Radius key: '%s', key_len: %d for %s%d \n",conf->mbss_num_auth_servers[i], conf->mbss_auth_server[i]->shared_secret, conf->mbss_auth_server[i]->shared_secret_len, prefix_name, i);	
+ 				}
+ 				else
+ 				{
+@@ -859,8 +860,7 @@ BOOLEAN nk_Config_parse(char *config_filename, char *prefix_name, struct rtapd_c
+ 					radius_key_count++;
+ 					conf->auth_server->shared_secret = (u8 *)strdup((const char *)pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_key);            
+ 		        	conf->auth_server->shared_secret_len = pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_key_len;
+-					DBGPRINT(RT_DEBUG_TRACE,"(no.%d) Radius key: '%s', key_len: %d \n", conf->num_auth_servers, 
+-					conf->auth_server->shared_secret, conf->auth_server->shared_secret_len);	
++				//DBGPRINT(RT_DEBUG_TRACE,"(no.%d) Radius key: '%s', key_len: %d \n", conf->num_auth_servers,conf->auth_server->shared_secret, conf->auth_server->shared_secret_len);	
+ 				} 
+ 				else
+ 				{
+diff --git a/src/source/radius.c b/src/source/radius.c
+index 301b5ee..4f96496 100644
+--- a/src/source/radius.c
++++ b/src/source/radius.c
+@@ -1,3 +1,7 @@
++/* 19/12/2017   
++* Manish Tiwari <manish.tiwari@nxp.com>
++* PSK logs removed from syslog
++*/
+ 
+ #include <stdlib.h>
+ #include <stdio.h>
+@@ -606,7 +610,7 @@ Radius_msg_get_ms_keys(struct radius_msg *msg, struct radius_msg *sent_msg,
+ 		keys->send = decrypt_ms_key(key, keylen, sent_msg, secret, secret_len, &keys->send_len);
+ 		free(key);
+ 	}
+-    DBGPRINT(RT_DEBUG_INFO," secret_len = %d, secret= %s\n",secret_len,secret);
++	//DBGPRINT(RT_DEBUG_INFO," secret_len = %d, secret= %s\n",secret_len,secret);
+ 	key = Radius_msg_get_ms_attr(msg, RADIUS_VENDOR_ATTR_MS_MPPE_RECV_KEY, &keylen);
+ 	if (key)
+ 	{
+-- 
+1.7.9.5
+

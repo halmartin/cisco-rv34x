@@ -1,0 +1,185 @@
+#!/bin/sh
+. /lib/config/uci.sh
+. /lib/functions/network.sh
+certificate_path="/etc/ssl/certs/"
+private_key_path="/etc/ssl/private/"
+
+CLIENT_OVPN_TMPL_FILE=/tmp/openvpn_client_tmpl.ovpn
+
+#logger -t openvpn "$0 $@"
+clientconf=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "export") {print $(I+1)};}'`
+email_address=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "address") {print $(I+1)};}'`
+email_subject=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "subject") {print $(I+1)};}'`
+#email_subject=$8
+client_certificate=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "client-certificate") {print $(I+1)};}'`
+
+conf_file_status=0
+email_status=0
+
+generate_conf()
+{
+	rm -rf $CLIENT_OVPN_TMPL_FILE
+	touch $CLIENT_OVPN_TMPL_FILE
+
+	echo "client" > $CLIENT_OVPN_TMPL_FILE
+
+	temp=$(uci get openvpn.global.dev)
+	echo "dev $temp" >> $CLIENT_OVPN_TMPL_FILE
+
+	temp=$(uci get openvpn.global.proto)
+	echo "proto $temp" >> $CLIENT_OVPN_TMPL_FILE
+
+	if [ "$temp" = "udp" ]
+	then
+		echo "explicit-exit-notify 3" >> $CLIENT_OVPN_TMPL_FILE
+	fi
+
+	wan_iface=$(uci get openvpn.global.interface)
+	if [ "$wan_iface" = "ALL" ];then
+		network_get_wanip_cached listen_ip "wan1"
+		[ "$listen_ip" = "" ] && {
+		pid=$(uci get systeminfo.sysinfo.pid)
+		pid=${pid%W*}
+		pid=${pid%%-*}
+		[ "$pid" = "RV260" ] && {
+			network_get_wanip_cached listen_ip "usb1"
+		}
+		}
+
+#		network_get_wanip_cached listen_ip "usb1"
+	else
+		listen_ip=$(uci get openvpn.global.local)
+	fi
+	port=$(uci get openvpn.global.port)
+	if [ "$listen_ip" = "" ]; then
+		listen_ip="x.x.x.x"
+	fi
+	echo "remote $listen_ip $port" >> $CLIENT_OVPN_TMPL_FILE
+
+	echo "resolv-retry infinite" >> $CLIENT_OVPN_TMPL_FILE
+	echo "nobind" >> $CLIENT_OVPN_TMPL_FILE
+	echo "persist-key" >> $CLIENT_OVPN_TMPL_FILE
+	echo "persist-tun" >> $CLIENT_OVPN_TMPL_FILE
+#	temp=$(uci get openvpn.global.client_cert_not_required)
+#	if [ -z "$temp" ];then
+#		echo "ca $ca_cert_file" >> $CLIENT_OVPN_TMPL_FILE
+#		echo "cert client.pem" >> $CLIENT_OVPN_TMPL_FILE
+#		echo "key client-key.pem" >> $CLIENT_OVPN_TMPL_FILE
+#	fi
+#	echo "auth-user-pass [username_password.txt]" >> $CLIENT_OVPN_TMPL_FILE
+	echo "auth-user-pass" >> $CLIENT_OVPN_TMPL_FILE
+
+	temp=$(uci get openvpn.global.cipher)
+	if [ -n "$temp" ];then
+		echo "cipher $temp" >> $CLIENT_OVPN_TMPL_FILE
+	fi
+
+	temp=$(uci get openvpn.global.comp_lzo)
+	if [ "$temp" = "yes" ];then
+		echo "comp-lzo yes" >> $CLIENT_OVPN_TMPL_FILE
+	elif [ "$temp" = "adaptive" ];then
+		echo "comp-lzo adaptive" >> $CLIENT_OVPN_TMPL_FILE
+	else
+		echo "comp-lzo no" >> $CLIENT_OVPN_TMPL_FILE
+	fi
+
+	echo "tun-mtu 45000" >> $CLIENT_OVPN_TMPL_FILE
+	echo "fragment 0" >> $CLIENT_OVPN_TMPL_FILE
+	echo "mssfix 0" >> $CLIENT_OVPN_TMPL_FILE
+	echo "#Enable following txqueuelen option on Linux Clients for better performance" >> $CLIENT_OVPN_TMPL_FILE
+	echo "#txqueuelen 1000" >> $CLIENT_OVPN_TMPL_FILE
+
+	echo "mute-replay-warnings" >> $CLIENT_OVPN_TMPL_FILE
+
+	ca_cert=$(uci get openvpn.global.ca)
+	ca_cert_file=${ca_cert##*/}
+
+	echo "" >> $CLIENT_OVPN_TMPL_FILE
+
+	echo "<ca>" >> $CLIENT_OVPN_TMPL_FILE
+	plaincert=`head -n 1 $ca_cert  |grep "^----"`
+	if [ "$plaincert" = "" ]
+	then
+		openssl x509 -in $ca_cert >> $CLIENT_OVPN_TMPL_FILE
+	else
+		cat $ca_cert  >> $CLIENT_OVPN_TMPL_FILE
+	fi
+	echo "</ca>">> $CLIENT_OVPN_TMPL_FILE
+
+	[ "$client_certificate" != "" ] && {
+		local cert key
+		cert="$certificate_path$client_certificate.pem"
+		key="$private_key_path$client_certificate.pem"
+
+		echo "" >> $CLIENT_OVPN_TMPL_FILE
+		echo "<cert>" >> $CLIENT_OVPN_TMPL_FILE
+		openssl x509 -in $cert >>$CLIENT_OVPN_TMPL_FILE
+		echo "</cert>">> $CLIENT_OVPN_TMPL_FILE
+
+		echo "" >> $CLIENT_OVPN_TMPL_FILE
+		echo "<key>" >> $CLIENT_OVPN_TMPL_FILE
+		cat $key >>$CLIENT_OVPN_TMPL_FILE
+		echo "</key>">> $CLIENT_OVPN_TMPL_FILE
+	}
+}
+
+generate_conf
+
+if [ -s $CLIENT_OVPN_TMPL_FILE ]
+then
+	conf_file_status=0
+else
+	conf_file_status=1
+fi
+
+#[ "$__this_device" != "RV160" ] && [ "$__this_device" != "RV160W" ] && {
+#                                                [ -n "$temp_rule" ] && {
+[ -n "$email_subject" ] && [ -n "$email_address" ] && {
+	email_enable=`uci get email.email_settings.smtp_server` 2>/dev/null
+
+	if [ -n "$email_enable" ];then
+		echo "Openvpn Configuration Template" | mutt -s \"$email_subject\" -a $CLIENT_OVPN_TMPL_FILE $email_address >/dev/null 2>&1
+		retval=$?
+		if [ "$retval" -ne 0 ]; then
+			logger -t openvpn -p local0.warn "Openvpn configuration template failed to sent to $email_address"
+			email_status=1
+		else
+			logger -t openvpn -p local0.info "Openvpn configuration template successfully sent to $email_address"
+			email_status=0
+		fi
+	else
+		logger -t openvpn -p local0.warn "Email server not configured to send mail to $email_address"
+		email_status=1
+	fi
+}
+
+#There is an understanding between GUI and backend, that FILE://openvpn_client_tmpl.ovpn will refer to  $CLIENT_OVPN_TMPL_FILE
+str="download-url FILE://openvpn_client_tmpl.ovpn"
+logger -t openvpn "URL:$str"
+
+exit_status=$email_status$conf_file_status
+#echo $exit_status
+local exit_code
+case $exit_status in
+	00)
+#		exit 0
+		exit_code=0
+		break
+		;;
+	01)
+#		exit 1
+		exit_code=1
+		break
+		;;
+	10)
+#		exit 2
+		exit_code=2
+		break
+		;;
+	11)
+#		exit 3
+		exit_code=3
+		break
+		;;
+esac
+echo "$str code $exit_code"

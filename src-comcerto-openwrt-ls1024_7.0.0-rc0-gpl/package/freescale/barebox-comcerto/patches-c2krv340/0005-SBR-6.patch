@@ -1,0 +1,26 @@
+From 56d609333e172e20df7b0fbcf582341f3d4369fa Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Tue, 14 Jul 2015 19:08:52 +0530
+Subject: [PATCH 05/60] SBR-6 Fixup for correct inactive image name
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ defaultenv/bin/boot | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/defaultenv/bin/boot b/defaultenv/bin/boot
+index 297a3a1..0602a39 100755
+--- a/defaultenv/bin/boot
++++ b/defaultenv/bin/boot
+@@ -38,7 +38,7 @@ if [ x$1 = xactive ]; then
+     rootfs=rootfs2
+   fi
+ elif [ x$1 = xinactive ]; then
+-  echo "Booting inactive $active ..."
++  echo "Booting inactive $inactive ..."
+   if [ x$inactive = ximage1 ]; then
+     kernel=kernel1
+     rootfs=rootfs1
+-- 
+2.7.4
+

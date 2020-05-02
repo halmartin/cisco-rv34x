@@ -1,0 +1,13 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Remove poe led init.
+--- barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c.org	2017-01-19 16:02:40.255253090 +0800
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c	2017-01-19 16:03:04.277127309 +0800
+@@ -428,7 +428,7 @@
+ 		protect_file("/dev/env0", 1);
+ 	}
+ 
+-	GPIO_reset_external_device(COMPONENT_SLIC, 0);
++	//GPIO_reset_external_device(COMPONENT_SLIC, 0);
+ #endif
+ 	return 0;
+ }

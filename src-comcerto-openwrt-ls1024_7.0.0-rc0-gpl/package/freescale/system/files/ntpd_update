@@ -1,0 +1,31 @@
+#!/bin/sh
+
+. /etc/boardInfo
+
+type="$1"
+case $type in
+	step)
+		/usr/bin/dstHandler
+
+		# Set the time to flash
+        	clockTime=`date "+%Y.%m.%d-%H:%M:%S"`
+        	echo "$clockTime" > $TimeFile
+
+		Hour=`echo $clockTime | cut -d - -f 2 | cut -d : -f 1`
+		Min=`echo $clockTime | cut -d - -f 2 | cut -d : -f 2`
+		
+		# Add cronjob for this.
+		uci del crontabs.FlashTime
+		uci set crontabs.FlashTime=crontab
+		uci set crontabs.FlashTime.minutes=$Min
+		uci set crontabs.FlashTime.hours=$Hour
+		uci set crontabs.FlashTime.days=*/1
+		uci set crontabs.FlashTime.months=*
+		uci set crontabs.FlashTime.weekdays=*
+		uci set crontabs.FlashTime.command=/usr/bin/updateFlashTime
+		uci set crontabs.FlashTime.enabled=1
+		uci commit crontabs
+		/etc/init.d/cron reload
+	;;
+esac
+`hwclock -w` >/dev/null 2>&1

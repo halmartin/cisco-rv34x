@@ -1,0 +1,149 @@
+--- a/miniupnpd.c	2016-06-17 15:46:11.643801502 +0530
++++ b/miniupnpd.c	2016-06-17 15:50:31.971801502 +0530
+@@ -1284,6 +1284,9 @@
+ 			case UPNPMINISSDPDSOCKET:
+ 				minissdpdsocketpath = ary_options[i].value;
+ 				break;
++			case UPNPMAXRULE:
++				max_allowed_rules = strtoul(ary_options[i].value, 0, 0);
++				break;
+ 			default:
+ 				fprintf(stderr, "Unknown option in file %s\n",
+ 				        optionsfile);
+--- a/netfilter/iptcrdr.c	2016-06-17 15:46:11.643801502 +0530
++++ b/netfilter/iptcrdr.c	2016-06-17 15:49:42.319801502 +0530
+@@ -1086,6 +1086,17 @@
+ 	struct ipt_entry * tmp;
+ 	struct ipt_entry_match *match = NULL;
+ 	struct ipt_entry_target *target = NULL;
++        unsigned long current_rule_count;
++
++
++       /* check for the max rule,and return */
++        current_rule_count = get_current_chain_rule_count(miniupnpd_nat_chain);
++        if(max_allowed_rules == current_rule_count )
++        {
++		   syslog(LOG_ERR, "%s: Maximum allowed rules by the UPNP is:(%ld),configured rules is:(%ld)",
++		       __FUNCTION__,max_allowed_rules,max_allowed_rules);
++		   return -1;
++	    }
+ 
+ 	e = calloc(1, sizeof(struct ipt_entry));
+ 	if(!e) {
+@@ -1148,6 +1159,18 @@
+ 	struct ipt_entry * tmp;
+ 	struct ipt_entry_match *match = NULL;
+ 	struct ipt_entry_target *target = NULL;
++        unsigned long current_rule_count;
++
++
++
++       /* check for the max rule,and return */
++        current_rule_count = get_current_chain_rule_count(miniupnpd_forward_chain);
++        if(max_allowed_rules == current_rule_count )
++        {
++		   syslog(LOG_ERR, "%s: Maximum allowed rules by the UPNP is:(%ld),configured rules is:(%ld)",
++		       __FUNCTION__,max_allowed_rules,max_allowed_rules);
++	    	return -1;
++    	}
+ 
+ 	e = calloc(1, sizeof(struct ipt_entry));
+ 	if(!e) {
+@@ -1595,3 +1618,41 @@
+ 	return 0;
+ }
+ #endif
++
++unsigned long get_current_chain_rule_count(const char * chain)
++{
++	IPTC_HANDLE h;
++	const struct ipt_entry * e;
++    unsigned long index=0;
++
++
++	h = iptc_init("nat");
++	if(!h)
++	{
++		printf("iptc_init() error : %s\n", iptc_strerror(errno));
++		return -1;
++	}
++
++#ifdef IPTABLES_143
++	for(e = iptc_first_rule(chain, h);
++		e;
++		e = iptc_next_rule(e, h))
++	{
++#else
++	for(e = iptc_first_rule(chain, &h);
++		e;
++		e = iptc_next_rule(e, &h))
++	{
++#endif
++	index++;
++	}
++	if(h)
++#ifdef IPTABLES_143
++		iptc_free(h);
++#else
++		iptc_free(&h);
++#endif
++
++	return index;
++}
++
+--- a/netfilter/iptcrdr.h	2016-06-17 15:46:11.643801502 +0530
++++ b/netfilter/iptcrdr.h	2016-06-17 15:49:58.903801502 +0530
+@@ -61,5 +61,7 @@
+ int
+ list_redirect_rule(const char * ifname);
+ 
++unsigned long get_current_chain_rule_count(const char * chain);
++
+ #endif
+ 
+--- a/options.c	2016-06-17 15:46:11.643801502 +0530
++++ b/options.c	2016-06-17 15:50:46.903801502 +0530
+@@ -83,7 +83,8 @@
+ 	{ UPNPLEASEFILE, "lease_file"},
+ #endif
+ 	{ UPNPMINISSDPDSOCKET, "minissdpdsocket"},
+-	{ UPNPSECUREMODE, "secure_mode"}
++	{ UPNPSECUREMODE, "secure_mode"},
++	{ UPNPMAXRULE, "max_rule"}
+ };
+ 
+ int
+--- a/options.h	2016-06-17 15:46:11.647801502 +0530
++++ b/options.h	2016-06-17 15:50:57.095801502 +0530
+@@ -65,7 +65,8 @@
+ 	UPNPLEASEFILE,			/* lease_file */
+ #endif
+ 	UPNPMINISSDPDSOCKET,	/* minissdpdsocket */
+-	UPNPENABLE				/* enable_upnp */
++	UPNPENABLE,				/* enable_upnp */
++	UPNPMAXRULE				/* Maximum allowed rules by upnp */
+ };
+ 
+ /* readoptionsfile()
+--- a/upnpglobalvars.c	2016-06-17 15:46:11.647801502 +0530
++++ b/upnpglobalvars.c	2016-06-17 15:51:07.799801502 +0530
+@@ -27,6 +27,8 @@
+ unsigned long downstream_bitrate = 0;
+ unsigned long upstream_bitrate = 0;
+ 
++unsigned long max_allowed_rules = 0;
++
+ /* startup time */
+ time_t startup_time = 0;
+ 
+--- a/upnpglobalvars.h	2016-06-17 15:46:11.643801502 +0530
++++ b/upnpglobalvars.h	2016-06-17 15:51:13.607801502 +0530
+@@ -29,6 +29,8 @@
+ extern unsigned long downstream_bitrate;
+ extern unsigned long upstream_bitrate;
+ 
++extern unsigned long max_allowed_rules;
++
+ /* statup time */
+ extern time_t startup_time;
+ 

@@ -1,0 +1,455 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add mem_flash_test command.
+--- barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig.org	2017-01-19 15:51:17.026502393 +0800
++++ barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	2017-01-19 15:56:08.415252359 +0800
+@@ -214,6 +214,7 @@
+ # CONFIG_CMD_MEMINFO is not set
+ # CONFIG_CMD_CRC is not set
+ # CONFIG_CMD_MTEST is not set
++CONFIG_CMD_MEM_FLASH_TEST=y
+ 
+ #
+ # flash
+--- barebox-2011.06.0/commands/Makefile.org	2017-01-19 15:51:46.776502504 +0800
++++ barebox-2011.06.0/commands/Makefile	2017-01-19 15:53:34.175253702 +0800
+@@ -7,6 +7,7 @@
+ obj-$(CONFIG_CMD_MEMORY)	+= mem.o
+ obj-$(CONFIG_CMD_LOADS)		+= s_record.o
+ obj-$(CONFIG_CMD_MTEST)		+= memtest.o
++obj-$(CONFIG_CMD_MEM_FLASH_TEST)+= mem_flash_test.o
+ obj-$(CONFIG_CMD_EDIT)		+= edit.o
+ obj-$(CONFIG_CMD_EXEC)		+= exec.o
+ obj-$(CONFIG_CMD_SLEEP)		+= sleep.o
+--- barebox-2011.06.0/commands/Kconfig.org	2017-01-19 15:51:29.176502550 +0800
++++ barebox-2011.06.0/commands/Kconfig	2017-01-19 15:53:34.175253702 +0800
+@@ -242,6 +242,11 @@
+ 	tristate
+ 	prompt "mtest"
+ 
++config CMD_MEM_FLASH_TEST
++	tristate
++	depends on !COMCERTO_ULOADER && !COMCERTO_DIAG
++	prompt "mem_flash_test"
++
+ config CMD_MTEST_ALTERNATIVE
+ 	bool
+ 	depends on CMD_MTEST
+--- barebox-2011.06.0/commands/mem_flash_test.c.org	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/commands/mem_flash_test.c	2017-01-19 15:53:34.175253702 +0800
+@@ -0,0 +1,416 @@
++/*
++ * mem_flash_test - Perform a memory and flash test
++ *
++ * (C) Copyright 2000
++ * Wolfgang Denk, DENX Software Engineering, wd@denx.de.
++ *
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of
++ * the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ * MA 02111-1307 USA
++ */
++
++#include <common.h>
++#include <command.h>
++#include <types.h>
++#include <linux/mtd/mtd.h>
++#include <mach/comcerto_spi.h>
++
++#define NANDDEVNAME "nand0"
++#define SIZE_1SECTOR 0x10000     //64K
++#define SIZE_1BLOCK  0x20000     //128K
++
++static int do_ddr_test(ulong _start, ulong _end, ulong pattern_unused)
++{
++    if((_start < 0x800000) || (_end > 0x3FFFFFC0) || (_start > _end))
++    {
++        printf ("Addr Range: 0x800000 ~ 0x3FFFFFC0\n");
++        return -1;
++    }
++    
++    printf ("Ddr Testing ...\n");
++	
++	vu_long *start = (vu_long *)_start;
++	vu_long *end   = (vu_long *)_end;
++	vu_long *addr;
++	ulong	val;
++	ulong	readback;
++	vu_long	addr_mask;
++	vu_long	offset;
++	vu_long	test_offset;
++	vu_long	pattern;
++	vu_long	temp;
++	vu_long	anti_pattern;
++	vu_long	num_words;
++	vu_long *dummy = start;
++	int	j;
++
++	static const ulong bitpattern = 0xaaaaaaaa;
++
++	/* XXX: enforce alignment of start and end? */
++	if (ctrlc()) {
++		putchar ('\n');
++		return -1;
++	}
++
++    printf ("Check ...\r");
++	
++    addr = start;
++	/* XXX */
++	if (addr == dummy) ++addr;
++	val = bitpattern;
++	for(; val != 0; val <<= 1) {
++		*addr  = val;
++		*dummy  = ~val; /* clear the test data off of the bus */
++		readback = *addr;
++		if(readback != val) {
++		     printf ("FAILURE (data line): "
++			"expected 0x%08lx, actual 0x%08lx at address 0x%p\n",
++				  val, readback, addr);
++		}
++		*addr  = ~val;
++		*dummy  = val;
++		readback = *addr;
++		if(readback != ~val) {
++		    printf ("FAILURE (data line): "
++			"Is 0x%08lx, should be 0x%08lx at address 0x%p\n",
++				readback, ~val, addr);
++		}
++	}
++
++	addr_mask = ((ulong)end - (ulong)start)/sizeof(vu_long);
++	pattern = (vu_long) 0xaaaaaaaa;
++	anti_pattern = (vu_long) 0x55555555;
++
++	debug("%s:%d: addr mask = 0x%.8lx\n",
++		__FUNCTION__, __LINE__,
++		addr_mask);
++	/*
++	 * Write the default pattern at each of the
++	 * power-of-two offsets.
++	 */
++	for (offset = 1; (offset & addr_mask) != 0; offset <<= 1)
++		start[offset] = pattern;
++
++	/*
++	 * Check for address bits stuck high.
++	 */
++	test_offset = 0;
++	start[test_offset] = anti_pattern;
++
++	for (offset = 1; (offset & addr_mask) != 0; offset <<= 1) {
++	    temp = start[offset];
++	    if (temp != pattern) {
++		printf ("\nFAILURE: Address bit stuck high @ 0x%.8lx:"
++			" expected 0x%.8lx, actual 0x%.8lx\n",
++			(ulong)&start[offset], pattern, temp);
++		return -1;
++	    }
++	}
++	start[test_offset] = pattern;
++
++	/*
++	 * Check for addr bits stuck low or shorted.
++	 */
++	for (test_offset = 1; (test_offset & addr_mask) != 0; test_offset <<= 1) {
++	    start[test_offset] = anti_pattern;
++
++	    for (offset = 1; (offset & addr_mask) != 0; offset <<= 1) {
++		temp = start[offset];
++		if ((temp != pattern) && (offset != test_offset)) {
++		    printf ("\nFAILURE: Address bit stuck low or shorted @"
++			" 0x%.8lx: expected 0x%.8lx, actual 0x%.8lx\n",
++			(ulong)&start[offset], pattern, temp);
++		    return -1;
++		}
++	    }
++	    start[test_offset] = pattern;
++	}
++
++	num_words = ((ulong)end - (ulong)start)/sizeof(vu_long) + 1;
++
++	/*
++	 * Fill memory with a known pattern.
++	 */
++	for (pattern = 1, offset = 0; offset < num_words; pattern++, offset++) {
++		start[offset] = pattern;
++	}
++
++	/*
++	 * Check each location and invert it for the second pass.
++	 */
++	for (pattern = 1, offset = 0; offset < num_words; pattern++, offset++) {
++	    temp = start[offset];
++	    if (temp != pattern) {
++		printf ("\nFAILURE (read/write) @ 0x%.8lx:"
++			" expected 0x%.8lx, actual 0x%.8lx)\n",
++			(ulong)&start[offset], pattern, temp);
++		return -1;
++	    }
++
++	    anti_pattern = ~pattern;
++	    start[offset] = anti_pattern;
++	}
++
++	/*
++	 * Check each location for the inverted pattern and zero it.
++	 */
++	for (pattern = 1, offset = 0; offset < num_words; pattern++, offset++) {
++	    anti_pattern = ~pattern;
++	    temp = start[offset];
++	    if (temp != anti_pattern) {
++		printf ("\nFAILURE (read/write): @ 0x%.8lx:"
++			" expected 0x%.8lx, actual 0x%.8lx)\n",
++			(ulong)&start[offset], anti_pattern, temp);
++		return -1;
++	    }
++	    start[offset] = 0;
++	}
++
++    printf ("Ddr Test Succeed\n");
++    return 0;
++}
++
++static int do_spi_test(ulong _start, ulong _end, ulong pattern)
++{
++    ulong offset, count, j;
++    uint i = 0, k = 0;
++    
++    offset = _start;
++    count = _end - _start;
++    
++    if((_start < 0x70000) || (_end > 0x3FFFFF) || (_start > _end))
++    {
++        printf ("Addr Range: 0x70000 ~ 0x3FFFFF\n");
++        return -1;
++    }
++
++    unsigned char writebuf[SIZE_1SECTOR],readbuf[SIZE_1SECTOR];
++    for(j=0; j<SIZE_1SECTOR; j++)
++    {
++        writebuf[j] = 0xaa;
++    }
++   
++    printf ("Spi Testing ...\n");
++    
++    if(count > SIZE_1SECTOR)
++    {    
++        i = count/SIZE_1SECTOR;
++        
++        for(k=0; k<i; k++)
++        {
++	    printf("Erasing from offset 0x%lx count 0x%lx ...\n", offset+(k*SIZE_1SECTOR), SIZE_1SECTOR);
++            if(spi_copy_write((char *)SPI_FLASH_BAREBOX_DEV_NAME, writebuf, offset+(k*SIZE_1SECTOR), SIZE_1SECTOR) < 0)
++            {
++                printf ("ERROR: Spi Wirte Fail\n");
++                return -1;
++            }
++
++            if(spi_copy_read((char *)SPI_FLASH_BAREBOX_DEV_NAME, readbuf, offset+(k*SIZE_1SECTOR), SIZE_1SECTOR) < 0)
++            {
++                printf ("ERROR: Spi Read Fail\n");
++                return -1;
++            }
++
++            printf ("Checking ...\n");
++            for(j=0; j<SIZE_1SECTOR; j++)
++            {
++                if(writebuf[j] != readbuf[j])
++                {
++                    printf ("ERROR: Spi Check Fail\n");
++                    return -1;
++                }
++            }
++            printf ("Done...\n");
++        }
++        count = count - (i*SIZE_1SECTOR);
++	offset = offset + (i*SIZE_1SECTOR);
++    }
++
++    printf("Erasing from offset 0x%lx count 0x%lx ...\n", offset, count);
++    if(spi_copy_write((char *)SPI_FLASH_BAREBOX_DEV_NAME, writebuf, offset, count) < 0)
++    {
++        printf ("ERROR: Spi Wirte Fail\n");
++        return -1;
++    }
++    
++    if(spi_copy_read((char *)SPI_FLASH_BAREBOX_DEV_NAME, readbuf, offset, count) < 0)
++
++    {
++        printf ("ERROR: Spi Read Fail\n");
++        return -1;
++    }
++
++    printf ("Checking ...\n");
++    for(j=0; j<count; j++)
++    {
++        if(writebuf[j] != readbuf[j])
++        {
++            printf ("ERROR: Spi Check Fail\n");
++            return -1;
++        }
++    }
++    printf ("Done...\n");
++
++    printf ("Spi Test Succeed\n");
++    return 0;
++}
++
++static int do_nand_test(struct cdev *cdev, ulong _start, ulong _end, ulong pattern)
++{
++    struct mtd_info *info = cdev->priv;
++    ulong offset, count, j;
++    uint i = 0, k = 0;
++    int ret;
++
++    offset = _start;
++    count = _end - _start;
++
++    if((_start < 0x0) || (_end > 0xFFFFFFF) || (_start > _end))
++    {
++        printf ("Addr Range: 0x0 ~ 0xFFFFFFF\n");
++        return -1;
++    }
++
++    unsigned char writebuf[SIZE_1BLOCK],readbuf[SIZE_1BLOCK];
++    for(j=0; j<SIZE_1BLOCK; j++)
++    {
++        writebuf[j] = 0xaa;
++    }
++   
++    printf ("Nand Testing ...\n");
++    
++    if(count > SIZE_1BLOCK)
++    {    
++        i = count/SIZE_1BLOCK;
++        
++	for(k=0; k<i; k++)
++	{ 
++	    ret = info->block_isbad(info, offset+(k*SIZE_1BLOCK));
++	    if (ret > 0) {
++		printf("Skipping bad block at 0x%08x\n", offset+(k*SIZE_1BLOCK));
++		continue;
++	    }
++
++            if(update_nand(writebuf, offset+(k*SIZE_1BLOCK), SIZE_1BLOCK) < 0)
++            {
++                printf ("ERROR: Nand Wirte Fail\n");
++                return -1;
++            }
++
++            if(read_nand(readbuf, offset+(k*SIZE_1BLOCK), SIZE_1BLOCK) < 0)
++            {
++                printf ("ERROR: Nand Read Fail\n");
++                return -1;
++            }
++
++            printf ("Checking ...\n");
++            for(j=0; j<SIZE_1BLOCK; j++)
++            {
++                if(writebuf[j] != readbuf[j])
++                {
++                    printf ("ERROR: Nand Check Fail\n");
++                    return -1;
++                }
++            }
++            printf ("Done...\n");
++        }
++        count = count - (i*SIZE_1BLOCK);
++        offset = offset + (i*SIZE_1BLOCK);
++    }
++
++    ret = info->block_isbad(info, offset);
++    if (ret > 0) {
++        printf("Skipping bad block at 0x%08x\n", offset);
++	printf ("Nand Test Succeed\n");
++        return -1;
++    }
++
++    if(update_nand(writebuf, offset, count) < 0)
++    {
++        printf ("ERROR: Nand Wirte Fail\n");
++        return -1;
++    }
++    
++    if(read_nand(readbuf, offset, count) < 0)
++
++    {
++        printf ("ERROR: Nand Read Fail\n");
++        return -1;
++    }
++
++    printf ("Checking ...\n");
++    for(j=0; j<count; j++)
++    {
++        if(writebuf[j] != readbuf[j])
++        {
++            printf ("ERROR: Nand Check Fail\n");
++            return -1;
++        }
++    }
++    printf ("Done...\n");
++
++    printf ("Nand Test Succeed\n");
++	
++    return 0;
++}
++
++static int do_mem_flash_test(struct command *cmdtp, int argc, char *argv[])
++{
++    struct cdev *cdev;
++    ulong start, end, pattern = 0;
++    char *option;
++
++	if (argc < 4)
++		return COMMAND_ERROR_USAGE;
++
++    cdev = cdev_by_name(NANDDEVNAME);
++	
++	option = argv[1];
++	start  = simple_strtoul(argv[2], NULL, 0);
++	end    = simple_strtoul(argv[3], NULL, 0);
++
++    printf ("start:%x\n",start);
++    printf ("end:%x\n",end);
++
++	if (argc > 4)
++		pattern = simple_strtoul(argv[4], NULL, 0);
++
++    if (strcmp(option, "ddr") == 0)
++	    return do_ddr_test(start, end, pattern);
++
++    else if (strcmp(option, "spi") == 0)
++	    return do_spi_test(start, end, pattern);
++
++    else if (strcmp(option, "nand") == 0)
++	    return do_nand_test(cdev, start, end, pattern);
++
++    else
++        printf ("options : ddr, spi, nand\n");
++        return 0;
++}
++
++static const __maybe_unused char cmd_mem_flash_test_help[] =
++"\nUsage:    mem_flash_test <options> <start> <end>\n"
++"options:  ddr, spi, nand\n"
++"simple ddr spi nand memory read/write test\n";
++
++BAREBOX_CMD_START(mem_flash_test)
++	.cmd		= do_mem_flash_test,
++	.usage		= "simple ddr spi nand memory read/write test",
++	BAREBOX_CMD_HELP(cmd_mem_flash_test_help)
++BAREBOX_CMD_END
++

@@ -1,0 +1,12 @@
+Firmware Manager is set of script to enable Firmware Image updates
+
+Contents:
+--------
+
+files - Scripts to Carry out Firmware Image Update and LED Handling
+Makefile - Makefile to build the package
+
+Execution:
+----------
+Run script
+xxx_fw_unpack.sh <Firmware.img>

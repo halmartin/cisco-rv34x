@@ -1,0 +1,69 @@
+diff -rauN b/src/source/config.c a/src/source/config.c
+--- b/src/source/config.c	2016-05-31 18:18:41.378301493 +0530
++++ a/src/source/config.c	2016-05-31 18:17:39.718302549 +0530
+@@ -193,7 +193,7 @@
+         	    &conf->mbss_auth_servers[i],
+ 	            &conf->mbss_num_auth_servers[i], 
+ 	            pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_ip, 
+-	            1812,
++	            pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_port,
+             	&conf->mbss_auth_server[i]))
+     		{        	
+         	    radius_count++;
+@@ -232,7 +232,7 @@
+ 	            &conf->auth_servers,
+ 	            &conf->num_auth_servers, 
+ 	            pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_ip, 
+-	            1812,
++	            pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_port,
+ 	            &conf->auth_server))
+ 		    {        	
+ 		            radius_count++;
+@@ -786,15 +786,12 @@
+         	    &conf->mbss_auth_servers[i],
+ 	            &conf->mbss_num_auth_servers[i], 
+ 	            pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_ip, 
+-	            1812,
++	            pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_port,
+             	&conf->mbss_auth_server[i]))
+     		{        	
+         	    radius_count++;
+-				DBGPRINT(RT_DEBUG_TRACE, "(no.%d) Radius ip address: '%s'(%x) for %s%d\n", conf->mbss_num_auth_servers[i],
+-										inet_ntoa(conf->mbss_auth_server[i]->addr), 
+-										conf->mbss_auth_server[i]->addr.s_addr, prefix_name, i);
+-										inet_ntoa(conf->mbss_auth_server[i]->addr), 
+-										conf->mbss_auth_server[i]->addr.s_addr, prefix_name, i);
++			DBGPRINT(RT_DEBUG_TRACE, "(no.%d) Radius ip address: '%s'(%x) for %s%d\n", conf->mbss_num_auth_servers[i],
++				inet_ntoa(conf->mbss_auth_server[i]->addr), conf->mbss_auth_server[i]->addr.s_addr, prefix_name, i);
+    			}	
+ 
+ 			// RADIUS_Port and RADIUS_Key      
+@@ -831,7 +828,7 @@
+ 	            &conf->auth_servers,
+ 	            &conf->num_auth_servers, 
+ 	            pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_ip, 
+-	            1812,
++	            pDot1xCmmConf->Dot1xBssInfo[i].radius_srv_info[idx].radius_port,
+ 	            &conf->auth_server))
+ 		    {        	
+ 		            radius_count++;
+diff -rauN b/src/source/ieee802_1x.c a/src/source/ieee802_1x.c
+--- b/src/source/ieee802_1x.c	2016-05-31 18:18:49.222301358 +0530
++++ a/src/source/ieee802_1x.c	2016-05-31 18:17:29.058302732 +0530
+@@ -1145,11 +1145,11 @@
+     
+     Radius_msg_get_attr(msg, RADIUS_ATTR_CLASS, groupname,sizeof(groupname));
+ 
+-    if(strcmp(groupname,"") == 0)
+-         strcpy(groupname,"default");
+-    
+-    group_authorize = authorize(groupname);
+-       
++   if(strcmp(groupname,"") == 0)
++    	group_authorize = 1;
++   else 
++    	group_authorize = authorize(groupname);
++
+     if(group_authorize == 0)
+         return RADIUS_RX_UNKNOWN;
+ 

@@ -1,0 +1,162 @@
+#!/bin/sh /etc/rc.common
+START=61
+STOP=11
+
+board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`       
+start() {
+
+if [ "$board" = "RV340" -o "$board" = "RV340W" -o "$board" = "RV345" -o "$board" = "RV345P" ]; then
+	bonjour_status=$(uci get bonjour.bonjour_status.status)
+else
+	bonjour_status=$(uci get bonjour.bonjour_status.global_status)
+fi
+	[ "$bonjour_status" = "enable" ] || return 0
+	
+	iface_str=""
+	accessType=""
+	csco_sb_port=""
+	maclan=$(uci get systeminfo.sysinfo.maclan)
+	mac_suffix=$(echo ${maclan:9})
+	bonjour_instance=$(echo "${mac_suffix//[:]/}")
+	
+	lan_vpn_https=$(uci get firewall.global_configuration.lan_vpn_https)
+	[ "$lan_vpn_https" = "1" ] && {
+	sed -i "4s/.*/\<name replace\-wildcards\=\"yes\"\>router"$bonjour_instance"\<\/name\>/" /etc/avahi/https.service
+	cp /etc/avahi/https.service /etc/avahi/services/https.service
+	accessType="https"
+	csco_sb_port="443"
+	}
+
+	lan_vpn_http=$(uci get firewall.global_configuration.lan_vpn_http)
+	[ "$lan_vpn_http" = "1" ] && {
+	sed -i "4s/.*/\<name replace\-wildcards\=\"yes\"\>router"$bonjour_instance"\<\/name\>/" /etc/avahi/http.service
+	cp /etc/avahi/http.service /etc/avahi/services/http.service 	
+	if [ -z $accessType ]
+        then
+        accessType="http"
+        else
+        accessType="$accessType,http"
+        fi
+	[ -z $csco_sb_port ] && { 
+		csco_sb_port="80"
+		}
+	}
+
+	config_load bonjour
+	config_foreach iface iface
+	
+	rm -f /etc/avahi/avahi-daemon.conf
+	touch /etc/avahi/avahi-daemon.conf
+	cp /etc/avahi/avahi-daemon.default_conf /etc/avahi/avahi-daemon.conf
+	# Adding Bonjour enabled interfaces to avahi configuration file
+	echo "allow-interfaces=$iface_str" >> /etc/avahi/avahi-daemon.conf	
+	
+	avahi_services
+	/etc/init.d/avahi-daemon start
+}
+
+stop() {
+
+	/etc/init.d/avahi-daemon stop
+	rm -rf /etc/avahi/services/*
+}
+
+iface() {
+
+	local cfg=$1	
+	
+	config_get status "$cfg" status
+	config_get interface "$cfg" interface
+	
+	[ "$status" = "enable" ] || return 0 
+	iface=$(uci get network.$interface.ifname)	
+
+	if [ "$board" = "RV160W" -o "$board" = "RV260W" -o "$board" = "RV340W" ];then
+		iface=$iface,br-$interface
+	fi
+	
+	if [ -z $iface_str ]
+	then
+	iface_str="$iface"
+	else
+	iface_str="$iface_str,$iface"
+	fi	
+	
+}
+
+avahi_services() {
+
+	fmVersion=$(cat /etc/firmware_version)
+	PID=$(uci get systeminfo.sysinfo.pid)
+	pid_prefix=$(echo ${PID%%-*})
+	VID=$(uci get systeminfo.sysinfo.vid)
+if [ "$board" = "RV340" -o "$board" = "RV340W" -o "$board" = "RV345" -o "$board" = "RV345P" ]; then
+	MACAddress=$(cat /sys/class/net/eth3/address)
+else
+	MACAddress=$(cat /sys/class/net/eth2/address)
+fi
+	serialNo=$(uci get systeminfo.sysinfo.serial_number)
+	hostname=$(/bin/hostname)
+        if [ "$board" = "RV340" -o "$board" = "RV340W" -o "$board" = "RV345" -o "$board" = "RV345P" ]; then
+                mdfid_RV340="286287791"                                                                                             
+                swtid_RV340="282465789:fw:286289041:avc:286261054:driver:286277447:lang:282465797:mib"
+                mdfid_RV340W="286289157"                                                              
+        swtid_RV340W="282465789:fw:286289041:avc:286261054:driver:286277447:lang:282465797:mib"
+        mdfid_RV345="286288298"
+                swtid_RV345="282465789:fw:286289041:avc:286261054:driver:286277447:lang:282465797:mib"                 
+                mdfid_RV345P="286289211"                                                               
+                swtid_RV345P="282465789:fw:286289041:avc:286261054:driver:286277447:lang:282465797:mib"
+        elif [ "$board" = "RV160" -o "$board" = "RV160W" -o "$board" = "RV260" -o "$board" = "RV260W" -o "$board" = "RV260P" ]; then
+                mdfid_RV160="286315556"                                                                                             
+                swtid_RV160="282465789:fw:286277447:lang:282465797:mib"                               
+                mdfid_RV160W="286316464"                                                                                            
+                swtid_RV160W="282465789:fw:286277447:lang:282465797:mib"                             
+                mdfid_RV260="286316476"                                                                                             
+                swtid_RV260="282465789:fw:286261054:driver:286277447:lang:282465797:mib"                              
+                mdfid_RV260P="286316489"                                                                                            
+                swtid_RV260P="282465789:fw:286261054:driver:286277447:lang:282465797:mib"                             
+                mdfid_RV260W="286316501"                                                                                            
+                swtid_RV260W="282465789:fw:286261054:driver:286277447:lang:282465797:mib"                             
+        fi                                                                                                                          
+        MDFID=$(eval echo "$"mdfid_$pid_prefix)                                
+        SWTID=$(eval echo "$"swtid_$pid_prefix)
+	
+	[ -f /etc/avahi/services/csco-sb.service ] && rm -rf /etc/avahi/services/csco-sb.service
+	touch /etc/avahi/services/csco-sb.service
+
+	echo "<?xml version=\"1.0\" standalone='no'?><!--*-nxml-*-->" >> /etc/avahi/services/csco-sb.service
+	echo "<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">" >> /etc/avahi/services/csco-sb.service
+	echo "<service-group>" >> /etc/avahi/services/csco-sb.service
+	echo " <name replace-wildcards=\"yes\">router$bonjour_instance</name>" >> /etc/avahi/services/csco-sb.service
+	echo "  <service>" >> /etc/avahi/services/csco-sb.service
+	echo "   <type>_csco-sb._tcp</type>" >> /etc/avahi/services/csco-sb.service
+	echo "   <port>$csco_sb_port</port>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>version=1.2</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>model=$pid_prefix</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>deviceType=Router</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>deviceDescr=$pid_prefix Series Configuration Utility</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>fmVersion=$fmVersion</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>PIDVID=$PID $VID</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>MACAddress=$MACAddress</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>serialNo=$serialNo</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>hostname=$hostname</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>MDFID=$MDFID</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>SWTID=$SWTID</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "   <txt-record>accessType=$accessType</txt-record>" >> /etc/avahi/services/csco-sb.service
+	echo "  </service>" >> /etc/avahi/services/csco-sb.service
+	echo "</service-group>" >> /etc/avahi/services/csco-sb.service
+
+}
+
+reload() {
+
+	tmp1=$(cat /tmp/update.sh | grep "bonjour.")
+	tmp2=$(cat /tmp/update.sh | grep "network.vlan")
+	tmp3=$(cat /tmp/update.sh | grep "systemconfig.system")
+	tmp4=$(cat /tmp/update.sh | grep "firewall.global_configuration")
+
+	[ -n "$tmp1" -o -n "$tmp2" -o -n "$tmp3" -o -n "$tmp4" ] && {
+	restart 
+	}
+	exit 0;
+}

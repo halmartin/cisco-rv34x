@@ -1,0 +1,41 @@
+#!/bin/sh
+USB_STATUS_FILE="/tmp/USBSTATUS"
+USB_CONN_STATUS_FILE="/var/USBCONNSTATUS"
+
+USB_STATUS=`cat $USB_STATUS_FILE | grep "^USB1" | cut -d : -f 5` >/dev/null 2>&1
+if [ "$USB_STATUS" = 1 ];then
+	USB1="true"
+	USB1_TYPE=`cat $USB_CONN_STATUS_FILE | grep "^USB1" | cut -d : -f 4` >/dev/null 2>&1
+	if [ "$USB1_TYPE" = "storage" ];then
+		USB1_TYPE="mass-storage"
+	elif [ "$USB1_TYPE" = "3G" ];then
+		USB1_TYPE="3g"
+	elif [ "$USB1_TYPE" = "4G" ];then
+		USB1_TYPE="4g"
+	else
+		USB1_TYPE="other"
+	fi
+	echo "usbs __BEGIN name USB1 attached $USB1 usbs-type $USB1_TYPE usbs __END"
+else
+	USB1="false"
+	echo "usbs __BEGIN name USB1 attached $USB1 usbs __END"
+fi
+
+USB_STATUS=`cat $USB_STATUS_FILE | grep "^USB2" | cut -d : -f 5` >/dev/null 2>&1
+if [ "$USB_STATUS" = 1 ];then
+	USB2="true"
+	USB2_TYPE=`cat $USB_CONN_STATUS_FILE | grep "^USB2" | cut -d : -f 4` >/dev/null 2>&1
+	if [ "$USB2_TYPE" = "storage" ];then
+		USB2_TYPE="mass-storage"
+	elif [ "$USB2_TYPE" = "3G" ];then
+		USB2_TYPE="3g"
+	elif [ "$USB2_TYPE" = "4G" ];then
+		USB2_TYPE="4g"
+	else
+		USB2_TYPE="other"
+	fi
+	echo "usbs __BEGIN name USB2 attached $USB2 usbs-type $USB2_TYPE usbs __END"
+else
+	USB2="false"
+	echo "usbs __BEGIN name USB2 attached $USB2 usbs __END"
+fi

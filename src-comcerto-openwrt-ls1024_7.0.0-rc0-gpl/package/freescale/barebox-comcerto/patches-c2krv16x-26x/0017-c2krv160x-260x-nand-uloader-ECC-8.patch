@@ -1,0 +1,15 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Change nand uloader ECC mode to be BCH8.
+--- barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig.org	2017-01-19 16:00:44.995877520 +0800
++++ barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig	2017-01-19 16:01:06.326502347 +0800
+@@ -271,8 +271,8 @@
+ # CONFIG_NAND_ECC_HW is not set
+ CONFIG_NAND_ECC_HW_SYNDROME=y
+ # CONFIG_NAND_ECC_HW_NONE is not set
+-# CONFIG_NAND_COMCERTO_ECC_8_HW_BCH is not set
+-CONFIG_NAND_COMCERTO_ECC_24_HW_BCH=y
++CONFIG_NAND_COMCERTO_ECC_8_HW_BCH=y
++# CONFIG_NAND_COMCERTO_ECC_24_HW_BCH is not set
+ # CONFIG_COMCERTO_NAND_ERASE_FBB is not set
+ CONFIG_NAND_INFO=y
+ # CONFIG_NAND_BBT is not set

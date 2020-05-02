@@ -1,0 +1,105 @@
+# 2017-05-17: harry.lin <harry.lin@deltaww.com>
+# Add support one proc interface for usb enable/disable debugging.
+--- linux-4.1.8/drivers/gpio/gpio-c2k.c.org	2017-05-17 13:07:38.770671135 +0800
++++ linux-4.1.8/drivers/gpio/gpio-c2k.c	2017-05-17 16:08:47.930670564 +0800
+@@ -6,10 +6,17 @@
+ #include <mach/comcerto-common.h>
+ #include <asm/io.h>
+ #include <mach/gpio.h>
++#include <asm/uaccess.h>
++#include <linux/proc_fs.h>
++#include <linux/seq_file.h>
+ 
++#define USB_EN_GPIO      52
+ #define DRV_NAME "c2k-gpio"
+ DEFINE_SPINLOCK(c2k_gpio_lock);
+ 
++static struct proc_dir_entry *proc_dir = NULL;
++static struct proc_dir_entry *usb_enable_file = NULL;
++
+ static struct c2k_gpio_chip {
+ 	struct gpio_chip chip;
+ };
+@@ -120,6 +127,73 @@
+ 	return 0;
+ }
+ 
++static int usb_enable_show(struct seq_file *seq, void *v)
++{
++	seq_printf(seq,
++		"Usage:\n"
++		"usb enable:  echo 1 > /proc/gpio/usb_enable\n"
++		"usb disable: echo 0 > /proc/gpio/usb_enable\n");
++
++	return 0;
++}
++
++static int usb_enable_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, usb_enable_show, PDE_DATA(inode));
++}
++
++static int usb_enable_write(struct file *file, const char __user * user_buffer, size_t count, loff_t * ppos)
++{
++	struct gpio_chip *chip = (struct gpio_chip *) (((struct seq_file *)file->private_data)->private);
++	char   line[64] = {0};
++	int    len;
++	int    ret;
++
++	ret = copy_from_user(line, user_buffer, count);
++	if(ret)
++		 return -EFAULT;
++
++	len = strlen(line);
++	if(len == 2)
++		line[1] = '\0';
++
++	if(strcmp(line, "1") == 0)
++	{
++		c2k_gpio_set(chip, USB_EN_GPIO, 1);
++		printk("Do USB Enable: %d\n", c2k_gpio_get(chip, USB_EN_GPIO));
++	}
++	else if(strcmp(line, "0") == 0)
++	{
++		c2k_gpio_set(chip, USB_EN_GPIO, 0);
++		printk("Do USB Disable: %d\n", c2k_gpio_get(chip, USB_EN_GPIO));
++	}
++
++	return count;
++}
++
++static struct file_operations usb_enable_proc_fops =
++{
++	.owner = THIS_MODULE,
++	.open = usb_enable_open,
++	.read = seq_read,
++	.write = usb_enable_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static int gpio_proc_fs_create(struct gpio_chip *chip)
++{
++	proc_dir = proc_mkdir("gpio", NULL);
++	if(!proc_dir)
++		return -ENOMEM;
++
++	usb_enable_file = proc_create_data("usb_enable", 0644, proc_dir, &usb_enable_proc_fops, chip);
++	if(!usb_enable_file)
++		return -ENOMEM;
++
++	return 0;
++}
++
+ static struct c2k_gpio_chip c2k_gpio_chip = {
+ 	.chip = {
+ 		.label			= DRV_NAME,
+@@ -141,6 +215,8 @@
+ 
+ 	if (ret)
+ 		printk(KERN_WARNING "C2K GPIO registration failed: %d\n", ret);
++	else
++		gpio_proc_fs_create(&c2k_gpio_chip.chip);
+ 
+ 	return 0;
+ }

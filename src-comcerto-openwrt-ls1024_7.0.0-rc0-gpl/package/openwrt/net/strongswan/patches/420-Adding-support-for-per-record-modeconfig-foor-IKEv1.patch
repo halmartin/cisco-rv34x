@@ -1,0 +1,790 @@
+From c11c4a096bfff73b1b2fb97645a5a2ff48b1f567 Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Date: Tue, 14 Feb 2017 03:08:07 -0600
+Subject: [PATCH] Adding support for per record modeconfig foor IKEv1
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+---
+ src/libcharon/plugins/stroke/stroke_attribute.c | 194 ++++++++++++++---
+ src/libcharon/plugins/stroke/stroke_socket.c    |  10 +
+ src/starter/args.c                              |   4 +
+ src/starter/confread.h                          |   5 +
+ src/starter/keywords.c                          | 268 ++++++++++++------------
+ src/starter/keywords.h                          |  18 +-
+ src/starter/keywords.txt                        |   4 +
+ src/starter/starterstroke.c                     |   5 +
+ src/stroke/stroke_msg.h                         |   4 +
+ 9 files changed, 350 insertions(+), 162 deletions(-)
+
+diff --git a/src/libcharon/plugins/stroke/stroke_attribute.c b/src/libcharon/plugins/stroke/stroke_attribute.c
+index cd1b4d0..f66bd02 100644
+--- a/src/libcharon/plugins/stroke/stroke_attribute.c
++++ b/src/libcharon/plugins/stroke/stroke_attribute.c
+@@ -49,21 +49,42 @@ struct private_stroke_attribute_t {
+ };
+ 
+ /**
++ * Structure which holds the type and data of an attribute.
++ */
++typedef struct {
++	/** type of attribute */
++	configuration_attribute_type_t type;
++	/** attribute value */
++	chunk_t value;
++} attrTypeValue_t;
++
++/**
+  * Attributes assigned to a connection
+  */
+ typedef struct {
+ 	/** name of the connection */
+ 	char *name;
+-	/** list of DNS attributes, as host_t */
+-	linked_list_t *dns;
++	/** list of Type,Value attribute pairs, as attrTypeValue_t */
++	linked_list_t *attrTypeValue;
+ } attributes_t;
+ 
++
++/**
++ * Destroy an entry
++ */
++static void attrTypeValue_destroy(attrTypeValue_t *this)
++{
++	free(this->value.ptr);
++	free(this);
++}
++
+ /**
+  * Destroy an attributes_t entry
+  */
+ static void attributes_destroy(attributes_t *this)
+ {
+-	this->dns->destroy_offset(this->dns, offsetof(host_t, destroy));
++	this->attrTypeValue->destroy_function(this->attrTypeValue, (void*)attrTypeValue_destroy);
++	//DBG1(DBG_CFG, "Destroyed attributes of the connection '%s'.", this->name);
+ 	free(this->name);
+ 	free(this);
+ }
+@@ -179,26 +200,14 @@ METHOD(attribute_provider_t, release_address, bool,
+ }
+ 
+ /**
+- * Filter function to convert host to DNS configuration attributes
++ * Filter function to convert attributes to TLV format compatible
+  */
+-static bool attr_filter(void *lock, host_t **in,
++static bool attr_filter(void *lock, attrTypeValue_t **in,
+ 						configuration_attribute_type_t *type,
+ 						void *dummy, chunk_t *data)
+ {
+-	host_t *host = *in;
+-
+-	switch (host->get_family(host))
+-	{
+-		case AF_INET:
+-			*type = INTERNAL_IP4_DNS;
+-			break;
+-		case AF_INET6:
+-			*type = INTERNAL_IP6_DNS;
+-			break;
+-		default:
+-			return FALSE;
+-	}
+-	*data = host->get_address(host);
++	*type = (*in)->type;
++	*data = (*in)->value;
+ 	return TRUE;
+ }
+ 
+@@ -222,7 +231,7 @@ METHOD(attribute_provider_t, create_attribute_enumerator, enumerator_t*,
+ 			{
+ 				enumerator->destroy(enumerator);
+ 				return enumerator_create_filter(
+-									attr->dns->create_enumerator(attr->dns),
++									attr->attrTypeValue->create_enumerator(attr->attrTypeValue),
+ 									(void*)attr_filter, this->lock,
+ 									(void*)this->lock->unlock);
+ 			}
+@@ -278,11 +287,15 @@ METHOD(stroke_attribute_t, add_pool, void,
+ METHOD(stroke_attribute_t, add_dns, void,
+ 	private_stroke_attribute_t *this, stroke_msg_t *msg)
+ {
++/* This function is modified to add more attributes like WINS server, default domain,
++ * backup server, split DNS along with dns attribute.
++ */
++	attributes_t *attr = NULL;
+ 	if (msg->add_conn.other.dns)
+ 	{
+ 		enumerator_t *enumerator;
+-		attributes_t *attr = NULL;
+ 		host_t *host;
++		attrTypeValue_t *attrTV = NULL;
+ 		char *token;
+ 
+ 		enumerator = enumerator_create_token(msg->add_conn.other.dns, ",", " ");
+@@ -295,10 +308,28 @@ METHOD(stroke_attribute_t, add_dns, void,
+ 				{
+ 					INIT(attr,
+ 						.name = strdup(msg->add_conn.name),
+-						.dns = linked_list_create(),
++						.attrTypeValue = linked_list_create(),
+ 					);
+ 				}
+-				attr->dns->insert_last(attr->dns, host);
++				attrTV = malloc_thing(attrTypeValue_t);
++				if(!attrTV)
++				{
++					DBG1(DBG_CFG, "Memory allocation failed for DNS attribute of connection '%s'.", msg->add_conn.name);
++					break;
++				}
++				switch (host->get_family(host))
++				{
++					case AF_INET:
++						attrTV->type = INTERNAL_IP4_DNS;
++						attrTV->value = chunk_clone(host->get_address(host));
++						break;
++					case AF_INET6:
++						attrTV->type = INTERNAL_IP6_DNS;
++						attrTV->value = chunk_clone(host->get_address(host));
++						break;
++				 	}
++				attr->attrTypeValue->insert_last(attr->attrTypeValue, attrTV);
++				//DBG1(DBG_CFG, "Adding DNS attribute '%s' for connection '%s'", token, msg->add_conn.name);
+ 			}
+ 			else
+ 			{
+@@ -306,12 +337,121 @@ METHOD(stroke_attribute_t, add_dns, void,
+ 			}
+ 		}
+ 		enumerator->destroy(enumerator);
+-		if (attr)
++	}
++	if (msg->add_conn.other.wins)
++	{
++		enumerator_t *enumerator;
++		host_t *host;
++		attrTypeValue_t *attrTV = NULL;
++		char *token;
++
++		enumerator = enumerator_create_token(msg->add_conn.other.wins, ",", " ");
++		while (enumerator->enumerate(enumerator, &token))
++		{
++			host = host_create_from_string(token, 0);
++			if (host)
++			{
++				if (!attr)
++				{
++					INIT(attr,
++						.name = strdup(msg->add_conn.name),
++						.attrTypeValue = linked_list_create(),
++					);
++				}
++				attrTV = malloc_thing(attrTypeValue_t);
++				if(!attrTV)
++				{
++					DBG1(DBG_CFG, "Memory allocation failed for WINS attribute of connection '%s'.", msg->add_conn.name);
++					break;
++				}
++				attrTV->type = INTERNAL_IP4_NBNS;
++				attrTV->value = chunk_clone(host->get_address(host));
++				attr->attrTypeValue->insert_last(attr->attrTypeValue, attrTV);
++				//DBG1(DBG_CFG, "Adding WINS server attribute '%s' for connection '%s'", token, msg->add_conn.name);
++			}
++			else
++			{
++				DBG1(DBG_CFG, "ignoring invalid WINS Server address '%s'", token);
++			}
++		}
++		enumerator->destroy(enumerator);
++	}
++	if (msg->add_conn.other.default_domain)
++	{
++		attrTypeValue_t *attrTV = NULL;
++
++		if (!attr)
++		{
++			INIT(attr,
++				.name = strdup(msg->add_conn.name),
++				.attrTypeValue = linked_list_create(),
++			);
++		}
++		attrTV = malloc_thing(attrTypeValue_t);
++		if(!attrTV)
++		{
++			DBG1(DBG_CFG, "Memory allocation failed for default domain attribute of connection '%s'.", msg->add_conn.name);
++		}
++		else
++		{
++			attrTV->type = UNITY_DEF_DOMAIN;
++			attrTV->value = chunk_clone(chunk_from_str(msg->add_conn.other.default_domain));
++			attr->attrTypeValue->insert_last(attr->attrTypeValue, attrTV);
++			//DBG1(DBG_CFG, "Adding Default domain attribute '%s' for connection '%s'", msg->add_conn.other.default_domain, msg->add_conn.name);
++		}
++	}
++	if (msg->add_conn.other.backup_server)
++	{
++		attrTypeValue_t *attrTV = NULL;
++
++		if (!attr)
++		{
++			INIT(attr,
++				.name = strdup(msg->add_conn.name),
++				.attrTypeValue = linked_list_create(),
++			);
++		}
++		attrTV = malloc_thing(attrTypeValue_t);
++		if(!attrTV)
++		{
++			DBG1(DBG_CFG, "Memory allocation failed for backup server attribute of connection '%s'.", msg->add_conn.name);
++		}
++		else
++		{
++			attrTV->type = UNITY_BACKUP_SERVERS;
++			attrTV->value = chunk_clone(chunk_from_str(msg->add_conn.other.backup_server));
++			attr->attrTypeValue->insert_last(attr->attrTypeValue, attrTV);
++			DBG1(DBG_CFG, "Adding Backup server attribute '%s' for connection '%s'", msg->add_conn.other.backup_server, msg->add_conn.name);
++		}
++	}
++	if (msg->add_conn.other.split_dns)
++	{
++		attrTypeValue_t *attrTV = NULL;
++		if (!attr)
+ 		{
+-			this->lock->write_lock(this->lock);
+-			this->attrs->insert_last(this->attrs, attr);
+-			this->lock->unlock(this->lock);
++			INIT(attr,
++				.name = strdup(msg->add_conn.name),
++				.attrTypeValue = linked_list_create(),
++			);
+ 		}
++		attrTV = malloc_thing(attrTypeValue_t);
++		if(!attrTV)
++		{
++			DBG1(DBG_CFG, "Memory allocation failed for split DNS attribute of connection '%s'.", msg->add_conn.name);
++		}
++		else
++		{
++			attrTV->type = UNITY_SPLITDNS_NAME;
++			attrTV->value = chunk_clone(chunk_from_str(msg->add_conn.other.split_dns));
++			attr->attrTypeValue->insert_last(attr->attrTypeValue, attrTV);
++			DBG1(DBG_CFG, "Adding split DNS attribute '%s' for connection '%s'", msg->add_conn.other.split_dns, msg->add_conn.name);
++		}
++	}
++	if (attr)
++	{
++		this->lock->write_lock(this->lock);
++		this->attrs->insert_last(this->attrs, attr);
++		this->lock->unlock(this->lock);
+ 	}
+ }
+ 
+diff --git a/src/libcharon/plugins/stroke/stroke_socket.c b/src/libcharon/plugins/stroke/stroke_socket.c
+index 46de90c..a6ff61b 100644
+--- a/src/libcharon/plugins/stroke/stroke_socket.c
++++ b/src/libcharon/plugins/stroke/stroke_socket.c
+@@ -169,6 +169,11 @@ static void pop_end(stroke_msg_t *msg, const char* label, stroke_end_t *end)
+ 	pop_string(msg, &end->cert_policy);
+ 	pop_string(msg, &end->updown);
+ 
++	pop_string(msg, &end->wins);
++	pop_string(msg, &end->default_domain);
++	pop_string(msg, &end->backup_server);
++	pop_string(msg, &end->split_dns);
++
+ 	DBG_OPT("  %s=%s", label, end->address);
+ 	DBG_OPT("  %ssubnet=%s", label, end->subnets);
+ 	DBG_OPT("  %ssourceip=%s", label, end->sourceip);
+@@ -185,6 +190,11 @@ static void pop_end(stroke_msg_t *msg, const char* label, stroke_end_t *end)
+ 	DBG_OPT("  %sgroups=%s", label, end->groups);
+ 	DBG_OPT("  %sgroups2=%s", label, end->groups2);
+ 	DBG_OPT("  %supdown=%s", label, end->updown);
++
++	DBG_OPT("  wins=%s", end->wins);
++	DBG_OPT("  defaultdomain=%s", end->default_domain);
++	DBG_OPT("  backup_server=%s", end->backup_server);
++	DBG_OPT("  splitdns=%s", end->split_dns);
+ }
+ 
+ /**
+diff --git a/src/starter/args.c b/src/starter/args.c
+index 0874cc7..6e08fee 100644
+--- a/src/starter/args.c
++++ b/src/starter/args.c
+@@ -216,6 +216,10 @@ static const token_info_t token_info[] =
+ 	{ ARG_STR,  offsetof(starter_end_t, groups), NULL                              },
+ 	{ ARG_STR,  offsetof(starter_end_t, groups2), NULL                             },
+ 	{ ARG_MISC, 0, NULL  /* KW_END_DEPRECATED */                                   },
++	{ ARG_STR,  offsetof(starter_end_t, wins), NULL                                },
++	{ ARG_STR,  offsetof(starter_end_t, default_domain), NULL                      },
++	{ ARG_STR,  offsetof(starter_end_t, backup_server), NULL                       },
++	{ ARG_STR,  offsetof(starter_end_t, split_dns), NULL                           },
+ };
+ 
+ /*
+diff --git a/src/starter/confread.h b/src/starter/confread.h
+index 45f34ce..e9c840c 100644
+--- a/src/starter/confread.h
++++ b/src/starter/confread.h
+@@ -111,6 +111,11 @@ struct starter_end {
+ 		uint8_t        protocol;
+ 		char            *sourceip;
+ 		char            *dns;
++
++		char            *wins;
++		char            *default_domain;
++		char            *backup_server;
++		char            *split_dns;
+ };
+ 
+ typedef struct starter_conn starter_conn_t;
+diff --git a/src/starter/keywords.c b/src/starter/keywords.c
+index 762c5d9..e39105c 100644
+--- a/src/starter/keywords.c
++++ b/src/starter/keywords.c
+@@ -1,5 +1,5 @@
+ /* C code produced by gperf version 3.0.4 */
+-/* Command-line: /usr/bin/gperf -m 10 -C -G -D -t  */
++/* Command-line: gperf -m 10 -C -G -D -t --output-file=keywords.c keywords.txt  */
+ /* Computed positions: -k'2-3,6,$' */
+ 
+ #if !((' ' == 32) && ('!' == 33) && ('"' == 34) && ('#' == 35) \
+@@ -54,12 +54,12 @@ struct kw_entry {
+     kw_token_t token;
+ };
+ 
+-#define TOTAL_KEYWORDS 139
++#define TOTAL_KEYWORDS 143
+ #define MIN_WORD_LENGTH 2
+ #define MAX_WORD_LENGTH 17
+-#define MIN_HASH_VALUE 9
++#define MIN_HASH_VALUE 17
+ #define MAX_HASH_VALUE 257
+-/* maximum key range = 249, duplicates = 0 */
++/* maximum key range = 241, duplicates = 0 */
+ 
+ #ifdef __GNUC__
+ __inline
+@@ -79,15 +79,15 @@ hash (str, len)
+       258, 258, 258, 258, 258, 258, 258, 258, 258, 258,
+       258, 258, 258, 258, 258, 258, 258, 258, 258, 258,
+       258, 258, 258, 258, 258, 258, 258, 258, 258, 258,
+-      258, 258, 258, 258, 258, 258, 258, 258, 258,  14,
+-      129, 258, 258, 258, 258, 258, 258, 258, 258, 258,
++      258, 258, 258, 258, 258, 258, 258, 258, 258,   8,
++      110, 258, 258, 258, 258, 258, 258, 258, 258, 258,
+       258, 258, 258, 258, 258, 258, 258, 258, 258, 258,
+       258, 258, 258, 258, 258, 258, 258, 258, 258, 258,
+       258, 258, 258, 258, 258, 258, 258, 258, 258, 258,
+-      258, 258, 258, 258, 258,   3, 258,  31,   4,  83,
+-       50,   5,   4,   1,  79,   1, 258, 121,  62,   5,
+-       33,  51,  41,   2,  22,   1,  25, 103,   6,   1,
+-      258,   8,   2, 258, 258, 258, 258, 258, 258, 258,
++      258, 258, 258, 258, 258,  22, 258,  22,   1,  35,
++       62,   1,  11,   1, 114,   2, 258, 117,  46,  27,
++       41,  80,  46,  11,  20,   4,  24, 115,   1,   8,
++      258,  10,   1, 258, 258, 258, 258, 258, 258, 258,
+       258, 258, 258, 258, 258, 258, 258, 258, 258, 258,
+       258, 258, 258, 258, 258, 258, 258, 258, 258, 258,
+       258, 258, 258, 258, 258, 258, 258, 258, 258, 258,
+@@ -123,175 +123,179 @@ hash (str, len)
+ 
+ static const struct kw_entry wordlist[] =
+   {
+-    {"pfs",               KW_PFS_DEPRECATED},
+-    {"rightgroups",       KW_RIGHTGROUPS},
+     {"aggressive",        KW_AGGRESSIVE},
++    {"rightgroups",       KW_RIGHTGROUPS},
++    {"pfs",               KW_PFS_DEPRECATED},
+     {"lifetime",          KW_KEYLIFE},
+-    {"rightsigkey",       KW_RIGHTSIGKEY},
+-    {"lifebytes",         KW_LIFEBYTES},
+     {"keyingtries",       KW_KEYINGTRIES},
+-    {"leftsigkey",        KW_LEFTSIGKEY},
++    {"rightsigkey",       KW_RIGHTSIGKEY},
+     {"keylife",           KW_KEYLIFE},
+-    {"leftrsasigkey",     KW_LEFTSIGKEY},
+     {"right",             KW_RIGHT},
++    {"leftsigkey",        KW_LEFTSIGKEY},
++    {"keep_alive",        KW_SETUP_DEPRECATED},
++    {"lifebytes",         KW_LIFEBYTES},
+     {"leftcertpolicy",    KW_LEFTCERTPOLICY},
++    {"leftrsasigkey",     KW_LEFTSIGKEY},
+     {"left",              KW_LEFT},
+-    {"rightsubnet",       KW_RIGHTSUBNET},
+     {"rightikeport",      KW_RIGHTIKEPORT},
++    {"rightsubnet",       KW_RIGHTSUBNET},
+     {"rightsendcert",     KW_RIGHTSENDCERT},
++    {"leftcert",          KW_LEFTCERT},
+     {"leftgroups",        KW_LEFTGROUPS},
+     {"rightrsasigkey",    KW_RIGHTSIGKEY},
+-    {"leftcert",          KW_LEFTCERT},
++    {"rightallowany",     KW_RIGHTALLOWANY},
++    {"leftsendcert",      KW_LEFTSENDCERT},
+     {"lifepackets",       KW_LIFEPACKETS},
++    {"wins",              KW_RIGHT_WINS},
++    {"certuribase",       KW_CERTURIBASE},
+     {"uniqueids",         KW_UNIQUEIDS},
++    {"keyexchange",       KW_KEYEXCHANGE},
++    {"virtual_private",   KW_SETUP_DEPRECATED},
++    {"type",              KW_TYPE},
++    {"leftca",            KW_LEFTCA},
++    {"rightcertpolicy",   KW_RIGHTCERTPOLICY},
+     {"leftdns",           KW_LEFTDNS},
+-    {"leftsendcert",      KW_LEFTSENDCERT},
+     {"rightsubnetwithin", KW_RIGHTSUBNET},
+-    {"rightallowany",     KW_RIGHTALLOWANY},
+-    {"keep_alive",        KW_SETUP_DEPRECATED},
+     {"rightsourceip",     KW_RIGHTSOURCEIP},
+-    {"type",              KW_TYPE},
++    {"rightca",           KW_RIGHTCA},
++    {"ocspuri",           KW_OCSPURI},
++    {"leftprotoport",     KW_LEFTPROTOPORT},
++    {"leftnexthop",       KW_LEFT_DEPRECATED},
++    {"rightcert",         KW_RIGHTCERT},
++    {"leftfirewall",      KW_LEFTFIREWALL},
++    {"rightfirewall",     KW_RIGHTFIREWALL},
+     {"rightid",           KW_RIGHTID},
++    {"ocspuri1",          KW_OCSPURI},
++    {"crluri",            KW_CRLURI},
+     {"rightdns",          KW_RIGHTDNS},
+-    {"reqid",             KW_REQID},
+-    {"certuribase",       KW_CERTURIBASE},
+-    {"leftnexthop",       KW_LEFT_DEPRECATED},
+     {"replay_window",     KW_REPLAY_WINDOW},
+-    {"leftprotoport",     KW_LEFTPROTOPORT},
+-    {"compress",          KW_COMPRESS},
++    {"reqid",             KW_REQID},
++    {"leftallowany",      KW_LEFTALLOWANY},
++    {"crluri1",           KW_CRLURI},
++    {"tfc",               KW_TFC},
++    {"inactivity",        KW_INACTIVITY},
++    {"rightprotoport",    KW_RIGHTPROTOPORT},
+     {"mobike",	           KW_MOBIKE},
+-    {"me_peerid",         KW_ME_PEERID},
+     {"interfaces",        KW_SETUP_DEPRECATED},
+-    {"virtual_private",   KW_SETUP_DEPRECATED},
+-    {"lefthostaccess",    KW_LEFTHOSTACCESS},
+-    {"leftca",            KW_LEFTCA},
+-    {"rightfirewall",     KW_RIGHTFIREWALL},
+-    {"rightprotoport",    KW_RIGHTPROTOPORT},
+-    {"inactivity",        KW_INACTIVITY},
+-    {"leftfirewall",      KW_LEFTFIREWALL},
+-    {"esp",               KW_ESP},
+-    {"rightnexthop",      KW_RIGHT_DEPRECATED},
+-    {"forceencaps",       KW_FORCEENCAPS},
+-    {"leftallowany",      KW_LEFTALLOWANY},
+-    {"crluri",            KW_CRLURI},
+-    {"leftupdown",        KW_LEFTUPDOWN},
+     {"mark_in",           KW_MARK_IN},
+     {"strictcrlpolicy",   KW_STRICTCRLPOLICY},
+-    {"force_keepalive",   KW_SETUP_DEPRECATED},
+-    {"righthostaccess",   KW_RIGHTHOSTACCESS},
+-    {"marginbytes",       KW_MARGINBYTES},
+-    {"mediated_by",       KW_MEDIATED_BY},
+-    {"marginpackets",     KW_MARGINPACKETS},
+     {"margintime",        KW_REKEYMARGIN},
++    {"me_peerid",         KW_ME_PEERID},
+     {"fragmentation",     KW_FRAGMENTATION},
+-    {"pfsgroup",          KW_PFS_DEPRECATED},
+-    {"crluri1",           KW_CRLURI},
+-    {"rightcertpolicy",   KW_RIGHTCERTPOLICY},
+-    {"hidetos",           KW_SETUP_DEPRECATED},
+-    {"keyexchange",       KW_KEYEXCHANGE},
+-    {"leftsourceip",      KW_LEFTSOURCEIP},
+-    {"ocspuri",           KW_OCSPURI},
+-    {"leftid",            KW_LEFTID},
+-    {"eap",               KW_CONN_DEPRECATED},
++    {"marginbytes",       KW_MARGINBYTES},
++    {"esp",               KW_ESP},
++    {"marginpackets",     KW_MARGINPACKETS},
++    {"rightnexthop",      KW_RIGHT_DEPRECATED},
++    {"cachecrls",         KW_CACHECRLS},
++    {"mediated_by",       KW_MEDIATED_BY},
++    {"leftupdown",        KW_LEFTUPDOWN},
++    {"lefthostaccess",    KW_LEFTHOSTACCESS},
++    {"cacert",            KW_CACERT},
++    {"defaultdomain",     KW_RIGHT_DEFAULT_DOMAIN},
+     {"installpolicy",     KW_INSTALLPOLICY},
+-    {"also",              KW_ALSO},
+-    {"rightcert",         KW_RIGHTCERT},
+-    {"rightauth",         KW_RIGHTAUTH},
+-    {"mediation",         KW_MEDIATION},
+-    {"rightca",           KW_RIGHTCA},
+-    {"klipsdebug",        KW_SETUP_DEPRECATED},
+     {"ldapbase",          KW_CA_DEPRECATED},
+-    {"overridemtu",       KW_SETUP_DEPRECATED},
+-    {"ocspuri1",          KW_OCSPURI},
+-    {"dpdtimeout",        KW_DPDTIMEOUT},
+-    {"aaa_identity",      KW_AAA_IDENTITY},
++    {"forceencaps",       KW_FORCEENCAPS},
++    {"eap",               KW_CONN_DEPRECATED},
++    {"packetdefault",     KW_SETUP_DEPRECATED},
++    {"compress",          KW_COMPRESS},
++    {"klipsdebug",        KW_SETUP_DEPRECATED},
+     {"ike",               KW_IKE},
+-    {"mark_out",          KW_MARK_OUT},
+-    {"dumpdir",           KW_SETUP_DEPRECATED},
+-    {"rekey",             KW_REKEY},
+     {"rightid2",          KW_RIGHTID2},
+-    {"rekeyfuzz",         KW_REKEYFUZZ},
+-    {"eap_identity",      KW_EAP_IDENTITY},
++    {"nat_traversal",     KW_SETUP_DEPRECATED},
+     {"rightgroups2",      KW_RIGHTGROUPS2},
++    {"aaa_identity",      KW_AAA_IDENTITY},
++    {"crlcheckinterval",  KW_SETUP_DEPRECATED},
++    {"overridemtu",       KW_SETUP_DEPRECATED},
++    {"fragicmp",          KW_SETUP_DEPRECATED},
++    {"leftcert2",         KW_LEFTCERT2},
++    {"rekey",             KW_REKEY},
++    {"also",              KW_ALSO},
++    {"backupserver",      KW_RIGHT_BACKUP_SERVER},
++    {"righthostaccess",   KW_RIGHTHOSTACCESS},
++    {"mediation",         KW_MEDIATION},
++    {"force_keepalive",   KW_SETUP_DEPRECATED},
++    {"rekeyfuzz",         KW_REKEYFUZZ},
+     {"ikelifetime",       KW_IKELIFETIME},
++    {"leftid",            KW_LEFTID},
++    {"rightauth2",        KW_RIGHTAUTH2},
++    {"rightauth",         KW_RIGHTAUTH},
++    {"pfsgroup",          KW_PFS_DEPRECATED},
++    {"leftsourceip",      KW_LEFTSOURCEIP},
++    {"leftca2",           KW_LEFTCA2},
++    {"eap_identity",      KW_EAP_IDENTITY},
++    {"leftgroups2",       KW_LEFTGROUPS2},
++    {"mark_out",          KW_MARK_OUT},
++    {"hidetos",           KW_SETUP_DEPRECATED},
++    {"rightca2",          KW_RIGHTCA2},
++    {"rightcert2",        KW_RIGHTCERT2},
+     {"leftsubnet",        KW_LEFTSUBNET},
+-    {"rightupdown",       KW_RIGHTUPDOWN},
++    {"mark",              KW_MARK},
++    {"leftikeport",       KW_LEFTIKEPORT},
+     {"authby",            KW_AUTHBY},
+-    {"leftcert2",         KW_LEFTCERT2},
+-    {"nat_traversal",     KW_SETUP_DEPRECATED},
+-    {"charondebug",       KW_CHARONDEBUG},
++    {"splitdns",          KW_RIGHT_SPLIT_DNS},
++    {"dpdtimeout",        KW_DPDTIMEOUT},
++    {"rightupdown",       KW_RIGHTUPDOWN},
++    {"dumpdir",           KW_SETUP_DEPRECATED},
++    {"dpddelay",          KW_DPDDELAY},
++    {"pkcs11module",      KW_PKCS11_DEPRECATED},
++    {"pkcs11keepstate",   KW_PKCS11_DEPRECATED},
++    {"ocspuri2",          KW_OCSPURI2},
++    {"pkcs11initargs",    KW_PKCS11_DEPRECATED},
++    {"plutostderrlog",    KW_SETUP_DEPRECATED},
++    {"pkcs11proxy",       KW_PKCS11_DEPRECATED},
+     {"dpdaction",         KW_DPDACTION},
+     {"xauth_identity",    KW_XAUTH_IDENTITY},
+-    {"ah",                KW_AH},
+     {"leftsubnetwithin",  KW_LEFTSUBNET},
+-    {"modeconfig",        KW_MODECONFIG},
++    {"crluri2",           KW_CRLURI2},
++    {"nocrsend",          KW_SETUP_DEPRECATED},
++    {"charondebug",       KW_CHARONDEBUG},
++    {"leftid2",           KW_LEFTID2},
+     {"ldaphost",          KW_CA_DEPRECATED},
+-    {"leftikeport",       KW_LEFTIKEPORT},
+-    {"crlcheckinterval",  KW_SETUP_DEPRECATED},
+-    {"dpddelay",          KW_DPDDELAY},
+-    {"cacert",            KW_CACERT},
+-    {"leftgroups2",       KW_LEFTGROUPS2},
+-    {"rightauth2",        KW_RIGHTAUTH2},
+-    {"tfc",               KW_TFC},
+-    {"postpluto",         KW_SETUP_DEPRECATED},
+     {"rekeymargin",       KW_REKEYMARGIN},
+-    {"leftca2",           KW_LEFTCA2},
+-    {"packetdefault",     KW_SETUP_DEPRECATED},
+-    {"mark",              KW_MARK},
++    {"plutostart",        KW_SETUP_DEPRECATED},
++    {"closeaction",       KW_CLOSEACTION},
++    {"ikedscp",           KW_IKEDSCP,},
+     {"charonstart",       KW_SETUP_DEPRECATED},
+-    {"plutostderrlog",    KW_SETUP_DEPRECATED},
++    {"postpluto",         KW_SETUP_DEPRECATED},
+     {"auto",              KW_AUTO},
+-    {"fragicmp",          KW_SETUP_DEPRECATED},
+-    {"closeaction",       KW_CLOSEACTION},
+     {"prepluto",          KW_SETUP_DEPRECATED},
+-    {"leftid2",           KW_LEFTID2},
+-    {"nocrsend",          KW_SETUP_DEPRECATED},
+-    {"leftauth",          KW_LEFTAUTH},
+-    {"reauth",            KW_REAUTH},
+-    {"plutostart",        KW_SETUP_DEPRECATED},
+-    {"cachecrls",         KW_CACHECRLS},
+-    {"xauth",             KW_XAUTH},
+-    {"crluri2",           KW_CRLURI2},
+-    {"rightca2",          KW_RIGHTCA2},
+-    {"rightcert2",        KW_RIGHTCERT2},
++    {"ah",                KW_AH},
++    {"modeconfig",        KW_MODECONFIG},
+     {"plutodebug",        KW_SETUP_DEPRECATED},
+-    {"pkcs11initargs",    KW_PKCS11_DEPRECATED},
+-    {"pkcs11module",      KW_PKCS11_DEPRECATED},
+-    {"pkcs11proxy",       KW_PKCS11_DEPRECATED},
+-    {"pkcs11keepstate",   KW_PKCS11_DEPRECATED},
+-    {"ocspuri2",          KW_OCSPURI2},
+     {"leftauth2",         KW_LEFTAUTH2},
+-    {"ikedscp",           KW_IKEDSCP,}
++    {"leftauth",          KW_LEFTAUTH},
++    {"xauth",             KW_XAUTH},
++    {"reauth",            KW_REAUTH}
+   };
+ 
+ static const short lookup[] =
+   {
+-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,   0,
+-     -1,  -1,  -1,  -1,  -1,   1,  -1,  -1,   2,   3,
+-     -1,  -1,   4,   5,  -1,  -1,   6,  -1,   7,   8,
+-     -1,   9,  10,  -1,  -1,  -1,  11,  -1,  12,  13,
+-     14,  15,  16,  -1,  -1,  -1,  17,  18,  19,  20,
+-     21,  22,  -1,  23,  24,  -1,  25,  26,  27,  -1,
+-     28,  29,  30,  -1,  -1,  31,  32,  -1,  33,  34,
+-     35,  36,  37,  38,  39,  40,  -1,  41,  -1,  -1,
+-     -1,  42,  43,  44,  45,  -1,  46,  -1,  47,  -1,
+-     48,  49,  50,  51,  52,  53,  54,  55,  56,  57,
+-     58,  59,  -1,  -1,  60,  61,  62,  -1,  63,  -1,
+-     64,  -1,  65,  66,  67,  68,  69,  70,  71,  72,
+-     -1,  73,  74,  75,  76,  77,  78,  -1,  79,  -1,
+-     -1,  80,  81,  -1,  82,  -1,  -1,  83,  84,  85,
+-     86,  87,  88,  -1,  89,  -1,  90,  91,  -1,  92,
+-     93,  -1,  94,  95,  -1,  96,  -1,  -1,  97,  98,
+-     99, 100,  -1, 101,  -1, 102, 103, 104,  -1, 105,
+-    106, 107, 108, 109, 110, 111, 112, 113, 114, 115,
+-     -1, 116,  -1, 117,  -1, 118,  -1,  -1, 119, 120,
+-     -1,  -1,  -1,  -1,  -1, 121,  -1, 122,  -1, 123,
+-    124, 125,  -1,  -1,  -1,  -1,  -1, 126,  -1,  -1,
+-     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1, 127,  -1,
+-     -1, 128, 129,  -1, 130,  -1, 131,  -1,  -1,  -1,
+-     -1,  -1,  -1, 132,  -1, 133,  -1, 134, 135,  -1,
+-     -1,  -1,  -1, 136,  -1,  -1,  -1,  -1,  -1,  -1,
+-    137,  -1,  -1,  -1,  -1,  -1,  -1, 138
++     -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,  -1,
++     -1,  -1,  -1,  -1,  -1,  -1,  -1,   0,  -1,   1,
++     -1,  -1,   2,  -1,   3,  -1,  -1,   4,   5,  -1,
++      6,  -1,   7,  -1,   8,   9,  10,  11,  -1,  12,
++     13,  14,  15,  -1,  16,  17,  18,  19,  20,  21,
++     22,  23,  -1,  24,  -1,  -1,  -1,  25,  26,  -1,
++     27,  28,  29,  30,  31,  32,  33,  34,  35,  36,
++     37,  38,  39,  40,  41,  42,  43,  44,  45,  46,
++     47,  -1,  -1,  48,  49,  50,  -1,  51,  -1,  52,
++     53,  -1,  54,  55,  56,  57,  -1,  58,  59,  60,
++     61,  -1,  62,  -1,  -1,  63,  -1,  -1,  64,  65,
++     66,  67,  68,  -1,  69,  70,  71,  72,  73,  -1,
++     74,  75,  76,  77,  -1,  78,  79,  -1,  80,  81,
++     82,  83,  84,  85,  86,  87,  88,  89,  90,  91,
++     -1,  92,  93,  -1,  -1,  94,  -1,  -1,  95,  96,
++     97,  98,  99, 100, 101, 102, 103,  -1, 104,  -1,
++     -1, 105,  -1, 106, 107, 108, 109,  -1,  -1, 110,
++    111, 112, 113, 114,  -1,  -1, 115, 116, 117,  -1,
++    118, 119, 120, 121, 122, 123, 124,  -1,  -1, 125,
++     -1, 126,  -1,  -1,  -1,  -1, 127, 128,  -1, 129,
++    130,  -1,  -1,  -1,  -1,  -1, 131,  -1,  -1,  -1,
++     -1,  -1, 132,  -1,  -1,  -1,  -1,  -1,  -1, 133,
++     -1,  -1,  -1, 134, 135,  -1,  -1,  -1,  -1,  -1,
++    136,  -1,  -1, 137, 138,  -1,  -1,  -1,  -1,  -1,
++     -1,  -1,  -1,  -1,  -1,  -1, 139,  -1,  -1, 140,
++     -1,  -1,  -1,  -1,  -1,  -1, 141, 142
+   };
+ 
+ #ifdef __GNUC__
+diff --git a/src/starter/keywords.h b/src/starter/keywords.h
+index 94af493..d69a9a2 100644
+--- a/src/starter/keywords.h
++++ b/src/starter/keywords.h
+@@ -122,9 +122,13 @@ enum kw_token_t {
+ 	KW_GROUPS,
+ 	KW_GROUPS2,
+ 	KW_END_DEPRECATED,
++	KW_WINS,
++	KW_DEFAULT_DOMAIN,
++	KW_BACKUP_SERVER,
++	KW_SPLIT_DNS,
+ 
+ #define KW_END_FIRST    KW_HOST
+-#define KW_END_LAST     KW_END_DEPRECATED
++#define KW_END_LAST     KW_SPLIT_DNS 
+ 
+ 	/* left end keywords */
+ 	KW_LEFT,
+@@ -151,9 +155,13 @@ enum kw_token_t {
+ 	KW_LEFTGROUPS,
+ 	KW_LEFTGROUPS2,
+ 	KW_LEFT_DEPRECATED,
++	KW_LEFT_WINS,
++	KW_LEFT_DEFAULT_DOMAIN,
++	KW_LEFT_BACKUP_SERVER,
++	KW_LEFT_SPLIT_DNS,
+ 
+ #define KW_LEFT_FIRST   KW_LEFT
+-#define KW_LEFT_LAST    KW_LEFT_DEPRECATED
++#define KW_LEFT_LAST    KW_LEFT_SPLIT_DNS
+ 
+ 	/* right end keywords */
+ 	KW_RIGHT,
+@@ -180,9 +188,13 @@ enum kw_token_t {
+ 	KW_RIGHTGROUPS,
+ 	KW_RIGHTGROUPS2,
+ 	KW_RIGHT_DEPRECATED,
++	KW_RIGHT_WINS,
++	KW_RIGHT_DEFAULT_DOMAIN,
++	KW_RIGHT_BACKUP_SERVER,
++	KW_RIGHT_SPLIT_DNS,
+ 
+ #define KW_RIGHT_FIRST  KW_RIGHT
+-#define KW_RIGHT_LAST   KW_RIGHT_DEPRECATED
++#define KW_RIGHT_LAST   KW_RIGHT_SPLIT_DNS
+ 
+ 	/* general section keywords */
+ 	KW_ALSO,
+diff --git a/src/starter/keywords.txt b/src/starter/keywords.txt
+index ee0bd31..b07842c 100644
+--- a/src/starter/keywords.txt
++++ b/src/starter/keywords.txt
+@@ -114,6 +114,10 @@ rightsubnetwithin, KW_RIGHTSUBNET
+ rightprotoport,    KW_RIGHTPROTOPORT
+ rightsourceip,     KW_RIGHTSOURCEIP
+ rightdns,          KW_RIGHTDNS
++wins,              KW_RIGHT_WINS
++defaultdomain,     KW_RIGHT_DEFAULT_DOMAIN
++backupserver,      KW_RIGHT_BACKUP_SERVER
++splitdns,          KW_RIGHT_SPLIT_DNS
+ rightfirewall,     KW_RIGHTFIREWALL
+ righthostaccess,   KW_RIGHTHOSTACCESS
+ rightallowany,     KW_RIGHTALLOWANY
+diff --git a/src/starter/starterstroke.c b/src/starter/starterstroke.c
+index b92c00c..ed78408 100644
+--- a/src/starter/starterstroke.c
++++ b/src/starter/starterstroke.c
+@@ -173,6 +173,11 @@ static void add_end(stroke_msg_t **msg, size_t offset, starter_end_t *conn_end)
+ 	msg_end->protocol = conn_end->protocol;
+ 	msg_end->from_port = conn_end->from_port;
+ 	msg_end->to_port = conn_end->to_port;
++
++	push_string_end(msg, offset, wins, conn_end->wins);
++	push_string_end(msg, offset, default_domain, conn_end->default_domain);
++	push_string_end(msg, offset, backup_server, conn_end->backup_server);
++	push_string_end(msg, offset, split_dns, conn_end->split_dns);
+ }
+ 
+ int starter_stroke_add_conn(starter_config_t *cfg, starter_conn_t *conn)
+diff --git a/src/stroke/stroke_msg.h b/src/stroke/stroke_msg.h
+index a3b911d..c306c3c 100644
+--- a/src/stroke/stroke_msg.h
++++ b/src/stroke/stroke_msg.h
+@@ -161,6 +161,10 @@ struct stroke_end_t {
+ 	char *sourceip;
+ 	char *dns;
+ 	char *subnets;
++	char *wins;
++	char *default_domain;
++	char *backup_server;
++	char *split_dns;
+ 	int sendcert;
+ 	int hostaccess;
+ 	int tohost;
+-- 
+1.9.1
+

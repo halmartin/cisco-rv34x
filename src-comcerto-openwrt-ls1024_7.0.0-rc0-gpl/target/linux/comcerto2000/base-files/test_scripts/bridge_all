@@ -1,0 +1,15 @@
+#!/bin/sh
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Script for testing bridge.
+
+#Bridge all interface
+ifconfig eth0 0
+ifconfig eth1 0
+ifconfig eth2 0
+ifconfig eth3 0
+brctl addbr br1
+brctl addif br1 eth0
+brctl addif br1 eth2
+#brctl addif br1 eth3
+ifconfig br1 192.168.1.254
+

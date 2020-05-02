@@ -1,0 +1,5 @@
+if [ "$(ip route show | grep default)" == "" ];then
+	vtysh -c "conf t" -c "router rip" -c "no default-information originate" -c "exit" -c "exit" -c "exit"
+else
+	vtysh -c "conf t" -c "router rip" -c "default-information originate" -c "exit" -c "exit" -c "exit"
+fi	

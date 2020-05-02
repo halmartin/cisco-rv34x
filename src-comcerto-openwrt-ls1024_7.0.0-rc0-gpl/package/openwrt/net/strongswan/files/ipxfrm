@@ -1,0 +1,164 @@
+#!/usr/bin/perl
+use Getopt::Long;
+
+%algs = ('md5' => 'md5', 
+		'sha1' => 'sha1', 
+		'sha256' => 'sha256',
+		'3des' => 'des3_ede', 
+		'aes128' => 'aes', 
+		'aes192' => 'aes',
+		'aes256' => 'aes', 
+		'modp1024' => '', 
+		'modp1536' => ''
+	);
+
+%lengths = ('md5' => '96', 
+			'sha1' => '96',
+			'sha256' => '128',
+			'3des' => '168',
+			'aes128' => '128',
+			'aes192' => '195',
+			'aes256' => '256', 
+			'modp1024' => '1024', 
+			'modp1536' => '1536'
+		);
+
+
+my $lgw = '';
+my $rgw = '';
+my $lsubnet = '';
+my $rsubnet = '';
+my $in_spi = '';
+my $out_spi = '';
+my $enc_alg = '';
+my $in_enc_key = '';
+my $out_enc_key = '';
+my $auth_alg = '';
+my $in_auth_key = '';
+my $out_auth_key = '';
+
+if($#ARGV != 24 && $#ARGV != 12) {
+	help();
+	exit;
+}
+
+sub help()
+{
+print "ipxfrm <add|delete> --lgw <left-gw> --rgw <right-gw> --lsubnet <left-subnet> --rsubnet <right-subnet> --in_spi <in-SPI> --out_spi <out-SPI> --enc_alg <encryption alogorothm> --in_enc_key <in-encryption-key> --out_enc_key <out-encryptionkey> --auth_alg <auth-algorithm> --in_auth_key <in-auth-key> --out_auth_key <out-auth-key>";
+}
+
+GetOptions ("lgw=s" => \$lgw,
+			"rgw=s" => \$rgw,
+			"lsubnet=s" => \$lsubnet,
+			"rsubnet=s" => \$rsubnet,
+			"in_spi=s" => \$in_spi,
+			"out_spi=s" => \$out_spi,
+			"enc_alg:s" => \$enc_alg,
+			"in_enc_key:s" => \$in_enc_key,
+			"out_enc_key:s" => \$out_enc_key,
+			"auth_alg:s" => \$auth_alg,
+			"in_auth_key:s" => \$in_auth_key,
+			"out_auth_key:s" => \$out_auth_key);
+
+my $command='';
+
+if($ARGV[0] =~ /add/)
+{
+	if($rsubnet =~ /0\.0\.0\.0/) {
+#passthrough connection policies 
+		$command = sprintf("ip xfrm policy add src %s dst %s dir fwd", 
+				$lsubnet,$lsubnet);
+		runCommand($command);
+
+		$command = sprintf("ip xfrm policy add src %s dst %s dir in", 
+				$lsubnet,$lsubnet);
+		runCommand($command);
+
+		$command = sprintf("ip xfrm policy add src %s dst %s dir out",
+				$lsubnet,$lsubnet);
+		runCommand($command);
+	}
+
+	$command = sprintf("ip xfrm policy add src %s dst %s dir fwd tmpl src %s dst %s proto esp reqid 0 mode tunnel", 
+				$rsubnet,$lsubnet,$rgw,$lgw);
+	runCommand($command);
+
+	$command = sprintf("ip xfrm policy add src %s dst %s dir in tmpl src %s dst %s proto esp reqid 0 mode tunnel", 
+				$rsubnet,$lsubnet,$rgw,$lgw);
+	runCommand($command);
+
+	$command = sprintf("ip xfrm policy add src %s dst %s dir out tmpl src %s dst %s proto esp reqid 0 mode tunnel",
+				$lsubnet,$rsubnet,$lgw,$rgw);
+	runCommand($command);
+
+	$command = sprintf("ip xfrm state add src %s dst %s proto esp spi %s mode tunnel auth-trunc %s %s %s enc %s %s", 
+				$rgw,$lgw,$in_spi,$algs{$auth_alg},$in_auth_key,
+				$lengths{$auth_alg}, $algs{$enc_alg},$in_enc_key);
+	runCommand($command);
+
+	$command = sprintf("ip xfrm state add src %s dst %s proto esp spi %s mode tunnel auth-trunc %s %s %s enc %s %s", 
+				$lgw,$rgw,$out_spi,$algs{$auth_alg},$out_auth_key,
+				$lengths{$auth_alg}, $algs{$enc_alg},$out_enc_key);
+	runCommand($command);
+
+	$command = sprintf("iptables -w -I vpn_fw_bypass 1 --source %s --destination %s --jump ACCEPT",
+				$lsubnet,$rsubnet);
+	runCommand($command);
+
+	$command = sprintf("iptables -w -I vpn_fw_bypass 1 --source %s --destination %s --jump ACCEPT",
+				$rsubnet,$lsubnet);
+	runCommand($command);
+
+	$command = sprintf("iptables -w -I vpn_nat_bypass 1 -t nat --source %s --destination %s --jump ACCEPT",
+				$lsubnet,$rsubnet);
+	runCommand($command);
+
+} else {
+	if($rsubnet =~ /0\.0\.0\.0/) {
+#passthrough connection policies 
+		$command = sprintf("ip xfrm policy delete src %s dst %s dir fwd", 
+				$lsubnet,$lsubnet);
+		runCommand($command);
+
+		$command = sprintf("ip xfrm policy delete src %s dst %s dir in", 
+				$lsubnet,$lsubnet);
+		runCommand($command);
+
+		$command = sprintf("ip xfrm policy delete src %s dst %s dir out",
+				$lsubnet,$lsubnet);
+		runCommand($command);
+	}
+
+
+	$command = sprintf("ip xfrm policy delete src %s dst %s dir fwd", $rsubnet,$lsubnet);
+	runCommand($command);
+
+	$command = sprintf("ip xfrm policy delete src %s dst %s dir in", $rsubnet,$lsubnet);
+	runCommand($command);
+
+	$command = sprintf("ip xfrm policy delete src %s dst %s dir out", $lsubnet,$rsubnet);
+	runCommand($command);
+
+	$command = sprintf("ip xfrm state delete src %s dst %s proto esp spi %s",  $rgw,$lgw,$in_spi);
+	runCommand($command);
+
+	$command = sprintf("ip xfrm state delete src %s dst %s proto esp spi %s",  $lgw,$rgw,$out_spi);
+	runCommand($command);
+
+	$command = sprintf("iptables -w -D vpn_fw_bypass --source %s --destination %s --jump ACCEPT",
+				$lsubnet,$rsubnet);
+	runCommand($command);
+
+	$command = sprintf("iptables -w -D vpn_fw_bypass --source %s --destination %s --jump ACCEPT",
+				$rsubnet,$lsubnet);
+	runCommand($command);
+
+	$command = sprintf("iptables -w -D vpn_nat_bypass -t nat --source %s --destination %s --jump ACCEPT",
+				$lsubnet,$rsubnet);
+	runCommand($command);
+}
+
+sub runCommand($) {
+#	printf("command:%s\n", $_[0]);
+	system($_[0]);
+}

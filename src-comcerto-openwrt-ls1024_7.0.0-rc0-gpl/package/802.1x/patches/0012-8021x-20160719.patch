@@ -1,0 +1,354 @@
+diff -rauN a/src/header/config.h b/src/header/config.h
+--- a/src/header/config.h	2016-07-19 14:38:55.098288926 +0530
++++ b/src/header/config.h	2016-07-19 14:39:18.634288923 +0530
+@@ -8,19 +8,6 @@
+ #define MAX_LINE_SIZE 80
+ #define RV34xx_LAN_IFIDX 3
+ 
+-
+-#define RV340
+-
+-#ifdef RV340
+-#define RV34xx_NUM_LAN_PORTS 4
+-
+-#endif
+-
+-#ifdef RV345
+-#define RV34xx_NUM_LAN_PORTS 16
+-
+-#endif
+-
+ typedef u8 macaddr[ETH_ALEN];
+ 
+ struct hostapd_radius_server {
+diff -rauN a/src/header/rtdot1x.h b/src/header/rtdot1x.h
+--- a/src/header/rtdot1x.h	2016-07-19 12:39:42.362289780 +0530
++++ b/src/header/rtdot1x.h	2016-07-19 14:31:37.166288978 +0530
+@@ -82,6 +82,7 @@
+ #define RTKSWITCH_ETH_TYPE 0x8899
+ #endif
+ 
++/** RV340 **/
+ #ifndef RTK8367_CPUTAG_OFFSET
+ #define RTK8367_CPUTAG_OFFSET 19
+ #endif
+@@ -94,6 +95,23 @@
+ #define RTK8367_CPUTAG_START_OFFSET 12
+ #endif
+ 
++/** RV340 **/
++
++/** RV345 **/
++#ifndef RV345_RTL8382_CPUTAG_OFFSET
++#define RV345_RTL8382_CPUTAG_OFFSET 15
++#endif
++
++#ifndef RV345_RTL8382_CPUTAG_HDR_SIZE
++#define RV345_RTL8382_CPUTAG_HDR_SIZE 12
++#endif
++
++#ifndef RV345_RTL8382_CPUTAG_START_OFFSET
++#define RV345_RTL8382_CPUTAG_START_OFFSET 12
++#endif
++/** RV345 **/
++
++
+ #ifndef IEEE_8021X_MAX_PKT_SIZE
+ #define IEEE_8021X_MAX_PKT_SIZE 2048
+ #endif
+diff -rauN a/src/source/eapol_sm.c b/src/source/eapol_sm.c
+--- a/src/source/eapol_sm.c	2016-07-19 12:36:49.958289800 +0530
++++ b/src/source/eapol_sm.c	2016-07-19 13:12:45.370289543 +0530
+@@ -11,7 +11,7 @@
+ #include "eapol_sm.h"
+ #include "eloop.h"
+ 
+-
++extern char PID_RV34X[10];
+ extern int get_physical_portno(uint16_t nas_port);
+ 
+ 
+@@ -607,7 +607,20 @@
+ 	char str[MAX_COMMAND_STR];
+ 	
+ 	memset(str, 0 , MAX_COMMAND_STR);
+-	sprintf(str, "rtkssdk dot1x -p %d -g 1", aid);
++
++	 if (strcmp(PID_RV34X,"RV340") == 0)
++        {
++                sprintf(str, "rtkssdk dot1x -p %d -g 1", aid);
++        }
++        else if (strcmp(PID_RV34X,"RV345") == 0)
++        {
++                 sprintf(str, "rtkssdk_diag -S 1 -p %d -g 1", aid);
++                if(NULL != (fp = popen(str,"r")))
++                pclose(fp);
++
++                memset(str, 0 , MAX_COMMAND_STR);
++                sprintf(str, "cat /tmp/stats/tmp_stats_port%d", aid);
++        }
+ 
+ 	if((fp = popen(str,"r")) !=NULL)
+ 	{
+diff -rauN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-07-19 12:37:01.358289799 +0530
++++ b/src/source/ieee802_1x.c	2016-07-19 13:12:25.678289545 +0530
+@@ -37,28 +37,50 @@
+ #include <arpa/inet.h>
+ 
+ #define SIZE 256
++extern char PID_RV34X[10];
+ 
+ int get_physical_portno(uint16_t nas_port)
+ {
++	if (strcmp(PID_RV34X,"RV340") == 0) 
++	{
++		switch(nas_port)
++		{
++			 case 1 :  return 4;
++
++			 case 2 : return 3;
++			 case 3 : return 2;
++			 case 4 : return 1;
++			 default:  return -1;
++        	}
+ 
+-#ifdef RV340
+-
+-        switch(nas_port)
+-        {
+-         case 1 :  return 4;
+-                   
+-         case 2 : return 3;
+-         case 3 : return 2;
+-         case 4 : return 1;
+-        }
+-
+-#endif
+-
+-#ifdef RV345
+-/** TODO - Add code for other router ports **/
+-#endif
+-   return -1;
+-
++	}
++	else if (strcmp(PID_RV34X,"RV345") == 0) 
++	{
++        	switch(nas_port)
++        	{
++		 case 0 :  return 9;
++		 case 1 :  return 1;
++		 case 2 : return 10;
++		 case 3 : return 2;
++		 case 4 : return 11;
++		 case 5 :  return 3;
++		 case 6 : return 12;
++		 case 7 : return 4;
++		 case 8 : return 13;
++		 case 9 :  return 5;
++		 case 10 : return 14;
++		 case 11 : return 6;
++		 case 12 : return 15;
++		 case 13 : return 7;
++		 case 14 : return 16;
++		 case 15 : return 8;
++		 default:  return -1;
++        	}
++	}
++	else
++	{
++		DBGPRINT(RT_DEBUG_ERROR,"Invalid PID");
++	}
+ }
+ 
+ int get_NAS_ip_address(struct in_addr *server, unsigned long *nasIP, char *dev, char *mac)
+@@ -195,7 +217,20 @@
+ 	char str[MAX_LINE_SIZE];
+ 	FILE *fp = NULL;
+ 	//rv340x_802_1x_SetPortStatus(sta->aid, authorized);
+-	sprintf(str, "rtkssdk dot1x -p %d -a %d\n",sta->aid,authorized);
++
++	if (strcmp(PID_RV34X,"RV340") == 0)
++	{
++        	sprintf(str, "rtkssdk dot1x -p %d -a %d\n",sta->aid,authorized);
++	}
++   	else if (strcmp(PID_RV34X,"RV345") == 0)
++	{
++        	sprintf(str, "rtkssdk_diag -D -p %d -a %d\n",sta->aid,authorized);
++	}
++	else
++	{
++		DBGPRINT(RT_DEBUG_ERROR,"Invalid PID");
++	}
++
+ 	fp = popen(str, "r"); //system(str);
+ 	if(fp == NULL)
+ 	{
+diff -rauN a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2016-07-19 12:37:26.726289796 +0530
++++ b/src/source/rtdot1x.c	2016-07-19 14:31:46.914288977 +0530
+@@ -29,6 +29,8 @@
+ #include "radius_client.h"
+ #include "config.h"
+ 
++char PID_RV34X[10] = {0};
++
+ //#define RT2860AP_SYSTEM_PATH   "/etc/Wireless/RT2860AP/RT2860AP.dat"
+ #define NK_DEFAULT_CONFIG_FILENAME "/etc/rtapd.conf"
+ #define NK_DEFAULT_PID_FILENAME "/var/run/rtapd.pid"
+@@ -241,20 +243,45 @@
+ 	}
+ 
+ 	pBuf = &buf[0];
+-
+-	eth_type_cpu = (unsigned short *)(pBuf + RTK8367_CPUTAG_START_OFFSET);
+-	if(eth_type_cpu == NULL)
+-	{
+-		return;
+-	}
+-	if(*eth_type_cpu == ntohs(RTKSWITCH_ETH_TYPE))
++	
++	if (strcmp(PID_RV34X,"RV340") == 0)
++        {
++                eth_type_cpu = (unsigned short *)(pBuf + RTK8367_CPUTAG_START_OFFSET);
++                if(eth_type_cpu == NULL)
++                {
++                        return;
++                }
++                if(*eth_type_cpu == ntohs(RTKSWITCH_ETH_TYPE))
++                {
++                        /* Retrieve port number first */
++                        apidx = portnum = *(pBuf + RTK8367_CPUTAG_OFFSET);
++                        DBGPRINT(RT_DEBUG_TRACE, "\r\n[RV340] Packet received on switch port = %d", apidx);
++                        memmove(pBuf + RTK8367_CPUTAG_HDR_SIZE, pBuf,RTK8367_CPUTAG_START_OFFSET);
++                        pBuf = pBuf + RTK8367_CPUTAG_HDR_SIZE;
++                        len -= RTK8367_CPUTAG_HDR_SIZE;
++                }
++        }
++        else if (strcmp(PID_RV34X,"RV345") == 0)
++        {
++                eth_type_cpu = (unsigned short *)(pBuf + RV345_RTL8382_CPUTAG_START_OFFSET);
++                if(eth_type_cpu == NULL)
++                {
++                        return;
++                }
++                if(*eth_type_cpu == ntohs(RTKSWITCH_ETH_TYPE))
++                {
++                        /* Retrieve port number first */
++                        apidx = portnum = (*((pBuf + RV345_RTL8382_CPUTAG_OFFSET)) & 0x000F);
++                        DBGPRINT(RT_DEBUG_TRACE, "\r\n[RV345] Packet received on switch port = %d", apidx);
++                        memmove(pBuf + RV345_RTL8382_CPUTAG_HDR_SIZE, pBuf,RV345_RTL8382_CPUTAG_START_OFFSET);
++                        pBuf = pBuf + RV345_RTL8382_CPUTAG_HDR_SIZE;
++                        len -= RV345_RTL8382_CPUTAG_HDR_SIZE;
++                }
++        }
++	else
+ 	{
+-		/*TCK:: Retrieve port number first */
+-		apidx = portnum = *(pBuf + RTK8367_CPUTAG_OFFSET); 
+-		DBGPRINT(RT_DEBUG_TRACE, "\r\nPacket received on switch port = %d", apidx); 
+-		memmove(pBuf + RTK8367_CPUTAG_HDR_SIZE, pBuf,RTK8367_CPUTAG_START_OFFSET);
+-		pBuf = pBuf + RTK8367_CPUTAG_HDR_SIZE;
+-		len -= RTK8367_CPUTAG_HDR_SIZE;
++        	DBGPRINT(RT_DEBUG_ERROR, "Invalid PID");
++
+ 	}
+ 
+ 	rec = (priv_rec*)pBuf;
+@@ -816,26 +843,82 @@
+ 	FILE *fp = NULL;	
+ 	if (!apd)
+ 		return;
+-	
+-	//kd_doCommand("VERSION NUM_LAN", CMD_PRINT, ASH_DO_NOTHING, buf);
+-	num_lan = RV34xx_NUM_LAN_PORTS; //TCK:: Hard coding for RV340:: atoi(buf); Read product ID from boardinfo API and use appropriate value. JIRA: SBR-96
+-	
++
+ 	DBGPRINT(RT_DEBUG_TRACE, "--- enter %s ---\n", __func__);
+-	for (i = 0; i < num_lan; i++)
++	
++	/** Fetch the Product ID **/
++        get_PID_RV34X(PID_RV34X);
++        printf("PID of board is %s \n",PID_RV34X);
++
++        if (strcmp(PID_RV34X,"RV340") == 0) {
++                num_lan = 4;
++                for (i = 0; i < num_lan; i++)
++                {
++                        /* must init one time for receive EAPOL packets */
++                        sprintf(str, "rtkssdk dot1x -p %d -a 0",(i+1));
++                        if(NULL != (fp = popen(str,"r")))
++                                nk_Ap_add_sta(apd, NULL, i+1);
++                        pclose(fp);
++                        if (rv_get_portControl(i+1) == ForceAuthorized)
++                        sprintf(str, "rtkssdk dot1x -p %d -a 1",(i+1));
++                        if(NULL != (fp = popen(str,"r")));
++                        pclose(fp);
++                }
++        }
++        else if (strcmp(PID_RV34X,"RV345") == 0)
++        {
++                num_lan = 16;
++                for (i = 0; i < num_lan; i++)
++                {
++                        /* must init one time for receive EAPOL packets */
++                        sprintf(str, "rtkssdk_diag -D 1 -p %d -a 0",(i+1));
++                        if(NULL != (fp = popen(str,"r")))
++                                nk_Ap_add_sta(apd, NULL, i+1);
++                        pclose(fp);
++                        if (rv_get_portControl(i+1) == ForceAuthorized)
++                        sprintf(str, "rtkssdk_diag -D 1 -p %d -a 1",(i+1));
++                        if(NULL != (fp = popen(str,"r")));
++                        pclose(fp);
++                }
++        }
++	else
+ 	{
+-		/* must init one time for receive EAPoL packets */
+-		sprintf(str, "rtkssdk dot1x -p %d -a 0",(i+1));
+-		if(NULL != (fp = popen(str,"r")))
+-			nk_Ap_add_sta(apd, NULL, i+1);
+-		pclose(fp);
+-		if (rv_get_portControl(i+1) == ForceAuthorized)
+-		sprintf(str, "rtkssdk dot1x -p %d -a 1",(i+1));
+-		if(NULL != (fp = popen(str,"r")));
+-		pclose(fp);
++		DBGPRINT(RT_DEBUG_ERROR, " Invalid PID ");
+ 	}
++
+ 	DBGPRINT(RT_DEBUG_TRACE, "--- exit %s ---\n", __func__);
+ }
+ 
++/** Function to get the Product ID **/
++int get_PID_RV34X(char* PID)
++{
++  FILE *fp=NULL;
++  char cmd[256];
++
++  sprintf(cmd,"uci get systeminfo.sysinfo.pid | awk -F'-' '{print $1}'");
++
++  if((fp = popen(cmd,"r"))!=NULL)
++  {
++  	memset(cmd,0,256);
++    	fgets(cmd,256,fp);
++  }
++  pclose(fp);
++
++  if (strncmp(cmd,"RV340",5) == 0) 
++  {
++  	strcpy(PID,"RV340");
++        printf("RV340 board \n");
++        return 0;
++  }
++  else if (strncmp(cmd,"RV345",5) == 0) 
++  {
++       	strcpy(PID,"RV345");
++       	printf("RV345 board \n");
++       	return 0;
++  }
++  return -1;
++}
++
+ int main(int argc, char *argv[])
+ {
+ 	struct hapd_interfaces interfaces;

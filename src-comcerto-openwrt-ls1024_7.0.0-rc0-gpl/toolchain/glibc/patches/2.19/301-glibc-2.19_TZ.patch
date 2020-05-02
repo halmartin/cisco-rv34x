@@ -1,0 +1,79 @@
+--- glibc-2.19-r25243/libc/time/tzset_orig.set	2017-03-27 22:03:47.313942599 +0530
++++ glibc-2.19-r25243/libc/time/tzset.c	2017-03-27 22:06:43.661948554 +0530
+@@ -23,6 +23,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <time.h>
++#include <fcntl.h>
+ 
+ 
+ #define NOID
+@@ -45,6 +46,11 @@
+ #define	sign(x)		((x) < 0 ? -1 : 1)
+ 
+ 
++#ifndef TZNAME_MAX
++#define TZNAME_MAX _POSIX_TZNAME_MAX
++#endif
++#define TZ_BUFLEN               (2*TZNAME_MAX + 56)
++
+ 
+ /* This structure contains all the information about a
+    timezone given in the POSIX standard TZ envariable.  */
+@@ -396,6 +402,31 @@
+   update_vars ();
+ }
+ 
++
++static char * read_TZ_file(char * buf) 
++{
++       int r;
++        int fd;
++       char *p = NULL;
++
++       fd = open("/etc/TZ", 0);
++       if (fd >= 0) {
++               r = read(fd, buf, TZ_BUFLEN);
++               if (r > 0)
++                       {
++                               p = buf + r;
++                               if ((p > buf) && (p[-1] == '\n')) { /* Must end with newline */
++                                       p[-1] = 0;
++                                       p=buf;
++                               }
++                       }
++               close(fd);
++       }
++       return p;
++}
++
++
++
+ /* Interpret the TZ envariable.  */
+ static void
+ internal_function
+@@ -405,6 +436,9 @@
+ {
+   static int is_initialized;
+   const char *tz;
++  char buf[TZ_BUFLEN] = {0};
++
++
+ 
+   if (is_initialized && !always)
+     return;
+@@ -418,6 +452,14 @@
+        name for change.  We want to notice file changes if tzset() has
+        been called explicitly.  Leave TZ as NULL in this case.  */
+     tz = TZDEFAULT;
++
++
++    if (tz == NULL) {
++      /* Read TZ value from /etc/TZ which is a link to /tmp/TZ */
++      tz=read_TZ_file(buf);
++    }
++
++
+   if (tz && *tz == '\0')
+     /* User specified the empty string; use UTC explicitly.  */
+     tz = "Universal";

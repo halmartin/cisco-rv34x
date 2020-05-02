@@ -1,0 +1,82 @@
+diff -aurN accel-pptp-0.8.5-org/pppd_plugin/configure.in accel-pptp-0.8.5/pppd_plugin/configure.in
+--- accel-pptp-0.8.5-org/pppd_plugin/configure.in	2017-03-28 05:30:55.058740943 -0500
++++ accel-pptp-0.8.5/pppd_plugin/configure.in	2017-03-28 05:32:29.630745318 -0500
+@@ -17,8 +17,8 @@
+ dnl check linux headers
+ AC_MSG_CHECKING([for linux kernel herders])
+ if test -n "${KDIR}"; then
+-    if test -f ${KDIR}/include/linux/version.h; then 
+-	header=${KDIR}/include
++    if test -f ${KDIR}/user_headers/include/linux/version.h; then
++	header=${KDIR}/user_headers/include
+     else
+ 	AC_MSG_RESULT(not found)
+ 	AC_MSG_ERROR(Could not find linux kernel headers)
+@@ -34,10 +34,10 @@
+ 	AC_MSG_ERROR(Could not find linux kernel headers)
+     fi
+ fi
+-VERSION=$(cat ${header/include}Makefile | grep '^VERSION = ' | awk '{print $3}')
+-PATCHLEVEL=$(cat ${header/include}Makefile | grep '^PATCHLEVEL = ' | awk '{print $3}')
+-SUBLEVEL=$(cat ${header/include}Makefile | grep '^SUBLEVEL = ' | awk '{print $3}')
+-EXTRAVERSION=$(cat ${header/include}Makefile | grep '^EXTRAVERSION = ' | awk '{print $3}')
++VERSION=$(cat ${KDIR}/Makefile | grep '^VERSION = ' | awk '{print $3}')
++PATCHLEVEL=$(cat ${KDIR}/Makefile | grep '^PATCHLEVEL = ' | awk '{print $3}')
++SUBLEVEL=$(cat ${KDIR}/Makefile | grep '^SUBLEVEL = ' | awk '{print $3}')
++EXTRAVERSION=$(cat ${KDIR}/Makefile | grep '^EXTRAVERSION = ' | awk '{print $3}')
+ KERNELVERSION=$VERSION.$PATCHLEVEL.$SUBLEVEL$EXTRAVERSION
+ AC_MSG_RESULT(found ($KERNELVERSION at ${header/include}))
+ AC_DEFINE_UNQUOTED(KERNELVERSION,"$KERNELVERSION")
+diff -aurN accel-pptp-0.8.5-org/pptpd-1.3.3/configure.in accel-pptp-0.8.5/pptpd-1.3.3/configure.in
+--- accel-pptp-0.8.5-org/pptpd-1.3.3/configure.in	2017-03-28 05:30:55.062740943 -0500
++++ accel-pptp-0.8.5/pptpd-1.3.3/configure.in	2017-03-28 05:32:03.390744104 -0500
+@@ -173,8 +173,8 @@
+ 
+ AC_MSG_CHECKING([for linux kernel herders])
+ if test -n "${KDIR}"; then
+-	if test -f ${KDIR}/include/linux/version.h; then
+-		header=${KDIR}/include
++	if test -f ${KDIR}/user_headers/include/linux/version.h; then
++		header=${KDIR}/user_headers/include
+ 	else
+ 		AC_MSG_RESULT(not found)
+ 		AC_MSG_ERROR(Could not find linux kernel headers)
+@@ -191,10 +191,10 @@
+ 	fi
+ fi
+ 
+-VERSION=$(cat ${header/include}Makefile | grep '^VERSION = ' | awk '{print $3}')
+-PATCHLEVEL=$(cat ${header/include}Makefile | grep '^PATCHLEVEL = ' | awk '{print $3}')
+-SUBLEVEL=$(cat ${header/include}Makefile | grep '^SUBLEVEL = ' | awk '{print $3}')
+-EXTRAVERSION=$(cat ${header/include}Makefile | grep '^EXTRAVERSION = ' | awk '{print $3}')
++VERSION=$(cat ${KDIR}/Makefile | grep '^VERSION = ' | awk '{print $3}')
++PATCHLEVEL=$(cat ${KDIR}/Makefile | grep '^PATCHLEVEL = ' | awk '{print $3}')
++SUBLEVEL=$(cat ${KDIR}/Makefile | grep '^SUBLEVEL = ' | awk '{print $3}')
++EXTRAVERSION=$(cat ${KDIR}/Makefile | grep '^EXTRAVERSION = ' | awk '{print $3}')
+ KERNELVERSION=$VERSION.$PATCHLEVEL.$SUBLEVEL$EXTRAVERSION
+ AC_DEFINE_UNQUOTED(KERNELVERSION,"$KERNELVERSION")
+ 
+@@ -202,6 +202,7 @@
+ CFLAGS="${CFLAGS} -I. -I${header}"
+ AC_SUBST(kernel_headers,${header})
+ 
++if test -z "${PPPD_VERSION}"; then
+ AC_MSG_CHECKING(for pppd)
+ pppd=`which pppd 2>&1`
+ if test $? -eq 1; then
+@@ -218,10 +219,12 @@
+     AC_MSG_RESULT(not found)
+     AC_MSG_ERROR(Could not find pppd)
+ fi    
+-pppd_ver=`${pppd} --version 2>&1 | grep version | sed 's/pppd version //'`
+-AC_MSG_RESULT($pppd ($pppd_ver))
+-AC_DEFINE_UNQUOTED(PPPD_VERSION,"${pppd_ver}")
+ 
++   PPPD_VERSION=`${pppd} --version 2>&1 | grep version | sed 's/pppd version //'`
++   AC_MSG_RESULT($pppd ($PPPD_VERSION))
++fi
++
++AC_DEFINE_UNQUOTED(PPPD_VERSION,"${PPPD_VERSION}")
+ 
+ echo '==============================================================================='
+ 

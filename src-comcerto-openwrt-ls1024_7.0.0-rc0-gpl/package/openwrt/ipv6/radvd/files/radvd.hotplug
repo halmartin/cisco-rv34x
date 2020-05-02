@@ -1,0 +1,19 @@
+#!/bin/sh
+
+[ "$DEVICE" == "lo" ] && exit 0
+
+local isboot=$(uci_get_state system.core.booted)
+[ "$isboot" != "1" ] && exit 0
+
+case "$INTERFACE" in
+	*_PD|*_tun1|*_tun2)
+		case "$ACTION" in
+			ifup|ifupdate|ifdown)
+				all_PD_data=$(uci show radvd | grep prefix_pd | awk -F = '{print $2}' | sed s/"'"//g | grep $INTERFACE)
+				[ -n "$all_PD_data" ] && {
+					/etc/init.d/radvd reload &
+				}
+			;;
+		esac
+	;;
+esac

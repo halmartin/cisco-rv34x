@@ -1,0 +1,125 @@
+#!/bin/sh
+
+
+##Rest API: GET /v1/organizations/{organizationId}/networkdevices
+##This API gets list of registered network devices of an organization identified by origanizationId.
+##The API results with curl tool as below:
+##Command:
+##curl -X GET https://management.api.umbrella.com/v1/organizations/2251171/networkdevices --user 'e2ca354f65c24068afac72758669e061:a7eb4ef43e2a48229ce87add8b8e98e0'
+##Output: 
+###{"deviceId":"ab0013a9ce0770a3","deviceKey":"RV134W-0123456789ab-demo","name":"Yabuli-winter","serialNumber":"12345a","createdAt":"2017-11-22T07:32:50.000Z","originId":116055908,"organizationId":2251171},{"deviceId":"ab00579d9238fc5a","deviceKey":"4321-01aabbccddff","name":"testDev","serialNumber":"12345b","createdAt":"2018-01-11T07:05:18.000Z","originId":124575806,"organizationId":2251171},{"deviceId":"ab0081c63e28732a","deviceKey":"1234-01aabbccddef","name":"testDev1","serialNumber":"12345a","createdAt":"2018-01-11T08:31:31.000Z","originId":124578606,"organizationId":2251171}
+
+. /usr/share/libubox/jshn.sh
+
+RPC_OUTPUT=/tmp/odns_device_output
+RPC_DEBUG=/tmp/odns_debug_output
+CURL="/usr/bin/curl"
+
+#logger -t rpc-testing "Called $0 with args: $@"
+
+key=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "key") {print $(I+1)};}'`
+secret=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "secret") {print $(I+1)};}'`
+ca=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "ca") {print $(I+1)};}'`
+
+org_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "organization-id") {print $(I+1)};}'`
+
+
+#Error Codes
+ODNS_SUCCESS=0
+ODNS_FAILURE=1
+errcode=$ODNS_SUCCESS
+#ERR_RETURN="echo \"code $errcode errstr $errString\""
+
+#clear the old contents of the debug file
+echo -n "" > $RPC_DEBUG
+echo "$0: key=$key secret=$secret ca=$ca orgid=$org_id " > $RPC_DEBUG
+echo no. of argument: $# >> $RPC_DEBUG
+
+#validating the input arguments
+if [ -z $org_id ];then
+    echo "not-ok __BEGIN error-code 403 error-message \"organization-id is missing\" not-ok __END"
+    exit 0
+elif [ -z $key ] || [ -z $secret ];then
+    echo "not-ok __BEGIN error-code 403 error-message \"key or secret is missing\" not-ok __END"
+    exit 0
+fi
+
+
+#Athentication Credentials
+KEY="$key:$secret"
+URL="https://management.api.umbrella.com/v1/organizations/$org_id"
+
+read_devices ()
+{
+	isFailure=$(cat $RPC_OUTPUT | grep error)
+	isAuthFailure=$(cat $RPC_OUTPUT | grep message)
+
+	if [ -n "$isAuthFailure" ]
+	then
+		local __tmp=$(cat $RPC_OUTPUT)
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_get_var message message
+		echo "not-ok __BEGIN error-code 403 error-message \"$message\" not-ok __END"
+	elif [ -n "$isFailure" ]
+	then
+		#Failure case
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		#json_get_keys __keys
+		#echo "keys: $__keys"
+
+		json_get_var statusCode statusCode
+		json_get_var error error
+		json_get_var txId txId
+
+		echo "not-ok __BEGIN error-code $statusCode error-message \"$error\" tx-id \"$txId\" not-ok __END"
+	else
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		__tmp="{\"__devices\":$__tmp}"
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_select "__devices"
+		local Index="1"
+
+		echo "success-code 200"
+
+		while json_get_type type $Index && [ "$type" = object ]; do
+			json_select "$((Index++))"
+			#json_get_keys __keys
+			#echo $__keys
+
+		        json_get_var deviceId deviceId
+			json_get_var deviceKey deviceKey
+			json_get_var name name
+			json_get_var serialNumber serialNumber
+			json_get_var createdAt createdAt
+			json_get_var originId originId
+			json_get_var organizationId organizationId
+
+			echo "devices __BEGIN origin-id \"$originId\" device-id \"$deviceId\" device-key \"$deviceKey\" name \"$name\" serial-number \"$serialNumber\" created-at \"$createdAt\" organization-id \"$organizationId\" devices  __END"
+
+			json_select ".."
+		done
+		json_select ".."
+	fi
+}
+
+#Gets the list of registered devices of an organization identified by $org_id.
+$CURL $URL/networkdevices -X GET --user $KEY -k 2>/dev/null > $RPC_OUTPUT
+[ "$?" != "0" ] && {
+	echo "not-ok __BEGIN error-code 1 error-message \"Network Error\" not-ok __END"
+	exit 0
+}
+
+#calling custom function
+read_devices
+
+exit 0

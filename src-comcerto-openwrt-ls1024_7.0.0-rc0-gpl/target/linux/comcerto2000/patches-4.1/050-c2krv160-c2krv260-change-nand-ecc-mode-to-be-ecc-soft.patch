@@ -1,0 +1,13 @@
+# 2017-04-12: harry.lin <harry.lin@deltaww.com>
+# Change ecc mode from NAND_ECC_HW_SYNDROME to be NAND_ECC_SOFT
+--- linux-4.1.8/drivers/mtd/nand/comcerto_nand.c.org	2017-02-14 14:57:38.127547485 +0800
++++ linux-4.1.8/drivers/mtd/nand/comcerto_nand.c	2017-02-14 14:57:51.417547128 +0800
+@@ -665,7 +665,7 @@
+ 	/* 20 us command delay time */
+ 	nand_device->chip_delay = 20;
+ 
+-	nand_device->ecc.mode = NAND_ECC_HW_SYNDROME;
++	nand_device->ecc.mode = NAND_ECC_SOFT;
+ 
+ #if defined(CONFIG_C2K_ASIC) && defined(CONFIG_NAND_TYPE_SLC)
+ 	nand_device->options = NAND_BUSWIDTH_16;

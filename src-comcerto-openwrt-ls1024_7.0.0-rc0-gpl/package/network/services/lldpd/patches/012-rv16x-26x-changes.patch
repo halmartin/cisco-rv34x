@@ -1,0 +1,130 @@
+diff -ruaN a/src/lldp.c b/src/lldp.c
+--- a/src/lldp.c	2017-05-16 12:38:01.111125515 +0530
++++ b/src/lldp.c	2017-05-16 16:41:11.463123774 +0530
+@@ -35,8 +35,8 @@
+ #define PORTOFFSET 19
+ #define CPUTAGLEN 8
+ 
+-#define RV345_CPUTAGLEN 4
+-#define RV345_PORTOFFSET 15
++#define BCM_CPUTAGLEN 4
++#define BCM_PORTOFFSET 15
+ 
+ #define CPUTAGPROTOCOL 0x8899
+ 
+@@ -76,8 +76,6 @@
+ lldp_send(struct lldpd *global,
+ 	  struct lldpd_hardware *hardware)
+ {
+-	printf(" PP ---- %s called\n", __FUNCTION__);
+-	LLOG_INFO("PP LLDP packet sending \n");
+ 	struct lldpd_port *port;
+ 	struct lldpd_chassis *chassis;
+ 	struct lldpd_frame *frame;
+@@ -166,7 +164,48 @@
+ 		    LLOG_INFO("For loop PP LLDP packet setting %d cputag[3]=%d\n", j,cputag[3]);
+             }
+             
+-        }    
++        }
++	else if(strcmp(PID_RV34X,"RV160") == 0)
++	{
++	    cputag[0]=0x20;
++            cputag[1]=0x0;
++            cputag[2]=0x0;
++            cputag[3]=0x0;
++
++            for(j=1;j<=4;j++)
++            {
++                sprintf(cmd,"uci get lldpd.config.lan%d",j);
++                fp=popen(cmd,"r");
++                if(fgets(var, sizeof(var), fp) == NULL)
++                {
++                    printf("fgets failed\n");
++                    pclose(fp);
++                    return -1;
++                }
++                pclose(fp);
++                    switch(j)
++                    {
++                        case 1 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[3]=(cputag[3] | (0x1 << (4-j) ));
++                        break;
++                        case 2 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[3]=(cputag[3] | (0x1 << (4-j) ));
++                        break;
++                        case 3 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[3]=(cputag[3] | (0x1 << (4-j) ));
++                        break;
++                        case 4 :
++                            if(strcmp(var,"1") == 0) 
++                                cputag[3]=(cputag[3] | (0x1 << (4-j) ));
++                        break;
++                    }
++		    LLOG_INFO("PP LLDP packet setting %d cputag[3]=%d\n", j,cputag[3]);
++            }
++
++	}
+     }
+     if ((packet = (u_int8_t*)malloc(length)) == NULL)
+ 		return ENOMEM;
+@@ -176,15 +215,15 @@
+ 	/* Ethernet header */
+    if(strcmp(port->p_descr,LAN_INTERFACE)==0)
+    {
+-	if (strcmp(PID_RV34X,"RV260") == 0)
++	if ((strcmp(PID_RV34X,"RV260") == 0) || (strcmp(PID_RV34X,"RV160") == 0))
+ 	{ 
+-		LLOG_INFO("PP LLDP send 260 = %s \n", port->p_descr);
+-		LLOG_INFO("LLDP SEND RV260");
++		LLOG_INFO("PP LLDP send  = %s \n", port->p_descr);
++		LLOG_INFO("LLDP SEND ");
+ 		if (!(
+ 		      /* LLDP multicast address */
+ 		      POKE_BYTES(mcastaddr, sizeof(mcastaddr)) &&
+ 		      /* Source MAC address */
+-		      POKE_BYTES(&hardware->h_lladdr, sizeof(hardware->h_lladdr)) && POKE_BYTES(cputag, RV345_CPUTAGLEN) && 
++		      POKE_BYTES(&hardware->h_lladdr, sizeof(hardware->h_lladdr)) && POKE_BYTES(cputag, BCM_CPUTAGLEN) && 
+ 		      /* LLDP frame */
+ 		      POKE_UINT16(ETHERTYPE_LLDP)))
+ 			goto toobig;
+@@ -577,9 +616,6 @@
+     struct lldpd_hardware *hardware,
+     struct lldpd_chassis **newchassis, struct lldpd_port **newport)
+ {
+-	printf(" PP ---- %s called\n", __FUNCTION__);
+-	LLOG_INFO(" ++++ PP ---- %s called\n", __FUNCTION__);
+-
+ 	struct lldpd_chassis *chassis = NULL;
+ 	struct lldpd_port *port = NULL;
+ 	const char lldpaddr[] = LLDP_MULTICAST_ADDR;
+@@ -629,20 +665,19 @@
+     /* Decapsulate VLAN frames */
+  //   if (((struct ethhdr*)frame)->h_proto == htons(CPUTAGPROTOCOL)) {
+ 
+-        if (strcmp(PID_RV34X,"RV260") == 0)
++        if ((strcmp(PID_RV34X,"RV260") == 0) || (strcmp(PID_RV34X,"RV160") == 0))
+         {
+-		portno=frame[RV345_PORTOFFSET];
+-		LLOG_INFO("RV260 LLDP port [%d]", portno);
+-		memmove(frame+RV345_CPUTAGLEN,frame,2*ETH_ALEN);
+-		frame=frame+RV345_CPUTAGLEN;
+-		s=s-RV345_CPUTAGLEN;
++		portno=frame[BCM_PORTOFFSET];
++		LLOG_INFO("LLDP port [%d]", portno);
++		memmove(frame+BCM_CPUTAGLEN,frame,2*ETH_ALEN);
++		frame=frame+BCM_CPUTAGLEN;
++		s=s-BCM_CPUTAGLEN;
+         }
+         else
+         {
+                 LLOG_INFO(" ---- Invalid PID -----");
+ 
+         }
+-//Saturday
+ #if 0        
+         sprintf(cmd,"uci get lldpd.config.lan%d",portno);
+         fp=popen(cmd,"r");

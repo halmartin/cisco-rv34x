@@ -1,0 +1,139 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add support update_spi command.
+--- barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig.org	2017-01-19 15:28:29.998378050 +0800
++++ barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	2017-01-19 15:30:33.498378093 +0800
+@@ -196,6 +196,7 @@
+ CONFIG_CMD_UMOUNT=y
+ CONFIG_CMD_NAND=y
+ CONFIG_CMD_NOR=y
++CONFIG_CMD_UPDATE_SPI=y
+ CONFIG_CMD_COPY=y
+ 
+ #
+--- barebox-2011.06.0/commands/Makefile.org	2017-01-19 15:28:39.338378201 +0800
++++ barebox-2011.06.0/commands/Makefile	2017-01-19 15:30:33.498378093 +0800
+@@ -60,6 +60,7 @@
+ obj-$(CONFIG_CMD_USB)		+= usb.o
+ obj-$(CONFIG_CMD_DIAGS)		+= diags.o
+ obj-$(CONFIG_CMD_NOR)		+= nor.o
++obj-$(CONFIG_CMD_UPDATE_SPI)+= update_spi.o
+ obj-$(CONFIG_CMD_GEMAC_STATS)	+= gemac_stat.o
+ obj-$(CONFIG_CMD_PFE_COMMANDS)	+= pfe_commands.o
+ obj-$(CONFIG_CMD_PFE_STATS)	+= pfe_stat.o
+--- barebox-2011.06.0/commands/Kconfig.org	2017-01-19 15:27:55.105252873 +0800
++++ barebox-2011.06.0/commands/Kconfig	2017-01-19 15:30:33.498378093 +0800
+@@ -162,6 +162,12 @@
+ 	default y
+ 	prompt "nor"
+ 
++config CMD_UPDATE_SPI
++	tristate
++	depends on !COMCERTO_ULOADER && !COMCERTO_DIAG
++	default n
++	prompt "update_spi"
++
+ config CMD_COPY
+ 	tristate
+ 	default y
+--- barebox-2011.06.0/drivers/spi/c2k_spi_flash.c.org	2017-01-19 15:27:32.498377993 +0800
++++ barebox-2011.06.0/drivers/spi/c2k_spi_flash.c	2017-01-19 15:36:32.515252084 +0800
+@@ -311,6 +311,39 @@
+ 
+ 	return ret;
+ }
++int spi_copy_write(char *src_flash, ulong src, ulong offset, ulong count)
++{
++	struct cdev 	*cdev;
++	int		err = 0;
++
++	cdev = cdev_by_name(src_flash);
++	if (!cdev)
++	{
++		printf("spi flash <%s> not found.\n", src_flash);
++		return -1;
++	}
++
++	printf("Erasing ...\n");
++	err = cdev->ops->erase(cdev, count, offset);
++	if(err < 0)
++	{
++		printf("erase spi flash failed : <%d>\n", err);
++		return -1;
++	}
++
++	printf("Writing ...\n");
++	err = cdev->ops->write(cdev, (char *)src, count, offset, 0);
++	if(err < 0)
++	{
++		printf("write spi flash failed : <%d>\n", err);
++		return -1;
++	}
++
++	printf("Done...\n");
++
++	return err;
++}
++EXPORT_SYMBOL(spi_copy_write);
+ #endif /* endif for ifndef CONFIG_COMCERTO_ULOADER */
+ 
+ static int read_bytes_page_addr(struct spi_device *spi,
+--- barebox-2011.06.0/commands/update_spi.c.org	1970-01-01 07:00:00.000000000 +0700
++++ barebox-2011.06.0/commands/update_spi.c	2017-01-19 15:31:15.948378017 +0800
+@@ -0,0 +1,57 @@
++/*
++ * test_spi.c
++ *
++ */
++
++#include <diags.h>
++#include <common.h>
++#include <command.h>
++#include <mach/comcerto_spi.h>
++
++#ifndef CONFIG_COMCERTO_ULOADER
++extern int spi_copy_write(char *src_flash, ulong src, ulong offset, ulong count);
++#endif
++
++static int do_update_spi(struct command *cmdtp, int argc, char *argv[])
++{
++        ulong   src, offset, count;
++
++        if (argc != 4) {
++                printf ("Usage:\n%s\n", cmdtp->usage);
++                return 1;
++        }
++
++	printk ("Updating SPI-Flash...\n");
++
++        src = simple_strtoul(argv[1], NULL, 16);
++
++        offset = simple_strtoul(argv[2], NULL, 16);
++
++        count = simple_strtoul(argv[3], NULL, 16);
++
++        if (count == 0) {
++                puts ("Zero length ???\n");
++                return -1;
++        }
++
++#ifndef CONFIG_COMCERTO_ULOADER
++	if(spi_copy_write((char *)SPI_FLASH_BAREBOX_DEV_NAME, src, offset, count) < 0)
++	{
++		printf("ERROR: NOR Update FAIL !!\n");
++		return -1;
++	}
++#endif
++
++	return 0;
++}
++
++BAREBOX_CMD_HELP_START(update_spi)
++BAREBOX_CMD_HELP_USAGE("update_spi\n")
++BAREBOX_CMD_HELP_SHORT("Update SPI flash.\n")
++BAREBOX_CMD_HELP_END
++
++BAREBOX_CMD_START(update_spi)
++        .cmd            = do_update_spi,
++        .usage          = "update_spi <src> <off> <size>",
++	BAREBOX_CMD_HELP(cmd_update_spi_help)
++BAREBOX_CMD_END

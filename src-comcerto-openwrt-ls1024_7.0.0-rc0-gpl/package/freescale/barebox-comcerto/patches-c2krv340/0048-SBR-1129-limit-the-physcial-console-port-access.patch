@@ -1,0 +1,114 @@
+From 264a0b94c5c63ed94d2fb79f63e537acb20140cb Mon Sep 17 00:00:00 2001
+From: user <abdul.moiz@nxp.com>
+Date: Mon, 18 Jul 2016 14:02:46 +0530
+Subject: [PATCH 48/60] SBR-1129 limit the physcial console port access
+
+Signed-off-by: user <abdul.moiz@nxp.com>
+---
+ arch/arm/boards/comcerto-rv340/env/bin/init | 34 ++++++-----------------------
+ arch/arm/boards/comcerto-rv340/env/config   |  2 +-
+ commands/check_reset.c                      | 25 +++++++++++++++------
+ 3 files changed, 26 insertions(+), 35 deletions(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/init b/arch/arm/boards/comcerto-rv340/env/bin/init
+index f8932ff..ea7e9ac 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/init
++++ b/arch/arm/boards/comcerto-rv340/env/bin/init
+@@ -36,37 +36,17 @@ if [ -f /env/bin/init_board ]; then
+ 	/env/bin/init_board
+ fi
+ 
+-# Parse Reset Key Press
+-chkreset
+-if [ $? -eq 0 ]; then
+-  val_gpio_reset="$val_gpio_reset"
+-  if [ "X$val_gpio_reset" = "Xclear" ]; then
+-    timeout -a $autoboot_timeout
+-    chkreset
+-    if [ $? -eq 0 ]; then
+-      val_gpio_reset="$val_gpio_reset"
+-      if [ "X$val_gpio_reset" = "Xclear" ]; then
+-        gpio_direction_output $GPIO_LED_DIAG $ON
+-        gpio_set_value $GPIO_LED_DIAG $ON
+-        . /env/bin/_update_help
+-        exit
+-      fi
+-    fi
+-  fi
+-fi
+-
+ #POWER_LED OFF
+ gpio_direction_output $GPIO_LED_POWER $ON
+ gpio_set_value $GPIO_LED_POWER $OFF
+ 
+-echo
+-echo -n "Hit any key to stop autoboot: "
+-timeout -a $autoboot_timeout
+-if [ $? != 0 ]; then
+-  gpio_direction_output $GPIO_LED_DIAG $ON
+-  gpio_set_value $GPIO_LED_DIAG $ON
+-  . /env/bin/_update_help
+-  exit
++# Parse Reset Key Press
++chkreset
++if [ $? -ge 100 ]; then
++	gpio_direction_output $GPIO_LED_DIAG $ON
++	gpio_set_value $GPIO_LED_DIAG $ON
++        . /env/bin/_update_help
++        exit
+ fi
+ 
+ boot
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index 658f616..94dcbc0 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -68,4 +68,4 @@ loglevel=4
+ 
+ pci_data="pcie0_gen1_only=yes pcie1_gen1_only=no  pcie_external_clk=yes"
+ 
+-bootargs="console=ttyS0,115200n8, loglevel=$loglevel, init=/etc/preinit"
++bootargs="loglevel=$loglevel, init=/etc/preinit"
+diff --git a/commands/check_reset.c b/commands/check_reset.c
+index f3dafaa..c96f903 100644
+--- a/commands/check_reset.c
++++ b/commands/check_reset.c
+@@ -43,17 +43,28 @@ static int do_chkreset(struct command *cmdtp, int argc, char *argv[])
+ {
+   int value = 0;
+   const int gpio_reset = 4;
++  int reset_count = 0;
+ 
+   gpio_direction_input(gpio_reset);
+-  value = gpio_get_value(gpio_reset);
+-  if(value < 0)
++
++  while(1)
+   {
+-    printf("GPIO  failed returned = %d\n", value);
+-    return COMMAND_ERROR;
++	if(gpio_get_value(gpio_reset)==0)
++		reset_count++;
++	else
++	{
++		reset_count=0;
++		break;
++	}
++
++	mdelay(100);
++	
++	if(reset_count >= 100)
++		break;
++
+   }
+-  setenv("val_gpio_reset", value == 0 ? "clear" : "set");
+-  printf("GPIO # %d value = %d\n", gpio_reset, value);
+-  return COMMAND_SUCCESS;
++
++  return reset_count;
+ }
+ 
+ static const __maybe_unused char cmd_chkreset_help[] =
+-- 
+2.7.4
+

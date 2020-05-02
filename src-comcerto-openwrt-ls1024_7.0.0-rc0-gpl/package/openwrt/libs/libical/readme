@@ -1,0 +1,7 @@
+SOURCE:https://github.com/openwrt/packages.git
+commit f28b1c33fdb18c322d3bfb03e2bff954d515099e
+Merge: 4d4f2cb 69e28f9
+Author: Hannu Nyman <hannu.nyman@iki.fi>
+Date:   Tue Sep 13 22:35:27 2016 +0300
+
+    Merge pull request #3159 from commodo/python-setuptools

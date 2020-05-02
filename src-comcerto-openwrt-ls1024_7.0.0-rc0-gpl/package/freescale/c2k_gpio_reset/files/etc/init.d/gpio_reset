@@ -1,0 +1,15 @@
+#!/bin/sh /etc/rc.common
+# 2018-01-04: Ganesh Reddy <ganesh.reddy@nxp.com>
+# Add c2k_gpio_reset module support.
+# Copyright (C) 2008 OpenWrt.org
+
+START=10
+
+start() {
+        insmod c2krv340_gpio_reset
+}
+
+stop(){
+        rmmod c2krv340_gpio_reset
+}
+

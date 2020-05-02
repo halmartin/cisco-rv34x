@@ -1,0 +1,22 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions/network.sh
+. /lib/netifd/netifd-proto.sh
+. /lib/config/uci.sh
+
+
+reload() {
+
+	act_int=""
+        act_int=$(cat /tmp/networkconfig | grep -e "-network.wan[1-2]p\|-network.wan[1-2]6p")
+        [ -n "$act_int" ] && {
+                act_int=$(echo $act_int | awk -F . '{print $2}')
+                noppp=$(uci show network | grep -w "$act_int")
+                [ -z "$noppp" ] && {
+                        act_int=$(echo $act_int | sed s/p//g)
+                        #logger -t testing "############for the purpose of sync up. I am sleeping for 4 sec for interface "ifup :$act_int" in:netifd-sync"
+                        sleep 4
+                        ifup $act_int
+                }
+        }
+}

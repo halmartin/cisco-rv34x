@@ -1,0 +1,91 @@
+From 449e8bf0ad4b5ee2e3650e02f15f37189896648f Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy K <ganeshreddy@freescale.com>
+Date: Mon, 28 Mar 2016 03:11:01 +0530
+Subject: [PATCH 068/100] SBR-1568 linux:001_pcie_mode_sep_control.patch
+ chanegs
+
+Signed-off-by: Ganesh Reddy K <ganeshreddy@freescale.com>
+---
+ arch/arm/mach-comcerto/pcie-c2000.c | 38 +++++++++++++++++++++++++++++--------
+ 1 file changed, 30 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-comcerto/pcie-c2000.c b/arch/arm/mach-comcerto/pcie-c2000.c
+index 1172bec..8b92cb9 100755
+--- a/arch/arm/mach-comcerto/pcie-c2000.c
++++ b/arch/arm/mach-comcerto/pcie-c2000.c
+@@ -66,15 +66,27 @@ static int __init get_pcie_clk_mode(char *str)
+ __setup("pcie_external_clk=", get_pcie_clk_mode);
+ 
+ int pcie_gen1_only = 0;
+-static int __init get_pcie_gen_mode(char *str)
++int pcie0_gen1_only = 0;
++static int __init get_pcie0_gen_mode(char *str)
+ {
+         if (!strcmp(str, "yes"))
+-                pcie_gen1_only = 1;
++                pcie0_gen1_only = 1;
+ 
+         return 1;
+ }
+ 
+-__setup("pcie_gen1_only=", get_pcie_gen_mode);
++__setup("pcie0_gen1_only=", get_pcie0_gen_mode);
++
++int pcie1_gen1_only = 0;
++static int __init get_pcie1_gen_mode(char *str)
++{
++        if (!strcmp(str, "yes"))
++                pcie1_gen1_only = 1;
++
++        return 1;
++}
++
++__setup("pcie1_gen1_only=", get_pcie1_gen_mode);
+ 
+ 
+ /* DWC PCIEe configuration register offsets on APB */
+@@ -1123,6 +1135,11 @@ static void comcerto_pcie_rc_init(struct pcie_port *pp)
+ 	val |= 0x00F1F100;
+ 	comcerto_dbi_write_reg(pp, PCIE_AFL0L1_REG, 4, val);
+ 
++	pcie_gen1_only = 0;
++
++	if ( ((pp->port==0)&&pcie0_gen1_only) || ((pp->port==1)&&pcie1_gen1_only) )
++		pcie_gen1_only=1;
++
+ 	if(pcie_gen1_only)
+ 	{
+ 		comcerto_dbi_write_reg(pp, PCIE_LCNT2_REG, 4, 0x1);
+@@ -1346,6 +1363,11 @@ static int comcerto_pcie_device_reset_exit(struct pcie_port *pp)
+ 	val |= 0x00F1F100;
+ 	comcerto_dbi_write_reg(pp, PCIE_AFL0L1_REG, 4, val);
+ 
++	pcie_gen1_only = 0;
++
++        if ( ((pp->port==0)&&pcie0_gen1_only) || ((pp->port==1)&&pcie1_gen1_only) )
++                pcie_gen1_only=1;
++
+ 	if(pcie_gen1_only)
+ 	{
+ 		comcerto_dbi_write_reg(pp, PCIE_LCNT2_REG, 4, 0x1);
+@@ -1357,12 +1379,12 @@ static int comcerto_pcie_device_reset_exit(struct pcie_port *pp)
+ 		val &= ~(0xFF);
+ 		val |= 0xF1;
+ 		comcerto_dbi_write_reg(pp, PCIE_G2CTRL_REG, 4, val);
+-	}
+ 
+-	// instruct pcie to switch to gen2 after init
+-	comcerto_dbi_read_reg(pp, PCIE_G2CTRL_REG, 4, &val);
+-	val |= (1 << 17);
+-	comcerto_dbi_write_reg(pp, PCIE_G2CTRL_REG, 4, val);
++		// instruct pcie to switch to gen2 after init
++		comcerto_dbi_read_reg(pp, PCIE_G2CTRL_REG, 4, &val);
++		val |= (1 << 17);
++		comcerto_dbi_write_reg(pp, PCIE_G2CTRL_REG, 4, val);
++	}
+ 
+ 	/*setup iATU for outbound translation */
+ 	PCIE_SETUP_iATU_OB_ENTRY( pp, iATU_ENTRY_MEM, iATU_GET_MEM_BASE(pp->remote_mem_baseaddr),
+-- 
+1.9.1
+

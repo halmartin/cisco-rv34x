@@ -1,0 +1,84 @@
+#!/bin/sh
+
+target=$2
+UTILITY_NAME="/tmp/utility-dnslookup"
+data_sent=1
+index=1
+
+# Get the proper nameserver
+nameserver=`cat /tmp/resolv.conf.auto | grep "nameserver" | grep -v "127.0.0.1" | head -n1`
+if [ -n "$nameserver" ];then
+	nameserver=`echo $nameserver | cut -d " " -f 2`
+else
+	nameserver="127.0.0.1"
+fi
+
+nslookup $target $nameserver &> $UTILITY_NAME
+errcode=$?
+
+if [ "$errcode" -eq 0 ];then
+	sed -i "2d" $UTILITY_NAME
+	sed -i "s/  */ /g" $UTILITY_NAME
+
+	Server=`cat $UTILITY_NAME | grep Server: | awk -F ' ' '{print $2}'`
+#	echo "target $nameserver server $Server"
+	
+	while read line 
+	do
+		outvalue=
+		value=`echo $line | grep Address`
+		if [ -n "$value" ];then
+			Type="A"
+			value=`echo $line | awk -F ' ' '{print $3}'`
+			case $value in
+				*:*)
+					Type="AAAA"
+				;;
+			esac
+			outvalue=`echo $line | awk -F ' ' '{print $4}'`
+			if [ -n "$outvalue" ]; then
+				if [ "$index" -eq "1" ]; then
+					echo "target $nameserver server $Server"
+				fi
+				data_sent=0
+				echo "responses __BEGIN name \"$outvalue\" type $Type value \"$value\" responses __END"
+				index=$((index+1))
+			else
+				data_sent=0
+				if [ "$index" -eq "1" ]; then
+					echo "target $nameserver server $Server"
+				fi
+				echo "responses __BEGIN name \"$target \" type $Type value \"$value\" responses __END"
+				index=$((index+1))
+			fi
+		else
+			value=`echo $line | grep "Name ="`
+			if [ -n "$value" ];then
+				Type="A"
+				value=`echo $line | awk -F ' ' '{print $1}'`
+				case $value in
+					*:*)
+						Type="AAAA"
+					;;
+				esac
+				outvalue=`echo $line | awk -F ' ' '{print $4}'`
+				if [ -n "$outvalue" ]; then
+					data_sent=0
+					if [ "$index" -eq "1" ]; then
+						echo "target $nameserver server $Server"
+					fi
+					echo "responses __BEGIN name \"$outvalue \" type $Type value \"$target\" responses __END"
+					index=$((index+1))
+				fi
+			fi
+		fi
+	done < $UTILITY_NAME
+else
+	cat $UTILITY_NAME
+fi
+
+if [ "$data_sent" -eq "0" ]; then
+	exit 0
+else
+	exit 1
+fi

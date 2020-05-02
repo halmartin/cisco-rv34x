@@ -1,0 +1,4080 @@
+#!/bin/sh /etc/rc.common
+
+###########################################################################
+# *  * Copyright 2015, Freescale Semiconductor, Inc. All rights reserved. #
+###########################################################################
+
+###########################################################################
+#file: strongswan.init                                                    #
+#This script is strongswan's init script.				  #
+#									  #
+###########################################################################
+
+CONFIGFILE="/tmp/etc/ipsec.conf"
+SECRETSFILE="/tmp/etc/ipsec.secrets"
+UCIPATH="/tmp/etc/config"
+TEMPUCIPATH="/tmp/.uci"
+EZVPNFILE="/etc/cisco_ezvpn_attr"
+# certificate path and key path can be changed as default path of  certificate module.
+certificate_path="/etc/ssl/certs/"
+private_key_path="/etc/ssl/private/"
+tmp_ca_path="/tmp/etc/ipsec.d/cacerts"
+CONFIGLOCKFILE="/tmp/.strongswanScriptLock"
+
+DEFAULT_PROFILE="prof_Default"
+DEFAULT_IKELIFETIME="28800s"
+DEFAULT_IPSECLIFETIME="3600s"
+
+DEFAUT_DPDDELAY="40"
+DEFAULT_DPDTIMEOUT="120"
+DEFAULT_DPDACTION="clear"
+
+START=90
+STOP=10
+
+IP_RULE_PREFIX_START=420
+IP_RULE_PREFIX_CURRENT=420
+
+IPGROUP_CONFIG="ipgroup"
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+extra_help() {
+	cat <<EOF
+	exec_ipsec		To bringup and bringdown tunnels
+	hotplug <interface>	Handle an hotplug event
+EOF
+}
+
+EXTRA_COMMANDS="exec_ipsec hotplug"
+EXTRA_HELP="$(extra_help)"
+
+ru_check=`uci get systeminfo.sysinfo.region 2> /dev/null`
+
+scriptSigHandler() {
+	logger -t VPN-cfg local0.err "Signal received for strongswan script. Signal received:$@"
+	#To be on safe side, we release lock.
+	lock -u $CONFIGLOCKFILE
+	exit 0
+}
+
+trap scriptSigHandler SIGINT SIGHUP SIGTERM SIGSEGV SIGQUIT
+
+xappend() {
+	local value="$1"
+	echo "$value" >> $CONFIGFILE    #${name#pattern} Remove(shortest)front-anchored pattern
+}
+
+xappend_multi() {
+	echo -e "$1" >> $CONFIGFILE
+}
+
+append_bool() {
+	local section="$1"
+	local option="$2"
+	local value="$3"
+	local _loctmp
+	config_get_bool _loctmp "$section" "$option" 0
+	[ $_loctmp -gt 0 ] && xappend "$value"
+}
+
+append_parm() {
+	local section="$1"
+	local option="$2"
+	local switch="$3"
+	local _loctmp
+	config_get _loctmp "$section" "$option"
+	[ -z "$_loctmp" ] && return 0
+	xappend "$switch=$_loctmp"
+}
+
+append_conn() {
+	local section="$1"
+	local option="$2"
+	local switch="$3"
+	local _loctmp
+	config_get _loctmp "$section" "$option"
+	[ -z "$_loctmp" ] && return 0
+	xappend "$switch $_loctmp"
+}
+
+config_setup(){
+#"config setup" section in strongswan.
+	xappend_multi "config setup\n\tcharondebug=\"chd 2,knl 1,ike 2,cfg 1\"\n\tstrictcrlpolicy=no\n" #extra line feed
+}
+
+config_default(){
+#"config %default" section in strongswan
+	xappend_multi "conn %default\n\tauto=route"
+	xappend "	ike=3des-md5-modp1024,3des-md5-modp1536,3des-sha1-modp1024,3des-sha1-modp1536,3des-sha256-modp1024,3des-sha256-modp1536,aes128-md5-modp1024,aes128-md5-modp1536,aes128-sha1-modp1024,aes128-sha1-modp1536,aes128-sha256-modp1024,aes128-sha256-modp1536,aes192-md5-modp1024,aes192-md5-modp1536,aes192-sha1-modp1024,aes192-sha1-modp1536,aes192-sha256-modp1024,aes192-sha256-modp1536,aes256-md5-modp1024,aes256-md5-modp1536,aes256-sha1-modp1024,aes256-sha1-modp1536,aes256-sha256-modp1024,aes256-sha256-modp1536!"
+	xappend "	esp=aes128-md5-modp1024,aes128-md5-modp1536,aes128-sha1-modp1024,aes128-sha1-modp1536,aes128-sha256-modp1024,aes128-sha256-modp1536,aes192-md5-modp1024,aes192-md5-modp1536,aes192-sha1-modp1024,aes192-sha1-modp1536,aes192-sha256-modp1024,aes192-sha256-modp1536,aes256-md5-modp1024,aes256-md5-modp1536,aes256-sha1-modp1024,aes256-sha1-modp1536,aes256-sha256-modp1024,aes256-sha256-modp1536,3des-md5-modp1024,3des-md5-modp1536,3des-sha1-modp1024,3des-sha1-modp1536,3des-sha256-modp1024,3des-sha256-modp1536,aes128-md5,aes128-sha1,aes128-sha256,aes192-md5,aes192-sha1,aes192-sha256,aes256-md5,aes256-sha1,aes256-sha256,3des-md5,3des-sha1,3des-sha256!"
+	xappend_multi "\tleftfirewall=yes\n\tlefthostaccess=yes\n\tkeyingtries=1\n\tmobike=no\n\tfragmentation=yes\n\tleftsendcert=always\n" #extra line feed
+}
+
+rekey_margin()
+{
+	#rekey_margin LocalVariable Lifetime
+	##rekey_margin rekeymargin  120s
+
+	local __confLifetime__ __finalRekeyMargin__
+
+	__confLifetime__=$2
+	__confLifetime__=`echo $__confLifetime__ | sed s/s//`
+	__finalRekeyMargin__=`expr $__confLifetime__ \/ 20`
+	__finalRekeyMargin__="$__finalRekeyMargin__"s
+
+	eval "export -- \"$1=\$__finalRekeyMargin__\""
+}
+
+createLink_CAChain()
+{
+	__ca_name__=$1
+	__tun_name__=$2
+
+	local ca_issuer_hash ca_subject_hash ca_name
+
+	ca_name=$__ca_name__
+
+	while : ; do
+	#{
+		ln -snf $certificate_path$ca_name $tmp_ca_path/$__tun_name__-$ca_name
+
+		ca_issuer_hash=`openssl x509 -noout -issuer_hash -in $certificate_path$ca_name`
+		ca_subject_hash=`openssl x509 -noout -subject_hash -in $certificate_path$ca_name`
+
+		if [ "$ca_issuer_hash" = "$ca_subject_hash" ]
+		then
+			break
+		else
+			tmp_ca_name=`uci show certificate|grep $ca_issuer_hash|cut -d '.' -f 2|head -n 1`
+			if [ "$tmp_ca_name" = "" ]
+			then
+				logger -t VPN-cfg local0.err "Unable to find CA certificate for $ca_name"
+				break
+			fi
+			ca_name="$tmp_ca_name.pem"
+		fi
+	#}
+	done
+}
+
+#Find the CA certificate of the input certificate and craete a link for it in $tmp_ca_path
+updateCertUsage_ipsec()
+{
+	local __certname__ __tunnel_type_name__
+
+	__certname__=$1
+	__tunnel_type_name__=$2
+
+	updateCertUsage add $__certname__ $__tunnel_type_name__
+
+	#Removing "SiteToSite-" from "SiteToSite-$tunnel_name"
+	__tunnel_name__=${__tunnel_type_name__#*-}
+
+	#create CA link in /tmp/etc/ipsec.d/cacerts
+	local CAFile issuer_hash
+	issuer_hash=`openssl x509 -in $certificate_path$__certname__ -noout -issuer_hash`
+	CAFile_name=`uci show certificate|grep $issuer_hash|cut -d '.' -f 2|head -n 1`
+	CAFile="$CAFile_name.pem"
+	[ -n "$CAFile" ] && {
+		#CA found, create link
+		createLink_CAChain $CAFile $__tunnel_name__
+#		[ -h $tmp_ca_path/$CAFile ] || {
+#			ln -sn $certificate_path$CAFile $tmp_ca_path/$CAFile
+#		}
+	} || {
+		#CA file missing
+		logger -t VPN-cfg local0.err "CA file missing for $__certname__"
+
+	}
+}
+
+#Create a ca certificate link for remote CA in $tmp_ca_path
+linkRemoteCA()
+{
+	local __remote_ca__
+	__remote_ca__=$1
+	__tunnel_name__=$2
+
+	createLink_CAChain $__remote_ca__ $__tunnel_name__
+#	[ -h $tmp_ca_path/$__remote_ca__ ] || {
+#		ln -sn $certificate_path$__remote_ca__ $tmp_ca_path/$__remote_ca__
+#	}
+}
+
+hotplug()
+{ #<interface>
+
+	if [ "$ru_check" = "RU" ]; then
+		exit 0
+	fi
+
+	local INTERFACENAME=$1
+	local device=$2
+
+	local allSite2Site=$(uci show strongswan | grep -e "=site2site" | cut -f 2 -d . | cut -f 1 -d =)
+	local site2siteCount=$(echo $allSite2Site | wc -l)
+	local allclient2site=$(uci show strongswan | grep -e "=client2site" | cut -f 2 -d . | cut -f 1 -d =)
+	local client2siteCount=$(echo $allclient2site | wc -l)
+	local wanIP
+	#network_get_ipaddr wanIP $INTERFACE
+	network_get_wanip_cached wanIP $INTERFACENAME
+
+	#echo "Total $site2siteCount site2site records...!"
+	#echo "Total $client2siteCount client2site records...!"
+	if [ $site2siteCount -gt 0 ]
+	then
+	#{
+		#local allSite2Site=$(uci show strongswan | grep -e "=site2site" | cut -f 2 -d . | cut -f 1 -d =)
+		local connForReload=""
+		local tunnel_name
+		for tunnel_name in $allSite2Site; do
+			local profile=`uci_get strongswan "$tunnel_name" profile`
+			local keying_mode=`uci_get strongswan "$profile" keying_mode`
+			if [ $keying_mode = 'auto' ]
+			then
+				local wan_interface=`uci_get strongswan "$tunnel_name" wan_interface`
+				local local_identifier_type=`uci_get strongswan "$tunnel_name" local_identifier_type`
+				local isEnable=`uci_get strongswan "$tunnel_name" enable`
+				local tunnel_backup=`uci_get strongswan "$tunnel_name" tunnel_backup`
+				local sameWan=0
+				[ "$wan_interface" = "$INTERFACENAME" ] && {
+					uci set strongswan.$tunnel_name.local_endpoint=$wanIP
+					[ "$local_identifier_type" = 'ip' ] && {
+						uci set strongswan.$tunnel_name.local_identifier=$wanIP
+					}
+					[ "$isEnable" -eq 1 ] && {
+						ipsec down $tunnel_name
+						connForReload="$connForReload $tunnel_name"
+						sameWan=1;
+						local ike_auth_type=`uci_get strongswan "$tunnel_name" ike_auth_type`
+						if [ "$ike_auth_type" = 'pubkey' ]
+						then
+							local local_cert=`uci get strongswan.$tunnel_name.local_cert`
+							updateCertUsage del $local_cert "SiteToSite-$tunnel_name"
+						fi
+
+						local keep_alive=`uci_get strongswan "$tunnel_name" keep_alive`
+						[ $keep_alive -eq 1 ] && {
+							timerCtrl "-$tunnel_name"
+						}
+					}
+				}
+				[ "$tunnel_backup" -eq 1 ] && {
+					local local_backup_iface=`uci_get strongswan "$tunnel_name" local_backup_iface`
+					[ "$local_backup_iface" = "$INTERFACENAME" ] && {
+						uci set strongswan.$tunnel_name.local_backup=$wanIP
+						[ "$isEnable" -eq 1 ] && {
+							ipsec down ""$tunnel_name"_bkp" #If it is UP.
+							[ "$sameWan" -eq 0 ] && {
+								connForReload="$connForReload $tunnel_name"
+								local keep_alive=`uci_get strongswan "$tunnel_name" keep_alive`
+								[ $keep_alive -eq 1 ] && {
+									timerCtrl "-$tunnel_name"
+								}
+
+							}
+						}
+					}
+				}
+			elif [ "$keying_mode" = 'manual' ]
+			then
+				local wan_interface=`uci_get strongswan "$tunnel_name" wan_interface`
+				local isEnable=`uci_get strongswan "$tunnel_name" enable`
+				[ "$wan_interface" = "$INTERFACENAME" ] && {
+					uci set strongswan.$tunnel_name.local_endpoint=$wanIP
+					[ "$local_identifier_type" = 'ip' ] && {
+						uci set strongswan.$tunnel_name.local_identifier=$wanIP
+					}
+					[ "$isEnable" -eq 1 ] && {
+						cp $UCIPATH/strongswan $UCIPATH/strongswan-bkp #Have a backup to get old data. Delete after use.
+						delete_ipxfrm $tunnel_name "MOD"
+						uci commit strongswan
+						rm $UCIPATH/strongswan-bkp
+						config_reload
+					}
+				}
+			fi
+		done
+		[ -n "$connForReload" ] && {
+			uci commit strongswan
+			config_load strongswan #load configuration of strongswan into environment.
+			source uci_cache $IPGROUP_CONFIG
+			config_reload
+
+			local connName
+			exec_ipsec reload
+			for connName in $connForReload; do
+				#logger -t VPN-cfg "Bringing UP tunnel $connName"
+				#ipsec up $connName &
+				#NOTE: During hotplug, we are just updating the connection record in strongswan, later if interesting traffic comes
+				#	it gets triggered automatically.
+
+				local keep_alive
+				config_get_bool keep_alive "$connName" keep_alive 0
+				[ $keep_alive -eq 1 ] && {
+					timerHandler $connName &
+					timerCtrl "+$connName"
+				}
+			done
+
+			config_clear strongswan #Unload configuration of strongswan
+		}
+	#}
+	fi
+	if [ $client2siteCount -gt 0 ]
+	then
+		#local allclient2site=$(uci show strongswan | grep -e "=client2site" | cut -f 2 -d . | cut -f 1 -d =)
+		local groupsForReload=""
+		local group_name
+		for group_name in $allclient2site; do
+			local wan_interface=`uci_get strongswan "$group_name" wan_interface`
+			local client_type=`uci_get strongswan "$group_name" client_type`
+			local isEnable=`uci_get strongswan "$group_name" enable`
+			[ "$wan_interface" = "$INTERFACENAME" ] && {
+				uci set strongswan.$group_name.local_endpoint=$wanIP
+				[ "$client_type" = '3rdparty' ] && {
+					local local_identifier_type=`uci_get strongswan "$group_name" local_identifier_type`
+					[ "$local_identifier_type" = 'ip' ] && {
+						uci set strongswan.$group_name.local_identifier=$wanIP
+					}
+				}
+				[ "$isEnable" -eq 1 ] && {
+					ipsec down "$group_name"
+					groupsForReload="$groupsForReload $group_name"
+					local ike_auth_type=`uci_get strongswan "$group_name" ike_auth_type`
+					if [ "$ike_auth_type" = 'pubkey' ]
+					then
+						local local_cert=`uci get strongswan.$group_name.local_cert`
+						updateCertUsage del $local_cert "ClientToSite-$group_name"
+					fi
+
+				}
+			}
+		done
+		[ -n "$groupsForReload" ] && {
+			uci commit strongswan
+			config_load strongswan #load configuration of strongswan into environment.
+			source uci_cache $IPGROUP_CONFIG
+			config_reload
+
+			exec_ipsec reload
+
+			config_clear strongswan #Unload configuration of strongswan
+		}
+	fi
+
+	#Handling for L2TP. Below Code is executed only during ifup event.
+	local isL2TPoverIPSecEnable=`uci get l2tpd.global.ipsec_enable`
+	if [ "$isL2TPoverIPSecEnable" -eq 1 ]
+	then
+		#wanIP $INTERFACENAME
+		logger -t VPN-cfg "Bringing DOWN tunnel l2tp_l2tpOverIpsec_$INTERFACENAME"
+		ipsec down "l2tp_l2tpOverIpsec_$INTERFACENAME" & #It is going to come up with new IP address.
+		uci commit strongswan
+		config_load strongswan #load configuration of strongswan into environment.
+		source uci_cache $IPGROUP_CONFIG
+		config_reload
+		exec_ipsec reload
+		config_clear strongswan #Unload configuration of strongswan
+	fi
+	exit 0
+}
+
+l2tp_psk=
+config_l2tpd_psk()
+{
+	echo -e $l2tp_psk >> $SECRETSFILE
+}
+
+config_l2tpd()
+{
+	local cfg="$1"
+	local profile p1_prop p2_prop prof_proto
+
+	config_get profile "$cfg" profile
+	config_get prof_proto "$profile" proto
+	config_get p1_prop "$profile" p1_prop
+	config_get p2_prop "$profile" p2_prop
+
+	# "<leftid> <rightid> : PSK preshared_key"
+	local preshared_key
+	local confLifetime finalRekeyMargin
+	config_get preshared_key "$cfg" preshared_key
+	l2tp_psk=
+
+	config_get confLifetime "$profile" ipsec_lifetime
+	rekey_margin finalRekeyMargin $confLifetime
+
+	network_active_wan_interfaces_cached allWANiface
+	for iface in $allWANiface
+	do
+		local isGRE=`echo $iface | grep gre`
+		[ -n "$isGRE" ] && continue
+
+		local isIPv6=`uci get network.$iface.ipv6 2>/dev/null`
+		[ "$isIPv6" = "1" ] && [ $(echo $iface | cut -d _ -f 1 | grep 6) ] && continue
+
+		local wanip
+		network_get_wanip_cached wanip "$iface"
+
+		xappend_multi "conn l2tp_l2tpOverIpsec_$iface\n\tleft=$wanip\n\tleftid=$wanip\n\trightid=%any\n\tleftprotoport=17/1701\n\tright=%any\n\trightprotoport=17/%any\n\tleftauth=psk\n\trightauth=psk\n\ttype=transport\n\tkeyexchange=ikev1\n\tauto=add\n\tike=$p1_prop!\n\t$prof_proto=$p2_prop!"
+		append_parm "$profile" ike_lifetime "	ikelifetime"
+		append_parm "$profile" ipsec_lifetime "	lifetime"
+		xappend_multi "\trekeymargin=$finalRekeyMargin\n\tdpddelay=30\n\tdpdtimeout=90\n\tdpdaction=clear\n" #extra line feed
+
+#		echo "$wanip : PSK \"$preshared_key\"" >> $SECRETSFILE
+		psk="$wanip : PSK \"$preshared_key\""
+
+		if [ -n "$l2tp_psk" ]
+		then
+			l2tp_psk="${l2tp_psk}\n${psk}"
+		else
+			l2tp_psk="${psk}"
+		fi
+	done
+}
+
+config_client()
+{
+	local cfg="$1"
+	local tun_enable=`uci_get strongswan "$cfg" enable`
+	local client_name finalRekeyMargin
+	rekey_margin finalRekeyMargin $DEFAULT_IPSECLIFETIME
+	#config_get_bool tun_enable "$cfg" enable 0
+	config_get client_name "$cfg" client_name
+
+	if [ "$tun_enable" -eq 0 ]
+	then
+		echo "$client_name is disabled"
+	else
+		local remote_endpoint
+		config_get remote_endpoint "$cfg" remote_endpoint
+		iptables -w -F vpn_mangle_output -t mangle
+		iptables -w -A vpn_mangle_output -t mangle ! -d $remote_endpoint -j MARK --set-mark 0x20
+
+		xappend_multi "conn $client_name\n\tauto=add\n\tleft=%any\n\tkeyexchange=ikev1"
+		xappend "	ike=3des-md5-modp1024,3des-sha1-modp1024,3des-sha256-modp1024,aes128-md5-modp1024,aes128-sha1-modp1024,aes128-sha256-modp1024,aes192-md5-modp1024,aes192-sha1-modp1024,aes192-sha256-modp1024,aes256-md5-modp1024,aes256-sha1-modp1024,aes256-sha256-modp1024!"
+		xappend "	esp=aes128-md5-modp1024,aes128-md5-modp1536,aes128-sha1-modp1024,aes128-sha1-modp1536,aes128-sha256-modp1024,aes128-sha256-modp1536,aes192-md5-modp1024,aes192-md5-modp1536,aes192-sha1-modp1024,aes192-sha1-modp1536,aes192-sha256-modp1024,aes192-sha256-modp1536,aes256-md5-modp1024,aes256-md5-modp1536,aes256-sha1-modp1024,aes256-sha1-modp1536,aes256-sha256-modp1024,aes256-sha256-modp1536,3des-md5-modp1024,3des-md5-modp1536,3des-sha1-modp1024,3des-sha1-modp1536,3des-sha256-modp1024,3des-sha256-modp1536,aes128-md5,aes128-sha1,aes128-sha256,aes192-md5,aes192-sha1,aes192-sha256,aes256-md5,aes256-sha1,aes256-sha256,3des-md5,3des-sha1,3des-sha256!"
+
+		append_parm "$cfg" remote_endpoint "	right"
+
+		local ike_auth_type local_identifier remote_identifier preshared_key
+		local local_cert extract_subject subject1 subject final_cert_path final_key_path final_local_identifier
+		config_get ike_auth_type "$cfg" ike_auth_type #possible values are psk/pubkey
+		if [ "$ike_auth_type" = 'psk' ]
+		then
+			append_parm "$cfg" ike_auth_type "	leftauth"
+			append_parm "$cfg" ike_auth_type "	rightauth"
+			config_get local_identifier "$cfg" groupname
+			xappend_multi "\taggressive=yes\n\tleftid=keyid:$local_identifier\n\trightid=%any"
+			config_get remote_identifier "$cfg" remote_endpoint
+			config_get preshared_key "$cfg" preshared_key
+			final_local_identifier=`echo -n $local_identifier|hexdump -v -e '/1 "%02X"'`
+			echo "@#$final_local_identifier : PSK \"$preshared_key\"" >> $SECRETSFILE
+		else   # value is "pubkey"
+			append_parm "$cfg" ike_auth_type "	leftauth"
+			append_parm "$cfg" ike_auth_type "	rightauth"
+			config_get local_cert "$cfg" local_cert
+			# Certificate name should not contain relative or absolute path . It should only contain certificate name.
+			final_cert_path="$certificate_path$local_cert"
+			extract_subject=$(openssl x509 -in $final_cert_path -noout -subject)
+			subject1=${extract_subject#*/}
+			subject1="/$subject1"
+			subject=\"$subject1\"
+			# changing subject to required format
+			xappend_multi "\tleftid=$subject\n\trightid=%any\n\tleftcert=$final_cert_path"
+			# The private key file name should be used in ipsec.secrets
+			#while generating certificates, it is taken care that  file name of private key and corresponding certificate is the same. They are saved in
+			# different folders.
+			#Hence certificate name can be used for  private key file name.
+			final_key_path="$private_key_path$local_cert"
+			echo ": RSA $final_key_path" >> $SECRETSFILE
+			#Update certificate usage to CERTIFICATE module.
+			updateCertUsage_ipsec $local_cert "Tele-WorkerVPN-$client_name"
+		fi
+		
+		xappend "	modeconfig=pull"
+		
+		local mode vlan vlan_subnet
+		config_get mode "$cfg" mode #possible values nem/client
+		if [ "$mode" = 'nem' ]
+		then
+			# value is nem
+			config_get vlan "$cfg" vlan
+			network_get_subnet_cached vlan_subnet "vlan$vlan"
+			local network=`ipcalc.sh $vlan_subnet | grep NETWORK | cut -d = -f 2`
+			local mask=`ipcalc.sh $vlan_subnet | grep PREFIX | cut -d = -f 2`
+			vlan_subnet="$network/$mask" #Updated vlan_subnet to proper values.
+			xappend "	leftsubnet=$network/$mask"
+		fi
+		xappend_multi "\tleftsourceip=%config\n\trightsubnet=0.0.0.0/0\n\txauth=client\n\tleftauth2=xauth"
+		append_parm "$cfg" xauth_user "	xauth_identity"
+		config_get xauth_user "$cfg" xauth_user
+		config_get xauth_passwd "$cfg" xauth_passwd
+	       	#
+	        # get passphrase from xauth_passwd and write below line into ipsec.secrets file
+	        # <username> : XAUTH "password"
+	        #
+		echo "$xauth_user : XAUTH \"$xauth_passwd\"" >> $SECRETSFILE
+		local peer_timeout
+		config_get peer_timeout "$cfg" peer_timeout
+		local dpdDelay=`expr $peer_timeout / 3`
+		xappend_multi "\tdpddelay=$dpdDelay\n\tdpdtimeout=$peer_timeout\n\tdpdaction=clear"
+
+		#Configure default profile details
+		#NOTE: ike and esp are not set, so that the server proposed will be used.
+		xappend_multi "\tikelifetime=$DEFAULT_IKELIFETIME\n\tlifetime=$DEFAULT_IPSECLIFETIME\n\trekeymargin=$finalRekeyMargin"
+		xappend "" #extra line feed
+
+		if [ "$mode" = 'nem' ]
+		then
+			# value is nem
+			#local network=`ipcalc.sh $vlan_subnet | grep NETWORK | cut -d = -f 2`
+			#local mask=`ipcalc.sh $vlan_subnet | grep PREFIX | cut -d = -f 2`
+			xappend_multi "conn  passthrough_$client_name\n\tauto=route\n\ttype=passthrough\n\tleftsubnet=$vlan_subnet\n\trightsubnet=$vlan_subnet\n" #extra line feed
+		fi
+
+		#START: Handling backup settings
+		local tun_name
+		config_get tun_name "$cfg" client_name
+		local recvdBackupSetngs=`uci get strongswan.$client_name.backup_server_auto 2> /dev/null`
+		if [ -n "$recvdBackupSetngs" ]
+		then
+			#We received some backup settings from the server. Now configure them here.
+			local itr=0
+			for backupIP in $recvdBackupSetngs
+			do
+				#START:configure back-up connection
+				xappend "" #extra line feed
+				xappend_multi "conn "$tun_name"_bkp"$itr"\n\tauto=add\n\tleft=%any\n\tright=$backupIP\n\tkeyexchange=ikev1"
+				xappend "	ike=3des-md5-modp1024,3des-sha1-modp1024,3des-sha256-modp1024,aes128-md5-modp1024,aes128-sha1-modp1024,aes128-sha256-modp1024,aes192-md5-modp1024,aes192-sha1-modp1024,aes192-sha256-modp1024,aes256-md5-modp1024,aes256-sha1-modp1024,aes256-sha256-modp1024!"
+				xappend "	esp=aes128-md5-modp1024,aes128-md5-modp1536,aes128-sha1-modp1024,aes128-sha1-modp1536,aes128-sha256-modp1024,aes128-sha256-modp1536,aes192-md5-modp1024,aes192-md5-modp1536,aes192-sha1-modp1024,aes192-sha1-modp1536,aes192-sha256-modp1024,aes192-sha256-modp1536,aes256-md5-modp1024,aes256-md5-modp1536,aes256-sha1-modp1024,aes256-sha1-modp1536,aes256-sha256-modp1024,aes256-sha256-modp1536,3des-md5-modp1024,3des-md5-modp1536,3des-sha1-modp1024,3des-sha1-modp1536,3des-sha256-modp1024,3des-sha256-modp1536,aes128-md5,aes128-sha1,aes128-sha256,aes192-md5,aes192-sha1,aes192-sha256,aes256-md5,aes256-sha1,aes256-sha256,3des-md5,3des-sha1,3des-sha256!"
+
+				if [ "$ike_auth_type" = 'psk' ]
+				then
+					append_parm "$cfg" ike_auth_type "	leftauth"
+					append_parm "$cfg" ike_auth_type "	rightauth"
+					xappend_multi "\taggressive=yes\n\tleftid=keyid:$local_identifier\n\trightid=%any"
+				else   # value is "pubkey"
+					append_parm "$cfg" ike_auth_type "	leftauth"
+					append_parm "$cfg" ike_auth_type "	rightauth"
+					# Certificate name should not contain relative or absolute path . It should only contain certificate name.
+					# changing subject to required format
+					xappend_multi "\tleftid=$subject\n\trightid=%any\n\tleftcert=$final_cert_path"
+					# The private key file name should be used in ipsec.secrets
+					#while generating certificates, it is taken care that file name of private key and
+					#corresponding certificate is the same. They are saved in
+					echo ": RSA $final_key_path" >> $SECRETSFILE
+				fi
+		
+				xappend "	modeconfig=pull"
+		
+				if [ "$mode" = 'nem' ]
+				then
+					xappend "	leftsubnet=$vlan_subnet"
+				fi
+				xappend_multi "\tleftsourceip=%config\n\trightsubnet=0.0.0.0/0\n\txauth=client\n\tleftauth2=xauth"
+				append_parm "$cfg" xauth_user "	xauth_identity"
+				config_get xauth_user "$cfg" xauth_user
+				config_get xauth_passwd "$cfg" xauth_passwd
+		       		#
+			        # get passphrase from xauth_passwd and write below line into ipsec.secrets file
+			        # <username> : XAUTH "password"
+	        		#
+				#echo "$xauth_user : XAUTH \"$xauth_passwd\"" >> $SECRETSFILE
+				xappend_multi "\tdpddelay=$dpdDelay\n\tdpdtimeout=$peer_timeout\n\tdpdaction=clear"
+
+				#Configure default profile details
+				xappend_multi "\tikelifetime=$DEFAULT_IKELIFETIME\n\tlifetime=$DEFAULT_IPSECLIFETIME\n\trekeymargin=$finalRekeyMargin\n" #extra line feed
+				itr=`expr $itr + 1`
+				#END:configure back-up connection
+			done
+		else
+			#Configure only the Admin configured backup settings.
+			local temp
+			for temp in 1 2 3
+			do
+				local confBackupSetngs=""
+				config_get confBackupSetngs "$cfg" "backup_server"$temp""
+				#if  [ -n $confBackupSetngs ]
+				if  [ ${#confBackupSetngs} -gt 0 ]   #length of that string is greater than 0
+				then
+					#valid..! configure the backup tunnel on that IP
+					#START:configure back-up connection
+					xappend "" #extra line feed
+					xappend_multi "conn "$tun_name"_bkp"$temp"\n\tauto=add\n\tleft=%any\n\tkeyexchange=ikev1"
+					xappend "	ike=3des-md5-modp1024,3des-sha1-modp1024,3des-sha256-modp1024,aes128-md5-modp1024,aes128-sha1-modp1024,aes128-sha256-modp1024,aes192-md5-modp1024,aes192-sha1-modp1024,aes192-sha256-modp1024,aes256-md5-modp1024,aes256-sha1-modp1024,aes256-sha256-modp1024!"
+					xappend "	esp=aes128-md5-modp1024,aes128-md5-modp1536,aes128-sha1-modp1024,aes128-sha1-modp1536,aes128-sha256-modp1024,aes128-sha256-modp1536,aes192-md5-modp1024,aes192-md5-modp1536,aes192-sha1-modp1024,aes192-sha1-modp1536,aes192-sha256-modp1024,aes192-sha256-modp1536,aes256-md5-modp1024,aes256-md5-modp1536,aes256-sha1-modp1024,aes256-sha1-modp1536,aes256-sha256-modp1024,aes256-sha256-modp1536,3des-md5-modp1024,3des-md5-modp1536,3des-sha1-modp1024,3des-sha1-modp1536,3des-sha256-modp1024,3des-sha256-modp1536,aes128-md5,aes128-sha1,aes128-sha256,aes192-md5,aes192-sha1,aes192-sha256,aes256-md5,aes256-sha1,aes256-sha256,3des-md5,3des-sha1,3des-sha256!"
+					xappend "	right="$confBackupSetngs""
+
+					if [ "$ike_auth_type" = 'psk' ]
+					then
+						append_parm "$cfg" ike_auth_type "	leftauth"
+						append_parm "$cfg" ike_auth_type "	rightauth"
+						xappend_multi "\taggressive=yes\n\tleftid=keyid:$local_identifier\n\trightid=%any"
+					else   # value is "pubkey"
+						append_parm "$cfg" ike_auth_type "	authby"
+						append_parm "$cfg" ike_auth_type "	leftauth"
+						append_parm "$cfg" ike_auth_type "	rightauth"
+						# Certificate name should not contain relative or absolute path . It should only contain certificate name.
+						xappend_multi "\tleftid=$subject\n\trightid=%any\n\tleftcert=$final_cert_path"
+						# The private key file name should be used in ipsec.secrets
+						#while generating certificates, it is taken care that  file name of private key and corresponding
+						#certificate is the same. They are saved in different folders.
+						echo ": RSA $final_key_path" >> $SECRETSFILE
+					fi
+		
+					xappend "	modeconfig=pull"
+			
+					if [ "$mode" = 'nem' ]
+					then
+						xappend "	leftsubnet=$vlan_subnet"
+					fi	
+					xappend_multi "\tleftsourceip=%config\n\trightsubnet=0.0.0.0/0\n\txauth=client\n\tleftauth2=xauth"
+					append_parm "$cfg" xauth_user "	xauth_identity"
+					config_get xauth_user "$cfg" xauth_user
+					config_get xauth_passwd "$cfg" xauth_passwd
+			       		#
+				        # get passphrase from xauth_passwd and write below line into ipsec.secrets file
+				        # <username> : XAUTH "password"
+	        			#
+					#echo "$xauth_user : XAUTH \"$xauth_passwd\"" >> $SECRETSFILE
+					xappend_multi "\tdpddelay=$dpdDelay\n\tdpdtimeout=$peer_timeout\n\tdpdaction=clear"
+
+					#Configure default profile details
+					xappend_multi "\tikelifetime=$DEFAULT_IKELIFETIME\n\tlifetime=$DEFAULT_IPSECLIFETIME\n\trekeymargin=$finalRekeyMargin\n" #extra line feed
+					#END:configure back-up connection
+				fi
+			done
+		fi
+		#END: Handling backup settings
+	fi
+}
+
+#This is a stub function to write multiple conn entries into ipsec.conf for
+#	each pair of left-subnet and right-subnet of a given connection.
+config_sec_groups()
+{
+	local cfg="$1"
+	local tunnel_name="$2"
+	local is_backup="$3"
+	local final_left="$4"
+	local backup_tag=""
+
+	[ "$is_backup" = "1" ] && {
+		backup_tag="_bkp"
+	}
+
+	local local_sec_group remote_sec_group
+
+	config_get local_sec_group "$cfg" local_sec_group  #ip/subnet/ipgroup/gre
+	config_get remote_sec_group "$cfg" remote_sec_group  #ip/subnet/ipgroup/gre
+	if [ "$local_sec_group" = 'ipgroup' ] && [ "$remote_sec_group" = 'ipgroup' ]
+	then
+	#{
+		local all_local_sec_rec all_remote_sec_rec local_ip_group remote_ip_group
+		config_get local_ip_group "$cfg" local_ip_group
+		config_get remote_ip_group "$cfg" remote_ip_group
+		all_local_sec_rec=""
+		eval loop_var=\$ipgroup_"$local_ip_group"_ipv4_addr
+		for i in $(echo $loop_var | sed 's/,/ /g')
+		do
+			all_local_sec_rec="$all_local_sec_rec $i"
+		done
+		eval loop_var=\$ipgroup_"$local_ip_group"_ipv4_subnet
+		for i in $(echo $loop_var | sed 's/,/ /g')
+		do
+			all_local_sec_rec="$all_local_sec_rec $i"
+		done
+
+		eval loop_var=\$ipgroup_"$remote_ip_group"_ipv4_addr
+		for i in $(echo $loop_var | sed 's/,/ /g')
+		do
+			all_remote_sec_rec="$all_remote_sec_rec $i"
+		done
+		eval loop_var=\$ipgroup_"$remote_ip_group"_ipv4_subnet
+		for i in $(echo $loop_var | sed 's/,/ /g')
+		do
+			all_remote_sec_rec="$all_remote_sec_rec $i"
+		done
+
+		local itr=1
+		for i in $all_local_sec_rec
+		do
+			for j in $all_remote_sec_rec
+			do
+				if [ "$is_backup" = "0" ]
+				then
+					xappend_multi "conn "$tunnel_name""$backup_tag"-$itr\n\tauto=route\n\talso="$tunnel_name""$backup_tag"\n\tleftsubnet=$i\n\trightsubnet=$j\n" #with extra line feed.
+				else
+					xappend_multi "conn "$tunnel_name""$backup_tag"-$itr\n\talso="$tunnel_name""$backup_tag"\n\tleftsubnet=$i\n\trightsubnet=$j\n" #with extra line feed.
+				fi
+				itr=`expr $itr + 1`
+			done
+		done
+
+		[ "$is_backup" = "0" ] && {
+			uci_toggle_state strongswan core $tunnel_name `expr $itr - 1`
+		}
+	#}
+	elif [ "$local_sec_group" = 'ipgroup' ] #in this case remote_sec_group can be ip/subnet/any/gre.
+	then
+	#{
+		local all_local_sec_rec local_ip_group
+		config_get local_ip_group "$cfg" local_ip_group
+		all_local_sec_rec=""
+		eval loop_var=\$ipgroup_"$local_ip_group"_ipv4_addr
+		for i in $(echo $loop_var | sed 's/,/ /g')
+		do
+			all_local_sec_rec="$all_local_sec_rec $i"
+		done
+		eval loop_var=\$ipgroup_"$local_ip_group"_ipv4_subnet
+		for i in $(echo $loop_var | sed 's/,/ /g')
+		do
+			all_local_sec_rec="$all_local_sec_rec $i"
+		done
+
+		local itr=1
+		for i in $all_local_sec_rec
+		do
+		#{
+			if [ "$is_backup" = "0" ]
+			then
+				xappend_multi "conn "$tunnel_name""$backup_tag"-$itr\n\tauto=route\n\talso="$tunnel_name""$backup_tag"\n\tleftsubnet=$i"
+			else
+				xappend_multi "conn "$tunnel_name""$backup_tag"-$itr\n\talso="$tunnel_name""$backup_tag"\n\tleftsubnet=$i"
+			fi
+			case $remote_sec_group in
+			ip)
+				append_parm "$cfg" remote_sec_ip "	rightsubnet"
+			;;
+			subnet)
+				local remote_subnet remote_subnetmask
+				config_get remote_subnet "$cfg" remote_subnet
+				config_get remote_subnetmask "$cfg" remote_subnetmask
+				xappend "	rightsubnet=$remote_subnet/$remote_subnetmask"
+			;;
+			any)
+				[ "$is_backup" = "0" ] && [ "$__this_device" != "RV160" ] && [ "$__this_device" != "RV160W" ] && {
+				#NOTE: This is a custom ip rule addition, which would address the spoke traffic routing issue.
+					local temp_rule=`ip -4 rule show | grep $final_left`
+					[ -n "$temp_rule" ] && {
+						local route_table=`echo "$temp_rule" | xargs | cut -d ' ' -f 7`
+						ip -4 rule add pref $IP_RULE_PREFIX_CURRENT from $i lookup $route_table
+						IP_RULE_PREFIX_CURRENT=`expr $IP_RULE_PREFIX_CURRENT + 1`
+					}
+				}
+				xappend "	rightsubnet=0.0.0.0/0"
+			;;
+			gre)
+				local  final_right_subnet gre_append
+				config_get remote_gw "$cfg" remote_endpoint #It is assumed that remote_gw_type can be IP/FQDN only.All validation is at GUI end.
+				gre_append="[gre]"
+				final_right_subnet="$remote_gw$gre_append"
+				xappend "	rightsubnet=$final_right_subnet"
+			esac
+			xappend "" #extra line
+			itr=`expr $itr + 1`
+		#}
+		done
+
+		[ "$is_backup" = "0" ] && {
+			uci_toggle_state strongswan core $tunnel_name `expr $itr - 1`
+		}
+	#}
+	elif [ "$remote_sec_group" = 'ipgroup' ] #in this case local_sec_group can be ip/subnet/any/gre
+	then
+	#{
+		local all_remote_sec_rec remote_ip_group
+		config_get remote_ip_group "$cfg" remote_ip_group
+		all_remote_sec_rec=""
+		eval loop_var=\$ipgroup_"$remote_ip_group"_ipv4_addr
+		for i in $(echo $loop_var | sed 's/,/ /g')
+		do
+			all_remote_sec_rec="$all_remote_sec_rec $i"
+		done
+		eval loop_var=\$ipgroup_"$remote_ip_group"_ipv4_subnet
+		for i in $(echo $loop_var | sed 's/,/ /g')
+		do
+			all_remote_sec_rec="$all_remote_sec_rec $i"
+		done
+
+		local itr=1
+		for i in $all_remote_sec_rec
+		do
+		#{
+			if [ "$is_backup" = "0" ]
+			then
+				xappend_multi "conn "$tunnel_name""$backup_tag"-$itr\n\tauto=route\n\talso=$tunnel_name"$backup_tag"\n\trightsubnet=$i"
+			else
+				xappend_multi "conn "$tunnel_name""$backup_tag"-$itr\n\talso=$tunnel_name"$backup_tag"\n\trightsubnet=$i"
+			fi
+			case $local_sec_group in
+			ip)
+				append_parm "$cfg" local_sec_ip "	leftsubnet"
+			;;
+			subnet)
+				local local_subnet local_subnetmask
+				config_get local_subnet "$cfg" local_subnet
+				config_get local_subnetmask "$cfg" local_subnetmask
+				xappend "	leftsubnet=$local_subnet/$local_subnetmask"
+			;;
+			any)
+				xappend "	leftsubnet=0.0.0.0/0"
+			;;
+			gre)
+				local final_left_subnet gre_append
+				gre_append="[gre]"
+				final_left_subnet="$final_left$gre_append"
+				xappend "	leftsubnet=$final_left_subnet"
+			esac
+			xappend "" #extra line
+			itr=`expr $itr + 1`
+		#}
+		done
+
+		[ "$is_backup" = "0" ] && {
+			uci_toggle_state strongswan core $tunnel_name `expr $itr - 1`
+		}
+	#}
+	else #none of them are ipgroups.
+	#{
+		local local_subnet local_subnetmask
+		if [ "$is_backup" = "0" ]
+		then
+			xappend_multi "conn "$tunnel_name""$backup_tag"-1\n\tauto=route\n\talso="$tunnel_name""$backup_tag""
+		else
+			xappend_multi "conn "$tunnel_name""$backup_tag"-1\n\talso="$tunnel_name""$backup_tag""
+		fi
+		case $local_sec_group in
+		ip)
+			append_parm "$cfg" local_sec_ip "	leftsubnet"
+		;;
+		subnet)
+			config_get local_subnet "$cfg" local_subnet
+			config_get local_subnetmask "$cfg" local_subnetmask
+			xappend "	leftsubnet=$local_subnet/$local_subnetmask"
+		;;
+		any)
+			xappend "	leftsubnet=0.0.0.0/0"
+		;;
+		gre)
+			local final_left_subnet gre_append
+			gre_append="[gre]"
+			final_left_subnet="$final_left$gre_append"
+			xappend "	leftsubnet=$final_left_subnet"
+		esac
+		case $remote_sec_group in
+		ip)
+			append_parm "$cfg" remote_sec_ip "	rightsubnet"
+		;;
+		subnet)
+			local remote_subnet remote_subnetmask
+			config_get remote_subnet "$cfg" remote_subnet
+			config_get remote_subnetmask "$cfg" remote_subnetmask
+			xappend "	rightsubnet=$remote_subnet/$remote_subnetmask"
+		;;
+		any)
+			[ "$is_backup" = "0" ] && [ "$__this_device" != "RV160" ] && [ "$__this_device" != "RV160W" ] && {
+				#NOTE: This is a custom ip rule addition, which would address the spoke traffic routing issue.
+				#TODO or verification only.
+				local temp_rule=`ip -4 rule show | grep $final_left`
+				[ -n "$temp_rule" ] && {
+					local route_table=`echo "$temp_rule" | xargs | cut -d ' ' -f 7`
+					case $local_sec_group in
+					ip)
+						config_get local_sec_ip "$cfg" local_sec_ip
+						ip -4 rule add pref $IP_RULE_PREFIX_CURRENT from $local_sec_ip lookup $route_table
+					;;
+					subnet)
+						ip -4 rule add pref $IP_RULE_PREFIX_CURRENT from $local_subnet/$local_subnetmask lookup $route_table
+					;;
+					esac
+					IP_RULE_PREFIX_CURRENT=`expr $IP_RULE_PREFIX_CURRENT + 1`
+				}
+			}
+			xappend "	rightsubnet=0.0.0.0/0"
+		;;
+		gre)
+			local  final_right_subnet gre_append
+			config_get remote_gw "$cfg" remote_endpoint #It is assumed that remote_gw_type can be IP/FQDN only.All validation is at GUI end.
+			gre_append="[gre]"
+			final_right_subnet="$remote_gw$gre_append"
+			xappend "	rightsubnet=$final_right_subnet"
+		esac
+		xappend ""
+		[ "$is_backup" = "0" ] && {
+			uci_toggle_state strongswan core $tunnel_name 1
+		}
+	#}
+	fi
+}
+
+config_site2site()
+{
+	local cfg="$1"
+	local tun_enable=0	
+	local tunnel_name
+	config_get tunnel_name "$cfg" tunnel_name
+	config_get_bool tun_enable "$cfg" enable 0
+
+	if [ "$tun_enable" -eq 0 ]
+	then
+	#{
+		#tunnel is not enabled. Do nothing for tunnels of this type.	
+		echo "$tunnel_name is disabled"
+	#}
+	else	
+	#{
+		local profile keying_mode ike_version
+		local remote_identifier_type
+		config_get profile "$cfg" profile
+		config_get keying_mode "$profile" keying_mode
+		config_get ike_version "$profile" ike_version
+		
+		if [ "$keying_mode" = 'auto' ]
+		then
+		#{
+			##parse and configure in strongswan
+			#wan_interface contains the WAN interface name.
+			#It is assumed that local_endpoint will contain the IP address of the WAN interface used.
+			local wan_interface local_endpoint final_left final_leftid non_rfc
+			local local_identifier_type local_identifier
+			local local_sec_group remote_sec_group
+			config_get wan_interface "$cfg" wan_interface
+			config_get local_endpoint "$cfg" local_endpoint "0.0.0.0"
+
+			if [ "$local_endpoint" = "0.0.0.0" ]
+			then
+			#{
+				network_get_wanip_cached final_left "$wan_interface"
+				uci_set strongswan "$cfg" local_endpoint "$final_left"
+				uci commit strongswan
+			#}
+			else
+			#{
+				final_left=$local_endpoint
+			#}
+			fi
+
+			#Set tunnel state to zero.
+			uci_toggle_state strongswan core $tunnel_name 0
+
+			#append_conn "$cfg" tunnel_name "conn"
+			xappend "conn "$tunnel_name""
+			local is_ignore=0
+			[ -n "$final_left" ] || {
+				xappend "	auto=ignore"
+				is_ignore=1
+			}
+			xappend "	left=$final_left"
+
+			local remote_gw_type
+			config_get remote_gw_type "$cfg" remote_gw_type
+			if [ "$remote_gw_type" == "dynip" -a "$is_ignore" -eq 0 ]
+			then
+			#{
+				xappend "	auto=add"
+			#}
+			fi
+
+			append_parm "$cfg" remote_endpoint "	right"  #It is assumed that remote_gw_type can be IP/FQDN only.All validation is at GUI end.
+			local local_identifier_type local_identifier
+			config_get local_identifier_type "$cfg" local_identifier_type
+			config_get local_identifier "$cfg" local_identifier
+			if [ "$local_identifier_type" = 'ip' ]
+			then
+			#{
+				#It is assumed that local_identifier can be IP/FQDN/userFQDN only. All validation is at GUI end.
+				final_leftid=$final_left
+			#}
+			else #FQDN/userFQDN
+			#{
+				final_leftid=$local_identifier
+			#}
+			fi
+
+			local ike_auth_type remote_identifier preshared_key
+			local local_cert local_identifier_type extract_subject subject1 subject final_cert_path final_key_path
+			local remote_ca
+			local leftauth left_psk left_cert rightauth right_psk right_cert
+			config_get ike_auth_type "$cfg" ike_auth_type #possible values are psk/pubkey
+
+			config_get local_sec_group "$cfg" local_sec_group
+			[ $local_sec_group == "gre" ] && {
+				xappend "	type=transport"
+			}
+
+			local p1_prop proto p2_prop tunnel_backup
+			config_get p1_prop "$profile" p1_prop
+			append_parm "$profile" ike_lifetime "	ikelifetime"
+
+			local confLifetime finalRekeyMargin
+			config_get proto "$profile" proto
+			config_get p2_prop "$profile" p2_prop
+			xappend "	$proto=$p2_prop!"
+			append_parm "$profile" ipsec_lifetime "	lifetime"
+
+			config_get confLifetime "$profile" ipsec_lifetime
+			rekey_margin finalRekeyMargin $confLifetime
+			xappend "	rekeymargin=$finalRekeyMargin"
+
+			if [ "$ike_version" = 'ikev1'  ]
+			then
+			#{
+				xappend_multi "\tike=$p1_prop!\n\tauto=add\n\tkeyexchange=ikev1"
+				if [ "$ike_auth_type" = 'psk' ]
+				then
+				#{
+					#append_parm "$cfg" ike_auth_type "	authby"
+					append_parm "$cfg" ike_auth_type "	leftauth"
+					append_parm "$cfg" ike_auth_type "	rightauth"
+					xappend "	leftid=$final_leftid"
+					append_parm "$cfg" remote_identifier "	rightid"
+					#
+					# get passphrase from preshared_key and write below line into ipsec.secrets file
+					# "<leftid> <rightid> : PSK preshared_key"
+					#
+					config_get remote_identifier "$cfg" remote_identifier
+					config_get preshared_key "$cfg" preshared_key
+					echo "$final_leftid $remote_identifier : PSK \"$preshared_key\"" >> $SECRETSFILE
+				#}
+				else # value is "pubkey"
+				#{
+					append_parm "$cfg" ike_auth_type "	leftauth"
+					append_parm "$cfg" ike_auth_type "	rightauth"
+					config_get local_cert "$cfg" local_cert
+					final_cert_path="$certificate_path$local_cert"
+					config_get local_identifier_type "$cfg" local_identifier_type
+					if [ "$local_identifier_type" = 'asn1dn' ]
+					then
+					#{
+						extract_subject=$(openssl x509 -in $final_cert_path -noout -subject)
+						subject1=${extract_subject#*/}
+						subject1="/$subject1"
+						subject=\"$subject1\"  # changing subject to required format
+						xappend "	leftid=$subject"
+
+						config_get remote_identifier "$cfg" remote_identifier ""
+						if [ "$remote_identifier" != '%any' -a -n "$remote_identifier" ]
+						then
+						#{
+							xappend "	rightid=$remote_identifier"
+						#}
+						else
+						#{
+							xappend "	rightid=%any"
+						#}
+						fi
+					#}
+					else
+					#{
+						xappend "	leftid=$final_leftid"
+						append_parm "$cfg" remote_identifier "	rightid"
+					#}
+					fi
+					xappend "	leftcert=$final_cert_path"
+					# The private key file name should be used in ipsec.secrets
+					#while generating certificates, it is taken care that file name of private key and corresponding
+					# certificate is the same. They are saved in different folders.
+					#Hence certificate name can be used for private key file name.
+					final_key_path="$private_key_path$local_cert"
+					echo ": RSA $final_key_path" >> $SECRETSFILE
+					#Update certificate usage to CERTIFICATE module.
+					updateCertUsage_ipsec $local_cert "SiteToSite-$tunnel_name"
+					config_get remote_ca "$cfg" remote_ca
+					[ -n "$remote_ca" ] && {
+						linkRemoteCA $remote_ca $tunnel_name
+					}
+				#}
+				fi
+
+				local xauth xauth_type xauth_user xauth_passwd
+				config_get_bool xauth "$cfg" xauth 0
+				if [ $xauth -eq 1 ]
+				then
+				#{
+					config_get xauth_type "$cfg" xauth_type
+					if [ $xauth_type = 'client' ]
+					then
+					#{
+						append_parm "$cfg" xauth_type "	xauth"
+						xappend "	leftauth2=xauth"
+						append_parm "$cfg" xauth_user "	xauth_identity"
+						config_get xauth_user "$cfg" xauth_user
+						config_get xauth_passwd "$cfg" xauth_passwd
+						#
+						# get passphrase from xauth_passwd and write below line into ipsec.secrets file
+						# <username> : XAUTH "password"
+						#
+						echo "$xauth_user : XAUTH \"$xauth_passwd\"" >> $SECRETSFILE
+					#}
+					elif [ $xauth_type = 'server' ]
+					then
+					#{
+						append_parm "$cfg" xauth_type "	xauth"
+						xappend "	rightauth2=xauth"
+					#}
+					fi
+				#}
+				fi
+			#}
+			else
+			#{
+				#is for ikev2. Also security groups are handled here.
+				xappend_multi "\tike=$p1_prop\n\tkeyexchange=ikev2\n\treauth=no"
+				config_get leftauth "$cfg" leftauth
+				config_get rightauth "$cfg" rightauth
+				config_get remote_identifier_type "$cfg" remote_identifier_type
+
+				if [ "$leftauth" = 'psk' ] && [ "$rightauth" = 'psk' ]
+				then
+				#{
+					config_get remote_identifier "$cfg" remote_identifier
+					xappend_multi "\tleftauth=psk\n\trightauth=psk\n\tleftid=$final_leftid\n\trightid=$remote_identifier"
+					config_get left_psk "$cfg" left_psk
+					config_get right_psk "$cfg" right_psk
+					echo "$final_leftid : PSK \"$left_psk\"" >> $SECRETSFILE
+					echo "$remote_identifier : PSK \"$right_psk\"" >> $SECRETSFILE
+				#}
+				elif [ "$leftauth" = 'psk' ] && [ "$rightauth" = 'pubkey' ]
+				then
+				#{
+					xappend_multi "\tleftauth=psk\n\trightauth=pubkey\n\tleftid=$final_leftid"
+
+					config_get remote_identifier "$cfg" remote_identifier ""
+					if [ "$remote_identifier" != '%any' ]
+					then
+					#{
+						if [ "$remote_identifier_type" = "asn1dn" ]
+						then
+							xappend "	rightid=\"$remote_identifier\""
+						else
+							append_parm "$cfg" remote_identifier "	rightid"
+						fi
+					#}
+					else
+					#{
+						append_parm "$cfg" remote_identifier "  rightid"
+					#}
+					fi
+					config_get left_psk "$cfg" left_psk
+					echo "$final_leftid : PSK \"$left_psk\"" >> $SECRETSFILE
+					#no details of rightid.
+					config_get remote_ca "$cfg" remote_ca
+					linkRemoteCA $remote_ca $tunnel_name
+				#}
+				elif [ "$leftauth" = 'pubkey' ] && [ "$rightauth" = 'psk' ]
+				then
+				#{
+					xappend_multi "\tleftauth=pubkey\n\trightauth=psk"
+					config_get left_cert "$cfg" left_cert
+					final_cert_path="$certificate_path$left_cert"
+					config_get local_identifier_type "$cfg" local_identifier_type
+					if [ "$local_identifier_type" = 'asn1dn' ]
+					then
+						extract_subject=$(openssl x509 -in $final_cert_path -noout -subject)
+						subject1=${extract_subject#*/}
+						subject1="/$subject1"
+						subject=\"$subject1\"  # changing subject to required format
+						xappend "	leftid=$subject"
+					else
+						xappend "	leftid=$final_leftid"
+					fi
+					config_get remote_identifier "$cfg" remote_identifier
+					if [ "$remote_identifier" != '%any' ]
+					then
+					#{
+						if [ "$remote_identifier_type" = "asn1dn" ]
+						then
+							xappend "	rightid=\"$remote_identifier\""
+						else
+							xappend "	rightid=$remote_identifier"
+						fi
+					#}
+					else
+						xappend "	rightid=$remote_identifier"
+					fi
+					final_key_path="$private_key_path$left_cert"
+					config_get right_psk "$cfg" right_psk
+					xappend "	leftcert=$final_cert_path"
+					echo ": RSA $final_key_path" >> $SECRETSFILE
+					echo "$remote_identifier : PSK \"$right_psk\"" >> $SECRETSFILE
+					updateCertUsage_ipsec $left_cert "SiteToSite-$tunnel_name"
+				#}
+				elif [ "$leftauth" = 'pubkey' ] && [ "$rightauth" = 'pubkey' ]
+				then
+				#{
+					xappend_multi "\tleftauth=pubkey\n\trightauth=pubkey"
+					config_get left_cert "$cfg" left_cert
+					final_cert_path="$certificate_path$left_cert"
+					config_get local_identifier_type "$cfg" local_identifier_type
+					if [ "$local_identifier_type" = 'asn1dn' ]
+					then
+						extract_subject=$(openssl x509 -in $final_cert_path -noout -subject)
+						subject1=${extract_subject#*/}
+						subject1="/$subject1"
+						subject=\"$subject1\"  # changing subject to required format
+						xappend "	leftid=$subject"
+					else
+						xappend "	leftid=$final_leftid"
+					fi
+					config_get remote_identifier "$cfg" remote_identifier
+					if [ "$remote_identifier" != '%any' ]
+					then
+					#{
+						if [ "$remote_identifier_type" = "asn1dn" ]
+						then
+							xappend "	rightid=\"$remote_identifier\""
+						else
+							append_parm "$cfg" remote_identifier "	rightid"
+						fi
+					#}
+					else
+						xappend "	rightid=$remote_identifier"
+					fi
+					xappend "	leftcert=$final_cert_path"
+					final_key_path="$private_key_path$left_cert"
+					echo ": RSA $final_key_path" >> $SECRETSFILE
+					#no details of rightid.
+					updateCertUsage_ipsec $left_cert "SiteToSite-$tunnel_name"
+					config_get remote_ca "$cfg" remote_ca
+					linkRemoteCA $remote_ca $tunnel_name
+				#}
+				fi
+
+				config_get_bool non_rfc "$cfg" non_rfc 0
+				if [ "$non_rfc" = "0" ]
+				then
+				#{ NON-RFC=0
+					config_get local_sec_group "$cfg" local_sec_group  #ip/subnet
+					case $local_sec_group in
+					ip)
+						append_parm "$cfg" local_sec_ip "	leftsubnet"
+					;;
+					subnet)
+						local local_subnet local_subnetmask
+						config_get local_subnet "$cfg" local_subnet
+						config_get local_subnetmask "$cfg" local_subnetmask #It is assumed that subnetmask is gvn as a number.Eg:24 for 255.255.255.0 .same for remote_subnetmask
+						xappend "	leftsubnet=$local_subnet/$local_subnetmask"
+					;;
+					any)
+						xappend "	leftsubnet=0.0.0.0/0"
+					;;
+					ipgroup)
+						local local_ip_group all_networks
+						config_get local_ip_group "$cfg" local_ip_group
+
+						eval loop_var=\$ipgroup_"$local_ip_group"_ipv4_subnet
+						[ "$loop_var" != "" ] && {
+							for i in $(echo $loop_var | sed 's/,/ /g')
+							do
+								all_networks="$all_networks,$i"
+							done
+						}
+						eval loop_var=\$ipgroup_"$local_ip_group"_ipv4_addr
+						[ "$loop_var" != "" ] && {
+							for i in $(echo $loop_var | sed 's/,/ /g')
+							do
+								all_networks="$all_networks,$i"
+							done
+						}
+						all_networks=${all_networks#,}
+						xappend "	leftsubnet=$all_networks"
+					;;
+					gre)
+						local final_left_subnet gre_append
+						gre_append="[gre]"
+						final_left_subnet="$final_left$gre_append"
+						xappend "	leftsubnet=$final_left_subnet"
+					esac
+
+					config_get remote_sec_group "$cfg" remote_sec_group  #ip/subnet/any/ipgroup
+					case $remote_sec_group in
+					ip)
+						append_parm "$cfg" remote_sec_ip "	rightsubnet"
+					;;
+					subnet)
+						local remote_subnet remote_subnetmask
+						config_get remote_subnet "$cfg" remote_subnet
+						config_get remote_subnetmask "$cfg" remote_subnetmask
+						xappend "	rightsubnet=$remote_subnet/$remote_subnetmask"
+					;;
+					any)
+						[ "$__this_device" != "RV160" ] && [ "$__this_device" != "RV160W" ] && {
+							#NOTE: This is a custom ip rule addition, which would address the spoke traffic routing issue.
+							local temp_rule=`ip -4 rule show | grep $final_left`
+							[ -n "$temp_rule" ] && {
+								local route_table=`echo "$temp_rule" | xargs | cut -d ' ' -f 7`
+								case $local_sec_group in
+								ip)
+									local local_sec_ip
+									config_get local_sec_ip "$cfg" local_sec_ip
+									ip -4 rule add pref $IP_RULE_PREFIX_CURRENT from $local_sec_ip lookup $route_table
+								;;
+								subnet)
+									ip -4 rule add pref $IP_RULE_PREFIX_CURRENT from $local_subnet/$local_subnetmask lookup $route_table
+								;;
+								esac
+								IP_RULE_PREFIX_CURRENT=`expr $IP_RULE_PREFIX_CURRENT + 1`
+							}
+						}
+						xappend "	rightsubnet=0.0.0.0/0"
+					;;
+					ipgroup)
+						local remote_ip_group all_networks
+						config_get remote_ip_group "$cfg" remote_ip_group
+
+						all_networks=""
+						eval loop_var=\$ipgroup_"$remote_ip_group"_ipv4_subnet
+						[ "$loop_var" != "" ] && {
+							for i in $(echo $loop_var | sed 's/,/ /g')
+							do
+								all_networks="$all_networks,$i"
+							done
+						}
+						eval loop_var=\$ipgroup_"$remote_ip_group"_ipv4_addr
+						[ "$loop_var" != "" ] && {
+							for i in $(echo $loop_var | sed 's/,/ /g')
+							do
+								all_networks="$all_networks,$i"
+							done
+						}
+						all_networks=${all_networks#,}
+						xappend "	rightsubnet=$all_networks"
+					;;
+					gre)
+						local  final_right_subnet gre_append
+						config_get remote_gw "$cfg" remote_endpoint #It is assumed that remote_gw_type can be IP/FQDN only.All validation is at GUI end.
+						gre_append="[gre]"
+						final_right_subnet="$remote_gw$gre_append"
+						xappend "	rightsubnet=$final_right_subnet"
+					esac
+				#} NON-RFC=0
+				else
+					xappend "	auto=add"
+				fi
+
+				local xauth xauth_type xauth_user xauth_passwd
+				config_get_bool xauth "$cfg" xauth 0
+				if [ $xauth -eq 1 ]
+				then
+				#{
+					config_get xauth_type "$cfg" xauth_type
+					if [ $xauth_type = 'client' ]
+					then
+					#{
+						xappend "	leftauth2=eap"
+						append_parm "$cfg" xauth_user "	eap_identity"
+						config_get xauth_user "$cfg" xauth_user
+						config_get xauth_passwd "$cfg" xauth_passwd
+						#
+						# get passphrase from xauth_passwd and write below line into ipsec.secrets file
+						# <username> : EAP "password"
+						#
+						echo "$xauth_user : EAP \"$xauth_passwd\"" >> $SECRETSFILE
+					#}
+					elif [ $xauth_type = 'server' ]
+					then
+					#{
+						xappend_multi "\trightauth2=eap-radius\n\teap_identity=%any"
+					#}
+					fi
+				#}
+				fi
+			#} ike_version ikev2
+			fi
+			
+			append_bool "$cfg" aggressive_mode "	aggressive=yes"
+			append_bool "$cfg" ip_compress "	compress=yes"
+			local dpd
+			config_get_bool dpd "$cfg" dpd 0	
+			if [ $dpd -eq 1 ]
+			then
+			#{
+				append_parm "$cfg" dpd_delay "	dpddelay"
+				append_parm "$cfg" dpd_timeout "	dpdtimeout"
+				append_parm "$cfg" dpd_action "	dpdaction"  # possible values can be "clear/restart" only.It is assumed that only these values are given for us.
+			#dpdtimeout=`expr $dpddelay \* 3`
+			#}
+			fi
+
+			xappend "" #extra line feed
+
+			#if remote subnet is any, adding passthrough for LAN so, we will not loose DUT connectivity from LAN.
+			config_get remote_sec_group "$cfg" remote_sec_group
+			config_get local_sec_group "$cfg" local_sec_group
+			if [ "$remote_sec_group" = 'any' ]
+			then
+			#{
+				xappend_multi "conn passthrough_$tunnel_name\n\tauto=route\n\ttype=passthrough"
+
+				case $local_sec_group in
+				ip)
+					config_get local_sec_ip "$cfg" local_sec_ip
+					xappend_multi "\tleftsubnet=$local_sec_ip\n\trightsubnet=$local_sec_ip"
+				;;
+				subnet)
+					config_get local_subnet "$cfg" local_subnet
+					config_get local_subnetmask "$cfg" local_subnetmask
+					xappend_multi "\tleftsubnet=$local_subnet/$local_subnetmask\n\trightsubnet=$local_subnet/$local_subnetmask"
+				;;
+				ipgroup)
+					local all_local_sec_rec local_ip_group
+					config_get local_ip_group "$cfg" local_ip_group
+					eval loop_var=\$ipgroup_"$local_ip_group"_ipv4_addr
+					for i in $(echo $loop_var | sed 's/,/ /g')
+					do
+						all_local_sec_rec="$all_local_sec_rec $i"
+					done
+					eval loop_var=\$ipgroup_"$local_ip_group"_ipv4_subnet
+					for i in $(echo $loop_var | sed 's/,/ /g')
+					do
+						all_local_sec_rec="$all_local_sec_rec $i"
+					done
+					local itr=1
+					for i in $all_local_sec_rec
+					do
+						local jitr=1
+						for j in $all_local_sec_rec
+						do
+							if [ "$itr" -eq 1 ] && [ "$jitr" -eq 1 ]
+							then
+								xappend_multi "\tleftsubnet=$i\n\trightsubnet=$j"
+							else
+								xappend_multi "conn passthrough_$tunnel_name"-"$itr$jitr""\n\tauto=route\n\ttype=passthrough\n\tleftsubnet=$i\n\trightsubnet=$j"
+							fi
+							jitr=`expr $jitr + 1`
+						done
+						itr=`expr $itr + 1`
+					done
+				esac #no "any" case, since remote_sec_group is already any.
+				xappend "" #extra line feed
+			#}
+			fi
+
+			#For ikev1 profiles, we need to add multiple records into ipsec.conf, one for each leftsubnet and rightsubnet combination.
+			[ "$ike_version" = 'ikev1' ] && {
+				#moved complete code into single function.
+				#args: config_sec_groups $cfg $tunnel_name $is_backup $final_left
+				config_sec_groups "$cfg" "$tunnel_name" "0" "$final_left"
+			}
+
+			[ "$ike_version" = 'ikev2' ] && [ "$non_rfc" = "1" ] && {
+				config_sec_groups "$cfg" "$tunnel_name" "0" "$final_left"
+			}
+
+			#Must be at last. Also if any of above logic gets changed then below also need to be updated.
+			config_get_bool tunnel_backup "$cfg" tunnel_backup 0
+			if [ $tunnel_backup -eq 1 ]
+			then
+			#{
+			#START:Handling back-up tunnel
+				local tunnelName local_backup_iface local_backup final_left_backup
+#				local remote_ca
+				config_get tunnelName "$cfg" tunnel_name
+				#append_parm "$cfg" wan_interface "	left"   # It contains the WAN interface name. this is not needed at all.
+				#It is assumed that it will contain the IP address of the WAN interface used.
+				#append_parm "$cfg" local_backup "	left"
+				config_get local_backup_iface "$cfg" local_backup_iface
+				config_get local_backup "$cfg" local_backup "0.0.0.0"
+				if [ "$local_backup" = "0.0.0.0" ]
+				then
+				#{
+					local wanip=""
+					network_get_wanip_cached wanip "$local_backup_iface"
+					final_left_backup=$wanip
+					uci_set strongswan "$cfg" local_backup "$final_left_backup"
+					uci commit strongswan
+				#}
+				else
+				#{
+					final_left_backup=$local_backup
+				#}
+				fi
+				[ -n "$final_left_backup" ] || return
+				xappend_multi "conn "$tunnelName"_bkp\n\tauto=add\n\tleft=$final_left_backup"
+
+				append_parm "$cfg" remote_backup "	right"  #It is assumed that remote_gw_type can be IP/FQDN only.All validation is at GUI end.
+				if [ "$local_identifier_type" = 'ip' ]
+				then
+				#{
+					leftid="$final_left_backup"
+				#}
+				else
+				#{
+					leftid="$final_leftid"
+				#}
+				fi
+
+				append_parm "$profile" ike_lifetime "	ikelifetime"
+				append_parm "$profile" ipsec_lifetime "	lifetime"
+				xappend_multi "\t$proto=$p2_prop!\n\trekeymargin=$finalRekeyMargin"
+
+				if [ "$ike_version" = 'ikev1'  ]
+				then
+				#{
+					xappend_multi "\tike=$p1_prop!\n\tauto=add\n\tkeyexchange=ikev1"
+
+					if [ "$ike_auth_type" = 'psk' ]
+					then
+					#{
+						append_parm "$cfg" ike_auth_type "	leftauth"
+						append_parm "$cfg" ike_auth_type "	rightauth"
+						xappend "	leftid=$final_leftid"
+						append_parm "$cfg" remote_identifier "	rightid"
+						#No need of writing into secrets. Because it is already done above
+					#}
+					else   # value is "pubkey"
+					#{
+						append_parm "$cfg" ike_auth_type "	leftauth"
+						append_parm "$cfg" ike_auth_type "	rightauth"
+
+						if [ "$local_identifier_type" = 'asn1dn' ]
+						then
+						#{
+							xappend "	leftid=$subject"
+
+							config_get remote_identifier "$cfg" remote_identifier ""
+							if [ "$remote_identifier" != '%any' -a -n "$remote_identifier" ]
+							then
+							#{
+								xappend "	rightid=$remote_identifier"
+							#}
+							else
+							#{
+								xappend "	rightid=%any"
+							#}
+							fi
+						#}
+						else
+						#{
+							xappend "	leftid=$final_leftid"
+							append_parm "$cfg" remote_identifier "	rightid"
+						#}
+						fi
+						xappend "	leftcert=$final_cert_path"
+						# The private key file name should be used in ipsec.secrets
+						#while generating certificates, it is taken care that  file name of private key and corresponding
+						# certificate is the same. They are saved in different folders.
+						#Hence certificate name can be used for  private key file name.
+						echo ": RSA $final_key_path" >> $SECRETSFILE
+#						config_get remote_ca "$cfg" remote_ca
+#						linkRemoteCA $remote_ca
+					#}
+					fi
+
+					if [ $xauth -eq 1 ]
+					then
+					#{
+						if [ $xauth_type = 'client' ]
+						then
+						#{
+							append_parm "$cfg" xauth_type "	xauth"
+							xappend "	leftauth2=xauth"
+							append_parm "$cfg" xauth_user "	xauth_identity"
+						#}
+						elif [ $xauth_type = 'server' ]
+						then
+						#{
+							append_parm "$cfg" xauth_type "	xauth"
+							xappend "	rightauth2=xauth"
+						#}
+						fi
+					#}
+					fi
+				#}
+				else
+				#{ #ikev2
+					xappend_multi "\tike=$p1_prop\n\tkeyexchange=ikev2\n\treauth=no"
+					config_get remote_identifier_type "$cfg" remote_identifier_type
+					if [ "$leftauth" = 'psk' ] && [ "$rightauth" = 'psk' ]
+					then
+					#{
+						xappend_multi "\tleftauth=psk\n\trightauth=psk\n\tleftid=$final_leftid\n\trightid=$remote_identifier"
+						#No need of writing into secrets. Because it is already done above
+					#}
+					elif [ "$leftauth" = 'psk' ] && [ "$rightauth" = 'pubkey' ]
+					then
+					#{
+						xappend_multi "\tleftauth=psk\n\trightauth=pubkey\n\tleftid=$final_leftid"
+						config_get remote_identifier "$cfg" remote_identifier ""
+						if [ "$remote_identifier" != '%any' ]
+						then
+						#{
+							if [ "$remote_identifier_type" = "asn1dn" ]
+							then
+								xappend "	rightid=\"$remote_identifier\""
+							else
+								append_parm "$cfg" remote_identifier "	rightid"
+							fi
+						#}
+						else
+							append_parm "$cfg" remote_identifier "  rightid"
+						fi
+#						config_get remote_ca "$cfg" remote_ca
+#						linkRemoteCA $remote_ca
+					#}
+					elif [ "$leftauth" = 'pubkey' ] && [ "$rightauth" = 'psk' ]
+					then
+					#{
+						xappend_multi "\tleftauth=pubkey\n\trightauth=psk"
+
+						if [ "$local_identifier_type" = 'asn1dn' ]
+						then
+							xappend "	leftid=$subject"
+						else
+							xappend "	leftid=$final_leftid"
+						fi
+						xappend "	leftcert=$final_cert_path"
+						if [ "$remote_identifier" != '%any' ]
+						then
+						#{
+							xappend "	rightid=$remote_identifier"
+						#}
+						else
+							xappend "	rightid=%any"
+						fi
+					#}
+					elif [ "$leftauth" = 'pubkey' ] && [ "$rightauth" = 'pubkey' ]
+					then
+					#{
+						xappend_multi "\tleftauth=pubkey\n\trightauth=pubkey"
+						if [ "$local_identifier_type" = 'asn1dn' ]
+						then
+							xappend "	leftid=$subject"
+						else
+							xappend "	leftid=$final_leftid"
+						fi
+						xappend "	leftcert=$final_cert_path"
+						if [ "$remote_identifier" != '%any' ]
+						then
+						#{
+							if [ "$remote_identifier_type" = "asn1dn" ]
+							then
+								xappend "	rightid=\"$remote_identifier\""
+							else
+								append_parm "$cfg" remote_identifier "	rightid"
+							fi
+						#}
+						else
+							xappend "	rightid=%any"
+						fi
+#						config_get remote_ca "$cfg" remote_ca
+#						linkRemoteCA $remote_ca
+					#}
+					fi
+
+					if [ "$non_rfc" = "0" ]
+					then
+					#{ NON-RFC=0
+						case $local_sec_group in
+						ip)
+							append_parm "$cfg" local_sec_ip "	leftsubnet"
+						;;
+						subnet)
+							xappend "	leftsubnet=$local_subnet/$local_subnetmask"
+						;;
+						any)
+							xappend "	leftsubnet=0.0.0.0/0"
+						;;
+						ipgroup)
+							all_networks=""
+							eval loop_var=\$ipgroup_"$local_ip_group"_ipv4_subnet
+							[ "$loop_var" != "" ] && {
+								for i in $(echo $loop_var | sed 's/,/ /g')
+								do
+									all_networks="$all_networks,$i"
+								done
+							}
+							eval loop_var=\$ipgroup_"$local_ip_group"_ipv4_addr
+							[ "$loop_var" != "" ] && {
+								for i in $(echo $loop_var | sed 's/,/ /g')
+								do
+									all_networks="$all_networks,$i"
+								done
+							}
+							all_networks=${all_networks#,}
+							xappend "	leftsubnet=$all_networks"
+						;;
+						gre)
+							local final_left_subnet gre_append
+							gre_append="[gre]"
+							final_left_subnet="$final_left_backup$gre_append"
+							xappend "	leftsubnet=$final_left_subnet"
+						esac
+
+						case $remote_sec_group in
+						ip)
+							append_parm "$cfg" remote_sec_ip "	rightsubnet"
+						;;
+						subnet)
+							xappend "	rightsubnet=$remote_subnet/$remote_subnetmask"
+						;;
+						any)
+							xappend "	rightsubnet=0.0.0.0/0"
+						;;
+						ipgroup)
+							all_networks=""
+							eval loop_var=\$ipgroup_"$remote_ip_group"_ipv4_subnet
+							[ "$loop_var" != "" ] && {
+								for i in $(echo $loop_var | sed 's/,/ /g')
+								do
+									all_networks="$all_networks,$i"
+								done
+							}
+							eval loop_var=\$ipgroup_"$remote_ip_group"_ipv4_addr
+							[ "$loop_var" != "" ] && {
+								for i in $(echo $loop_var | sed 's/,/ /g')
+								do
+									all_networks="$all_networks,$i"
+								done
+							}
+							all_networks=${all_networks#,}
+							xappend "	rightsubnet=$all_networks"
+						;;
+						gre)
+							local  final_right_subnet gre_append
+							config_get remote_gw "$cfg" remote_backup  #It is assumed that remote_gw_type can be IP/FQDN only.All validation is at GUI end.
+							gre_append="[gre]"
+							final_right_subnet="$remote_gw$gre_append"
+							xappend "	rightsubnet=$final_right_subnet"
+						esac
+					#} NON-RFC=0
+					fi
+
+					local xauth xauth_type xauth_user xauth_passwd
+					config_get_bool xauth "$cfg" xauth 0
+					if [ $xauth -eq 1 ]
+					then
+					#{
+						config_get xauth_type "$cfg" xauth_type
+						if [ $xauth_type = 'client' ]
+						then
+						#{
+							xappend "	leftauth2=eap"
+							append_parm "$cfg" xauth_user "	eap_identity"
+							config_get xauth_user "$cfg" xauth_user
+							config_get xauth_passwd "$cfg" xauth_passwd
+							#
+							# get passphrase from xauth_passwd and write below line into ipsec.secrets file
+							# <username> : EAP "password"
+							#
+							echo "$xauth_user : EAP \"$xauth_passwd\"" >> $SECRETSFILE
+						#}
+						elif [ $xauth_type = 'server' ]
+						then
+						#{
+							xappend_multi "\trightauth2=eap-radius\n\teap_identity=%any"
+						#}
+						fi
+					#}
+					fi
+				#} #ikev2
+				fi
+				
+				append_bool "$cfg" aggressive_mode "	aggressive=yes"
+				append_bool "$cfg" ip_compress "	compress=yes"
+				if [ $dpd -eq 1 ]
+				then
+				#{
+					append_parm "$cfg" dpd_delay "	dpddelay"
+					append_parm "$cfg" dpd_timeout "	dpdtimeout"
+					append_parm "$cfg" dpd_action "	dpdaction"  # possible values can be "clear/restart" only.It is assumed that only these values are given for us.
+				#}
+				fi
+
+				xappend "" #extra line feed
+
+				[ "$ike_version" = 'ikev1' ] && {
+					#moved complete code into single function.
+					#args: config_sec_groups $cfg $tunnel_name $is_backup $final_left
+					config_sec_groups "$cfg" "$tunnel_name" "1" "$final_left_backup"
+				}
+
+				[ "$ike_version" = 'ikev2' ] && [ "$non_rfc" = "1" ] && {
+					config_sec_groups "$cfg" "$tunnel_name" "1" "$final_left"
+				}
+			#END: Handling back-up tunnel
+			#}
+			fi
+			##parse and configure in strongswan end
+		#}
+		elif [ "$keying_mode" = 'manual' ]
+		then
+		#{
+		#Frame XFRM commands are pushed to linux via custom utility "ipxfrm".
+
+			local local_gw wan_interface local_endpoint
+			config_get wan_interface "$cfg" wan_interface
+			config_get local_endpoint "$cfg" local_endpoint "0.0.0.0"
+			if [ "$local_endpoint" = "0.0.0.0" ]
+			then
+			#{
+				network_get_wanip_cached local_gw "$wan_interface"
+				uci_set strongswan "$cfg" local_endpoint "$local_gw"
+				uci commit strongswan
+			#}
+			else
+			#{
+				local_gw=$local_endpoint
+			#}
+			fi
+
+			[ -n "$local_gw" ] || return
+
+			local remote_gw localSubnet local_sec_group
+			config_get remote_gw "$cfg" remote_endpoint #It is assumed that remote_gw_type can be IP/FQDN only.All validation is at GUI end.
+	
+			config_get local_sec_group "$cfg" local_sec_group  #ip/subnet
+			case $local_sec_group in
+			ip)
+				config_get localSubnet "$cfg" local_sec_ip
+			;;
+			subnet)
+				local local_subnet local_subnetmask
+			config_get local_subnet "$cfg" local_subnet
+			config_get local_subnetmask "$cfg" local_subnetmask #It is assumed that subnetmask is given as a number.Eg:24 for 255.255.255.0 .same for remote_subnetmask
+				localSubnet="$local_subnet/$local_subnetmask"
+			;;
+			any)
+				localSubnet="0.0.0.0/0"
+			esac
+
+			local remoteSubnet remote_sec_group
+			config_get remote_sec_group "$cfg" remote_sec_group  #ip/subnet
+			case $remote_sec_group in
+			ip)
+				config_get remoteSubnet "$cfg" remote_sec_ip
+			;;
+			subnet)
+				local remote_subnet remote_subnetmask
+				config_get remote_subnet "$cfg" remote_subnet
+				config_get remote_subnetmask "$cfg" remote_subnetmask #It is assumed that subnetmask is given as a number.Eg:24 for 255.255.255.0 .same for remote_subnetmask
+				remoteSubnet="$remote_subnet/$remote_subnetmask"
+			;;
+			any)
+				[ "$__this_device" != "RV160" ] && [ "$__this_device" != "RV160W" ] && {
+					#NOTE: This is a custom ip rule addition, which would address the spoke traffic routing issue.
+					local temp_rule=`ip -4 rule show | grep $local_gw`
+					[ -n "$temp_rule" ] && {
+						local route_table=`echo "$temp_rule" | xargs | cut -d ' ' -f 5`
+						ip -4 rule add pref $IP_RULE_PREFIX_CURRENT from $localSubnet lookup $route_table
+						IP_RULE_PREFIX_CURRENT=`expr $IP_RULE_PREFIX_CURRENT + 1`
+					}
+				}
+
+				remoteSubnet="0.0.0.0/0"
+			esac
+
+			local in_spi out_spi enc_alg in_enc_key out_enc_key auth_alg in_auth_key out_auth_key
+			config_get in_spi "$profile" in_spi
+			config_get out_spi "$profile" out_spi
+			config_get enc_alg "$profile" enc_alg
+			config_get in_enc_key "$profile" in_enc_key
+			config_get out_enc_key "$profile" out_enc_key
+			config_get auth_alg "$profile" auth_alg
+			config_get in_auth_key "$profile" in_auth_key
+			config_get out_auth_key "$profile" out_auth_key
+			#usage: ipxfrm add [-h]
+			#	local-GW remote-GW local-subnet remote-subnet in-spi
+			#		out-spi encrypt-alg IN-ENCRYPT-KEY OUT-ENCRYPT-KEY
+			#		auth-alg IN-AUTH-KEY OUT-AUTH-KEY
+			ipxfrm add --lgw $local_gw --rgw $remote_gw --lsubnet $localSubnet --rsubnet $remoteSubnet \
+					--in_spi $in_spi --out_spi $out_spi --enc_alg $enc_alg --in_enc_key $in_enc_key --out_enc_key $out_enc_key \
+					--auth_alg $auth_alg --in_auth_key $in_auth_key --out_auth_key $out_auth_key
+		#}
+		else
+		#{
+			echo "Invalid keying_mode"
+		#}
+		fi
+	#}
+	fi  ### tun_enable end
+}
+
+config_client2site()
+{
+	local cfg="$1"
+	local tun_enable=0	
+	local client_type group_name
+	config_get group_name "$cfg" group_name
+	config_get client_type "$cfg" client_type
+#	#In PP we have only thirdparty Support and no EzVPN Support, Hence hardcoding here
+#	client_type='thirdparty'
+	config_get_bool tun_enable "$cfg" enable 0
+	if [ "$tun_enable" -eq 0 ]
+	then
+		#tunnel is not enabled. Do nothing for tunnels of this type.
+		echo "$group_name is disabled"
+	else
+		if [ "$client_type" = 'ezvpn' ]
+		then
+		#{
+			local wan_interface local_endpoint final_left final_leftid
+			config_get wan_interface "$cfg" wan_interface
+			config_get local_endpoint "$cfg" local_endpoint "0.0.0.0"
+			if [ "$local_endpoint" = "0.0.0.0" ]
+			then
+				network_get_wanip_cached final_left "$wan_interface"
+				uci_set strongswan "$cfg" local_endpoint "$final_left"
+				uci commit strongswan
+			else
+				final_left=$local_endpoint
+			fi
+			[ -n "$final_left" ] || return
+			xappend_multi "conn "$group_name"\n\tauto=add\n\tkeyexchange=ikev1\n\tleft=$final_left\n\tright=%any\n\tmodeconfig=pull\n\trekey=no"
+
+			local ike_auth_type local_identifier remote_identifier preshared_key
+		
+			config_get ike_auth_type "$cfg" ike_auth_type #possible values are psk/pubkey
+			if [ "$ike_auth_type" = 'psk' ]
+			then
+				local final_rightid=`echo $group_name | cut -d '_' -f 2-`
+				append_parm "$cfg" ike_auth_type "	leftauth"
+				append_parm "$cfg" ike_auth_type "	rightauth"
+				xappend_multi "\taggressive=yes\n\tleftid=$final_left\n\trightid=keyid:$final_rightid"
+				local_identifier=$final_left
+				config_get preshared_key "$cfg" preshared_key
+				local final_remote_identifier=`echo -n $final_rightid|hexdump -v -e '/1 "%02X"'`
+				echo "$local_identifier @#$final_remote_identifier : PSK \"$preshared_key\"" >> $SECRETSFILE
+			else
+				# value is "pubkey
+				append_parm "$cfg" ike_auth_type "	leftauth"
+				append_parm "$cfg" ike_auth_type "	rightauth"
+				local local_cert extract_subject subject1 subject final_cert_path final_key_path
+				local final_group_name=`echo $group_name | cut -d '_' -f 2-`
+				config_get local_cert "$cfg" local_cert
+				final_cert_path="$certificate_path$local_cert"
+				extract_subject=$(openssl x509 -in $final_cert_path -noout -subject)
+				subject1=${extract_subject#*/}
+				subject1="/$subject1"
+				subject=\"$subject1\"  # changing subject to required format
+				xappend "	leftid=$subject"
+					
+				rightid1=`echo "$subject1" | perl -p -e '@vars=split("/",$_); @newv=map {s/=.*/=*/r} @vars; print join("/",@newv)'|head -n 1 | perl -p -se 's/OU=\*/OU=$final_group_name/' -- -final_group_name=$final_group_name`
+				rightid=\"$rightid1\"
+				xappend_multi "\trightid=$rightid\n\tleftcert=$final_cert_path"
+				final_key_path="$private_key_path$local_cert"
+				echo ": RSA $final_key_path" >> $SECRETSFILE	
+				#Update certificate usage to CERTIFICATE module.
+				updateCertUsage_ipsec $local_cert "ClientToSite-$group_name"
+			fi
+			
+			#local profile=$DEFAULT_PROFILE
+			local confLifetime finalRekeyMargin
+			rekey_margin finalRekeyMargin $DEFAULT_IPSECLIFETIME
+			xappend_multi "\tikelifetime=$DEFAULT_IKELIFETIME\n\tlifetime=$DEFAULT_IPSECLIFETIME\n\trekeymargin=$finalRekeyMargin\n\tdpddelay=$DEFAUT_DPDDELAY\n\tdpdtimeout=$DEFAULT_DPDTIMEOUT\n\tdpdaction=$DEFAULT_DPDACTION"
+
+			local mode
+			config_get mode "$cfg" mode #possible values nem/client
+			if [ "$mode" = 'client' ]
+			then
+				local remote_ip_start remote_ip_end range
+				config_get remote_ip_start "$cfg" remote_ip_start
+				config_get remote_ip_end "$cfg" remote_ip_end
+				range="$remote_ip_start-$remote_ip_end"
+				xappend "	rightsourceip=$range"
+			
+			else    # value is nem
+				#configure all private addresses into rightsubnet for serving NEM clients.
+				xappend_multi "\trightsourceip=%config\n\trightsubnet=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+			fi
+			local split_tunnel
+			config_get_bool split_tunnel "$cfg"  split_tunnel 0
+			if [ "$split_tunnel" -eq 0 ]
+			then
+				xappend "	leftsubnet=0.0.0.0/0"
+			else
+				local split_tunnel_network networks concatenate
+				config_get split_tunnel_network "$cfg" split_tunnel_network
+				local split_tunnel_network_all=""
+				for networks in $split_tunnel_network; do
+					split_tunnel_network_all="$split_tunnel_network_all,$networks"
+				done
+				concatenate=`echo "$split_tunnel_network_all" | cut -d ',' -f 2-`
+				xappend "	leftsubnet=$concatenate"
+
+			fi
+
+			local xauth
+			config_get_bool xauth "$cfg" xauth 1
+			if [ "$xauth" == "1" ]
+			then
+				xappend_multi "\trightauth2=xauth\n\txauth=server"
+			fi
+		#}
+		else #client is of type 3rdparty
+		#{
+			xappend "" #extra line feed
+			local wan_interface local_endpoint final_left final_leftid
+			config_get wan_interface "$cfg" wan_interface
+			config_get local_endpoint "$cfg" local_endpoint "0.0.0.0"
+			if [ "$local_endpoint" = "0.0.0.0" ]
+			then
+				network_get_wanip_cached final_left "$wan_interface"
+				uci_set strongswan "$cfg" local_endpoint "$final_left"
+				uci commit strongswan
+			else
+				final_left=$local_endpoint
+			fi
+			[ -n "$final_left" ] || return
+			xappend_multi "conn "$group_name"\n\tauto=add\n\tleft=$final_left"
+
+			config_get remote_gw_type "$cfg" remote_gw_type
+			if [ "$remote_gw_type" = 'fqdn' -o "$remote_gw_type" = 'ip' ]
+			then
+				append_parm "$cfg" remote_endpoint "	right"
+			else #	remote endpoint is ip_addr or fqdn
+				xappend "	right=%any"
+			fi
+			append_bool "$cfg" aggressive_mode "	aggressive=yes"
+
+			local profile p1_prop proto  p2_prop  #NOTE: Always the profile's here must be of "auto" keying_mode
+			config_get profile "$cfg" profile
+			config_get p1_prop "$profile" p1_prop
+			append_parm "$profile" ike_lifetime "	ikelifetime"
+			config_get proto "$profile" proto
+			config_get p2_prop "$profile" p2_prop
+			xappend "	$proto=$p2_prop!"
+			append_parm "$profile" ipsec_lifetime "	lifetime"
+			local confLifetime finalRekeyMargin
+			config_get confLifetime "$profile" ipsec_lifetime
+			rekey_margin finalRekeyMargin $confLifetime
+			xappend "	rekeymargin=$finalRekeyMargin"
+
+			local ike_version
+			config_get ike_version "$profile" ike_version
+			if [ "$ike_version" = 'ikev1'  ]
+			then
+			#{
+				xappend_multi "\tike=$p1_prop!\n\tkeyexchange=ikev1"
+			#}
+			else
+			#{
+				xappend_multi "\tike=$p1_prop\n\tkeyexchange=ikev2\n\treauth=no"
+			#}
+			fi
+
+			local xauth
+			config_get_bool xauth "$cfg" xauth 1
+
+			local local_identifier_type local_identifier
+			config_get local_identifier_type "$cfg" local_identifier_type
+			config_get local_identifier "$cfg" local_identifier
+			if [ "$local_identifier_type" = 'ip' ]
+			then
+				#It is assumed that local_identifier can be IP/FQDN/userFQDN only. All validation is at GUI end.
+				final_leftid=$final_left
+			else #FQDN/userFQDN
+				final_leftid=$local_identifier
+			fi
+#			xappend "	leftid=$final_leftid"
+
+			local ike_auth_type remote_identifier preshared_key
+
+			config_get ike_auth_type "$cfg" ike_auth_type #possible values are psk/pubkey
+			if [ "$ike_auth_type" = 'psk' ]
+			then
+			#{
+				#append_parm "$cfg" ike_auth_type "	authby"
+				append_parm "$cfg" ike_auth_type "	leftauth"
+				append_parm "$cfg" ike_auth_type "	rightauth"
+				xappend "	leftid=$final_leftid"
+				append_parm "$cfg" remote_identifier "	rightid"
+				config_get remote_identifier "$cfg" remote_identifier
+				config_get preshared_key "$cfg" preshared_key
+				echo "$final_leftid $remote_identifier : PSK \"$preshared_key\"" >> $SECRETSFILE
+
+			#}
+			else
+			#{
+				local remote_ca
+				# value is "pubkey"
+				# For IKEv2, XAUTH/EAP is applicable only when ike_auth_type is pubkey
+				if [ "$ike_version" = 'ikev1' ] || [ "$ike_version" = 'ikev2'  -a  "$xauth" = "0" ]
+				then
+				#{
+					append_parm "$cfg" ike_auth_type "	leftauth"
+					append_parm "$cfg" ike_auth_type "	rightauth"
+				#}
+				else
+				#{
+					#IKEv2 and Xauth is enabled
+					xappend_multi "\tleftauth=pubkey\n\trightauth=eap-radius\n\teap_identity=%any\n\tleftsendcert=always\n\trightsendcert=never"
+				#}
+				fi
+
+
+				local local_cert local_identifier_type extract_subject subject1 subject final_cert_path final_key_path
+				config_get local_cert "$cfg" local_cert
+				final_cert_path="$certificate_path$local_cert"
+				config_get local_identifier_type "$cfg" local_identifier_type
+				if [ "$local_identifier_type" = 'asn1dn' ]
+				then
+					extract_subject=$(openssl x509 -in $final_cert_path -noout -subject)
+					subject1=${extract_subject#*/}
+					subject1="/$subject1"
+					subject=\"$subject1\"  # changing subject to required format
+					xappend "	leftid=$subject"
+					config_get remote_identifier "$cfg" remote_identifier ""
+					if [ "$remote_identifier" != '%any' -a -n "$remote_identifier" ]
+					then
+						xappend "	rightid=\"$remote_identifier\""
+					else
+						xappend "	rightid=%any"
+					fi
+				else
+					xappend "	leftid=$final_leftid"
+					append_parm "$cfg" remote_identifier "	rightid"
+				fi
+				xappend "	leftcert=$final_cert_path"
+				# The private key file name should be used in ipsec.secrets
+				#while generating certificates, it is taken care that  file name of private key and corresponding
+				#certificate is the same. They are saved in different folders.
+				#Hence certificate name can be used for  private key file name.
+				final_key_path="$private_key_path$local_cert"
+				echo ": RSA $final_key_path" >> $SECRETSFILE
+				#Update certificate usage to CERTIFICATE module.
+				updateCertUsage_ipsec $local_cert "ClientToSite-$group_name"
+				config_get remote_ca "$cfg" remote_ca
+				linkRemoteCA $remote_ca $group_name
+			#}
+			fi
+
+			if [ "$ike_version" = 'ikev1' -a "$xauth" = "1" ]
+			then
+			#{
+				xappend_multi "\trightauth2=xauth\n\txauth=server"
+			#}
+			fi
+
+			xappend_multi "\tdpddelay=$DEFAUT_DPDDELAY\n\tdpdtimeout=$DEFAULT_DPDTIMEOUT\n\tdpdaction=$DEFAULT_DPDACTION\n\trekey=no"
+
+			local remote_ip_start remote_ip_end local_subnet local_subnetmask
+			local local_sec_group local_sec_ip range local_finalsubnet
+			local split_tunnel split_tunnel_network ip_pool
+
+			config_get_bool ip_pool "$cfg" ip_pool
+			if [ $ip_pool -eq 1 ]
+			then
+				config_get remote_ip_start "$cfg" remote_ip_start
+				config_get remote_ip_end "$cfg" remote_ip_end
+				range="$remote_ip_start-$remote_ip_end"
+				xappend_multi "\trightsourceip=$range\n\tmodeconfig=pull"
+			else
+				xappend_multi "\trightsourceip=%config\n\tmodeconfig=push"
+			fi
+			
+			config_get local_subnet "$cfg" local_subnet
+			config_get local_subnetmask "$cfg" local_subnetmask
+			config_get local_sec_group "$cfg" local_sec_group
+			config_get local_sec_ip "$cfg" local_sec_ip
+			#split tunnel  handled
+			config_get_bool split_tunnel "$cfg"  split_tunnel 0
+			if [ "$split_tunnel" -eq 0 ]
+			then
+				if [ "$local_sec_group" = 'ip' ]
+				then
+					append_parm "$cfg" local_sec_ip "	leftsubnet"
+				elif [ "$local_sec_group" = 'any' ]
+				then
+					xappend "	leftsubnet=0.0.0.0/0"
+				else
+					local_finalsubnet="$local_subnet/$local_subnetmask"
+					xappend "	leftsubnet=$local_finalsubnet"
+				fi
+			else
+				config_get split_tunnel_network "$cfg" split_tunnel_network
+				if [ "$local_sec_group" = 'ip' ] #If local_sec_group is "any" with split tunnel networks, any should be ignored.
+				then
+					local_finalsubnet=$local_sec_ip
+				elif [ "$local_sec_group" = 'subnet' ]
+				then
+					local_finalsubnet="$local_subnet/$local_subnetmask"
+                                fi
+				local networks concatenate
+				local split_tunnel_network_all=""
+				for networks in $split_tunnel_network; do
+					if [ "$split_tunnel_network_all" == "" ]
+					then
+						split_tunnel_network_all="$networks"
+					else
+						split_tunnel_network_all="$split_tunnel_network_all,$networks"
+					fi
+				done
+				[  "$split_tunnel_network_all" != "" -a "$local_finalsubnet" != "" ] && {
+					local_finalsubnet="$local_finalsubnet,"
+				}
+				concatenate="$local_finalsubnet$split_tunnel_network_all"
+				if [ "$concatenate" == "" ]
+				then
+					xappend "	leftsubnet=0.0.0.0/0"
+				else
+					xappend "	leftsubnet=$concatenate"
+				fi
+			fi
+		#}
+		fi
+		#handling of common configuration.
+		#start
+		local primary_dns_server secondary_dns_server primary_wins_server secondary_wins_server
+		local default_domain backup_server1 backup_server2 backup_server3 split_dns split_dns_domain dnsservers
+		local backupservers nbnsservers
+		config_get primary_dns_server "$cfg" primary_dns_server
+		config_get secondary_dns_server "$cfg" secondary_dns_server
+		config_get primary_wins_server "$cfg" primary_wins_server
+		config_get secondary_wins_server "$cfg" secondary_wins_server
+		config_get default_domain "$cfg" default_domain
+		config_get_bool split_dns "$cfg" split_dns 0
+
+		[ -n "$primary_dns_server" ] && {
+			dnsservers=$primary_dns_server
+			[ -n "$secondary_dns_server" ] && {
+				dnsservers="$dnsservers,$secondary_dns_server"
+			}
+			xappend "	rightdns=$dnsservers"
+		}
+		[ -n "$primary_wins_server" ] && {
+			nbnsservers=$primary_wins_server
+			[ -n "$secondary_wins_server" ] && {
+				nbnsservers="$nbnsservers,$secondary_wins_server"
+			}
+			xappend "	wins=$nbnsservers"
+		}
+		[ "$client_type" = 'ezvpn' ] && {
+			config_get backup_server1 "$cfg" backup_server1
+			config_get backup_server2 "$cfg" backup_server2
+			config_get backup_server3 "$cfg" backup_server3
+			[ -n "$backup_server1" ] && {
+				backupservers="$backup_server1"
+				[ -n "$backup_server2" ] && {
+					backupservers="$backupservers,$backup_server2"
+					[ -n "$backup_server3" ] && {
+						backupservers="$backupservers,$backup_server3"
+					}
+				}
+				xappend "	backupserver=$backupservers"
+			}
+		}
+		[ -n "$default_domain" ] && {
+			xappend "	defaultdomain=$default_domain"
+		}
+		[ "$split_dns" -eq 1 ] && {
+			config_get split_dns_domain "$cfg" split_dns_domain
+			local finalSDD=`echo "$split_dns_domain" | awk -v "OFS=," '{ $1 = $1; print; }'` #Replace space with ","
+			[ -n "$finalSDD" ] && {
+				xappend "	splitdns=$finalSDD"
+			}
+		}
+		xappend "" #extra line feed
+		#end
+	fi
+}
+
+config_gre()
+{
+	local cfg="$1"
+	local tun_enable=0
+
+	config_get_bool tun_enable "$cfg" enable 0
+	if [ "$tun_enable" -eq 0 ]
+	then
+		#tunnel is not enabled. Do nothing for tunnels of this type.
+		#echo "found a disabled tunnel"
+		local gre_tunnel_name
+		config_get gre_tunnel_name "$cfg" gre_tunnel_name
+		echo "$gre_tunnel_name is disabled"
+	else
+#		local gre_interface_name=`uci get strongswan.$gre_tunnel_name.gre_interface_name`
+		local gre_interface_name
+		config_get gre_interface_name $cfg gre_interface_name
+		#cmm -c tunnel gre-$gre_interface_name add gre ipsec 1
+
+		local profile final_left final_leftid tunnel_source tunnel_destination
+		append_conn "$cfg" gre_tunnel_name "conn"
+		config_get profile "$cfg" profile
+		config_get tunnel_source "$cfg" tunnel_source
+		network_get_wanip_cached final_left "$tunnel_source"
+		xappend "	left=$final_left"
+
+		#tunnel_destination_type can be ip/fqdn/dynip
+		config_get tunnel_destination "$cfg" tunnel_destination
+		append_parm "$cfg" tunnel_destination "	right"
+
+		local final_left_subnet final_right_subnet gre_append
+		gre_append="[gre]"
+		final_left_subnet="$final_left$gre_append"
+		final_right_subnet="$tunnel_destination$gre_append"
+		xappend_multi "\tleftsubnet=$final_left_subnet\n\trightsubnet=$final_right_subnet"
+
+		local local_identifier_type local_identifier
+		config_get local_identifier_type "$cfg" local_identifier_type
+		config_get local_identifier "$cfg" local_identifier
+		if [ "$local_identifier_type" = 'ip' ]
+		then
+			#It is assumed that local_identifier can be IP/FQDN/userFQDN only. All validation is at GUI end.
+			final_leftid=$final_left
+		else	#FQDN/userFQDN
+			final_leftid=$local_identifier
+		fi
+
+		local ike_auth_type remote_identifier preshared_key
+		config_get ike_auth_type "$cfg" ike_auth_type #possible values are psk/pubkey
+		if [ "$ike_auth_type" = 'psk' ]
+		then
+			append_parm "$cfg" ike_auth_type "	leftauth"
+			append_parm "$cfg" ike_auth_type "	rightauth"
+			xappend "	leftid=$final_leftid"
+			append_parm "$cfg" remote_identifier "	rightid"
+			config_get remote_identifier "$cfg" remote_identifier
+			config_get preshared_key "$cfg" preshared_key
+			echo "$final_leftid $remote_identifier : PSK \"$preshared_key\"" >> $SECRETSFILE
+		else   # value is "pubkey"
+			append_parm "$cfg" ike_auth_type "	leftauth"
+			append_parm "$cfg" ike_auth_type "	rightauth"
+			local local_cert extract_subject subject1 subject
+			config_get local_cert "$cfg" local_cert
+			final_cert_path="$certificate_path$local_cert"
+
+			if [ "$local_identifier_type" = 'asn1dn' ]
+                        then
+				extract_subject=$(openssl x509 -in $final_cert_path -noout -subject)
+				subject1=${extract_subject#*/}
+				subject1="/$subject1"
+				subject=\"$subject1\"  # changing subject to required format
+				xappend "	leftid=$subject"
+				config_get remote_identifier "$cfg" remote_identifier ""
+				if [ "$remote_identifier" != '%any' -a -n "$remote_identifier" ]
+				then
+					xappend "	rightid=\"$remote_identifier\""
+				else
+					xappend "	rightid=%any"
+				fi
+			else
+				config_get local_identifier "$cfg" local_identifier
+				config_get remote_identifier "$cfg" remote_identifier
+				xappend "	leftid=$final_leftid"
+				append_parm "$cfg" remote_identifier "	rightid"
+			fi
+			xappend "	leftcert=$final_cert_path"
+			final_key_path="$private_key_path$local_cert"
+			echo ": RSA $final_key_path" >> $SECRETSFILE
+			#Update certificate usage to CERTIFICATE module.
+			updateCertUsage_ipsec $local_cert "GRE-$gre_tunnel_name"
+		fi
+
+		append_bool "$cfg" aggressive_mode "	aggressive=yes"
+
+		xappend "	type=transport"
+		local p1_prop proto p2_prop
+		config_get p1_prop "$profile" p1_prop
+		xappend "	ike=$p1_prop!"
+		append_parm "$profile" ike_lifetime "	ikelifetime"
+
+		config_get proto "$profile" proto
+		config_get p2_prop "$profile" p2_prop
+		xappend "	$proto=$p2_prop!"
+		append_parm "$profile" ipsec_lifetime "	lifetime"
+		local confLifetime finalRekeyMargin
+		config_get confLifetime "$profile" ipsec_lifetime
+		rekey_margin finalRekeyMargin $confLifetime
+		xappend "	rekeymargin=$finalRekeyMargin"
+		xappend "" #extra line feed
+	fi
+}
+
+config_reload()
+{
+	#Note: It has been reported that in a very rare scenario ipsec.conf is been accessed by multiple instances
+	#	of this script. So it is decided to have a lock around access to the ipsec.conf file
+
+	[ -n $1 ] || lock $CONFIGLOCKFILE  #acquire lock or wait until it acquires one.
+
+	echo "# auto-generated config file from $UCIPATH/strongswan" > $CONFIGFILE
+	echo "# auto-generated config file from $UCIPATH/strongswan" > $SECRETSFILE
+#	config_load strongswan
+
+	local temp_rule=$IP_RULE_PREFIX_START
+	while [ 1 ]
+	do
+		local found=`ip -4 rule list | grep $temp_rule:`
+		if [ -n "$found" ]
+		then
+			ip -4 rule del pref $temp_rule
+			temp_rule=`expr $temp_rule + 1`
+		else
+			break
+		fi
+	done
+
+	#Removing all CA certificate links, so required links will be created part of its config parsing
+	rm -f $tmp_ca_path/*.pem
+
+	config_setup
+	config_default
+	config_foreach config_l2tpd l2tpdipsec
+	config_foreach config_site2site site2site
+#	config_foreach config_client2site client2site
+	#Only 3rdparty type
+	uci show strongswan | grep "client_type=3rdparty" | cut -f 2 -d .  | while read line
+	do
+		config_client2site $line
+	done
+	#Only ezvpn type
+	uci show strongswan | grep "client_type=ezvpn" | cut -f 2 -d .  | while read line
+	do
+		config_client2site $line
+	done
+
+	local enableTVPNC=`uci get strongswan.@clientGlobal[0].client_status`
+	if [ "$enableTVPNC" -eq 1 ]
+	then
+		config_foreach config_client client
+	fi
+	#GRE over IPSec is split into multiple pages in BB2-MR1
+	#config_foreach config_gre greoipsec
+	config_l2tpd_psk
+
+	[ -n $1 ] || lock -u $CONFIGLOCKFILE
+}
+
+exec_ipsec()
+{
+	if [ "$ru_check" = "RU" ]; then
+		exit 0
+	fi
+
+	config_load strongswan
+	case $1 in
+	start)
+		#Below command takes care of bringing UP of all the configured connections in the ipsec.conf file. So no other work to do.
+		logger -t VPN-cfg "Starting ipsec..."
+		ipsec start
+		sleep 1 #May need a sec to settle down.
+	;;
+	restart)
+		logger -t VPN-cfg "Restarting ipsec..."
+		ipsec restart
+	;;
+	stop)
+		#Below command takes care of tearing down all the connections internally. We don't need to do anything.
+		logger -t VPN-cfg "Stopping ipsec..."
+		ipsec stop
+	;;
+	up)
+		logger -t VPN-cfg "Bringing UP tunnel $2 ..."
+		config_get profile "$2" profile
+		config_get ike_version "$profile" ike_version
+
+		[ "$ike_version" = 'ikev1' ] && {
+		local count=$(uci_get_state strongswan.core."$2")
+		for i in `seq 1 $count`
+		do
+			ipsec up "$2"-"$i" &
+		done
+		}
+
+		[ "$ike_version" = 'ikev2' ] && {
+			ipsec up $2 &
+		}
+
+		#Tunnel UP is called only from GUI for connect/disconnect buttons. So return below. TODO: REVIEW
+		return 0
+	;;
+	down)
+		logger -t VPN-cfg "Bringing DOWN tunnel $2 ..."
+		ipsec down $2 &
+		#Tunnel UP is called only from GUI for connect/disconnect buttons. So return below. TODO: REVIEW
+		return 0
+	;;
+	*)
+		#Handle reload here.
+		#logger -t VPN-cfg "reloading ipsec..."
+		ipsec reload
+		ipsec rereadall
+		sleep 1  #May need to be increased after testing
+	esac
+}
+
+delete_ipxfrm()
+{
+	local tunnel_name=$1
+	local command=$2
+
+	if [ $command = 'DEL' ]
+	then
+		local profile local_gw remote_gw localSubnet local_sec_group
+
+		config_get profile "$tunnel_name" profile
+		config_get local_gw "$tunnel_name" local_endpoint
+		config_get remote_gw "$tunnel_name" remote_endpoint
+
+		config_get local_sec_group "$tunnel_name" local_sec_group  #ip/subnet
+		case $local_sec_group in
+		ip)
+			config_get localSubnet "$tunnel_name" local_sec_ip
+		;;
+		subnet)
+			local local_subnet local_subnetmask
+			config_get local_subnet "$tunnel_name" local_subnet
+			config_get local_subnetmask "$tunnel_name" local_subnetmask #It is assumed that subnetmask is given as a number.Eg:24 for 255.255.255.0 .same for remote_subnetmask
+			localSubnet="$local_subnet/$local_subnetmask"
+       		;;
+		any)
+			localSubnet="0.0.0.0/0"
+       		esac
+
+		local remote_sec_group remoteSubnet
+		config_get remote_sec_group "$tunnel_name" remote_sec_group  #ip/subnet
+       		case $remote_sec_group in
+       		ip)
+			config_get remoteSubnet "$tunnel_name" remote_sec_ip
+		;;
+		subnet)
+			local remote_subnet remote_subnetmask
+			config_get remote_subnet "$tunnel_name" remote_subnet
+			config_get remote_subnetmask "$tunnel_name" remote_subnetmask #It is assumed that subnetmask is given as a number.Eg:24 for 255.255.255.0 .same for remote_subnetmask
+			remoteSubnet="$remote_subnet/$remote_subnetmask"
+		;;
+		any)
+			remoteSubnet="0.0.0.0/0"
+		esac
+
+		local in_spi out_spi
+		config_get in_spi "$profile" in_spi
+		config_get out_spi "$profile" out_spi
+		#usage: ipxfrm delete [-h]
+		#			local-GW remote-GW local-subnet remote-subnet in-spi
+		#			out-spi
+		ipxfrm delete --lgw $local_gw --rgw $remote_gw --lsubnet $localSubnet --rsubnet $remoteSubnet --in_spi $in_spi --out_spi $out_spi
+	elif [ $command = 'MOD' ]
+	then
+		local profile=`uci get strongswan-bkp.$tunnel_name.profile`
+		local local_gw=`uci get strongswan-bkp.$tunnel_name.local_endpoint`
+		local remote_gw=`uci get strongswan-bkp.$tunnel_name.remote_endpoint`
+
+		local localSubnet	
+		local local_sec_group=`uci get strongswan-bkp.$tunnel_name.local_sec_group`
+		case $local_sec_group in
+		ip)
+			localSubnet=`uci get strongswan-bkp.$tunnel_name.local_sec_ip`
+		;;
+		subnet)
+			local local_subnet=`uci get strongswan-bkp.$tunnel_name.local_subnet`
+			local local_subnetmask=`uci get strongswan-bkp.$tunnel_name.local_subnetmask`
+			localSubnet="$local_subnet/$local_subnetmask"
+       		;;
+		any)
+			localSubnet="0.0.0.0/0"
+       		esac
+
+		local remoteSubnet
+		local remote_sec_group=`uci get strongswan-bkp.$tunnel_name.remote_sec_group`
+       		case $remote_sec_group in
+       		ip)
+			remoteSubnet=`uci get strongswan-bkp.$tunnel_name.remote_sec_ip`
+		;;
+		subnet)
+			local remote_subnet=`uci get strongswan-bkp.$tunnel_name.remote_subnet`
+			local remote_subnetmask=`uci get strongswan-bkp.$tunnel_name.remote_subnetmask`
+			remoteSubnet="$remote_subnet/$remote_subnetmask"
+		;;
+		any)
+			remoteSubnet="0.0.0.0/0"
+		esac
+
+		local in_spi=`uci get strongswan-bkp.$profile.in_spi`
+		local out_spi=`uci get strongswan-bkp.$profile.out_spi`
+		#usage: ipxfrm delete [-h]
+		#			local-GW remote-GW local-subnet remote-subnet in-spi
+		#			out-spi
+		ipxfrm delete --lgw $local_gw --rgw $remote_gw --lsubnet $localSubnet --rsubnet $remoteSubnet --in_spi $in_spi --out_spi $out_spi
+	fi
+}
+
+boot()
+{
+	if [ "$ru_check" = "RU" ]; then
+		exit 0
+	fi
+
+	### This is meant for a fresh start. Don't handle any ADD/DEL/MOD in $TEMPUCIPATH/strongswan
+	insmod /lib/modules/3.2.54/nbvpn.ko
+	insmod /lib/modules/3.2.54/sbr_cdev.ko
+
+	# /etc/ssl/certs is the storage location of cacerts in our router
+	# /etc/ipsec.d/cacerts is the default location of cacerts for strongswan. Hence creating a soft link to avoid complexity in configuration.
+	rm -r /etc/ipsec.d/cacerts
+	rm -r /etc/ipsec.d/certs
+	rm -r /etc/ipsec.d/private
+#	ln -sn /etc/ssl/certs/ /etc/ipsec.d/cacerts
+#	ln -sn /tmp/etc/ipsec.d/cacerts /etc/ipsec.d/cacerts
+	mkdir -p /tmp/etc/ipsec.d/cacerts
+	ln -sn $tmp_ca_path /etc/ipsec.d/cacerts
+	ln -sn /etc/ssl/certs/ /etc/ipsec.d/certs
+	ln -sn /etc/ssl/private/ /etc/ipsec.d/private
+	[ -f /etc/ipsec.conf ] && rm -r /etc/ipsec.conf
+	[ -f /etc/ipsec.secrets ] && rm -r /etc/ipsec.secrets
+	touch $CONFIGFILE
+	touch $SECRETSFILE
+	ln -s $CONFIGFILE /etc/ipsec.conf
+	ln -s $SECRETSFILE /etc/ipsec.secrets
+
+	cmm -c set stat enable ipsec
+	cmm -c set sa_query_timer enable
+	cmm -c set sa_query_timer timer_value 20
+
+	#Copy the isakmp.bin from flash to the /tmp/ for effective access as NAND flash reading is CPU intensive
+	mkdir /tmp/ipsec
+	cp /usr/sbin/isakmp.bin /tmp/ipsec/
+
+	#GRE is now made independent. So a GRE tunnel interface can exist without an IPSec on top of it.
+	iptables -w --table filter --append vpn_input_bypass --protocol 47 --jump ACCEPT
+
+	#For DUT acting as L2TP/PPTP server types, for each connected client we create an interface ppp+.
+	iptables -w --table filter --append vpn_input_bypass --in-interface ppp+ --jump ACCEPT
+	iptables -w --table filter --append vpn_fw_bypass --in-interface ppp+ --jump ACCEPT
+#	iptables -w --table filter --append vpn_fw_bypass --in-interface ppp+ --out-interface eth3.+ --jump ACCEPT
+	iptables -w --table filter --append vpn_fw_bypass --in-interface eth3.+ --out-interface ppp+ --jump ACCEPT
+
+	iptables -w --table filter --append vpn_input_bypass --in-interface gre-+ --jump ACCEPT
+	iptables -w --table filter --append vpn_fw_bypass --in-interface gre-+ --jump ACCEPT
+	iptables -w --table filter --append vpn_fw_bypass --out-interface gre-+ --jump ACCEPT
+
+#	For calculating the PMTU, so MTU will set properly for IPSEC tunnels.
+	echo 1 > /proc/sys/net/ipv4/ip_forward_use_pmtu
+
+	#For TVPNC SNAT rules.
+	iptables -w --table nat --new-chain vpn_tvpnc_snat
+	iptables -w --table nat --append vpn_nat_bypass --jump vpn_tvpnc_snat
+
+#	iptables -w -I vpn_mangle_output -t mangle -p udp --match multiport --dports 500,4500 -j MARK --set-mark 0x20
+	[ "$__this_device" != "RV160" ] && [ "$__this_device" != "RV160W" ] && {
+		iptables -w -I vpn_mangle_output -t mangle -j MARK --set-mark 0x20
+	}
+
+	uci commit strongswan #Needed during boot.
+
+	#For tunnels of IKEv1 kind, we will have multile sections in ipsec.conf. Hence we maintain a counter here.
+	uci_set_state strongswan core "" strongswan_state
+	#For handline split DNS.
+	uci_set_state dhcp splitdns "" strongswan_state
+
+	#Handling IPSec global enable/disable
+	isEnable=`uci get strongswan.ipsecGlobal_0.status`
+	[ "$isEnable" = "1" ] && {
+		start
+		exit 0
+	}
+	#If IPSec is diabled globally, we may still need to have the table 220 and its services.
+	ip -4 rule add pref 220 lookup 220
+	update_records=`uci show strongswan | grep  ".pem" | grep -v remote_ca`
+	for rec in $update_records
+	do
+		rec_name=`echo $rec | awk -F . '{printf $2}'`
+		cert_name=`echo $rec | awk -F = '{printf $2}'`
+		case $rec_name in
+			s2s_*)
+				updateCertUsage_ipsec $cert_name "SiteToSite-$rec_name"
+			;;
+			c2s_*)
+				updateCertUsage_ipsec $cert_name "ClientToSite-$rec_name"
+			;;
+			tvpnc_*)
+				updateCertUsage_ipsec $cert_name "Tele-WorkerVPN-$rec_name"
+			;;
+			gre_*)
+				updateCertUsage_ipsec $cert_name "GRE-$rec_name"
+			;;
+		esac
+	done
+}
+
+start()
+{
+	if [ "$ru_check" = "RU" ]; then
+		exit 0
+	fi
+
+	#Install required rules to allow clients to connect us.
+	iptables -w --table filter --append vpn_input_bypass --protocol udp --dport 500 --jump ACCEPT
+	iptables -w --table filter --append vpn_input_bypass --protocol udp --dport 4500 --jump ACCEPT
+	iptables -w --table filter --append vpn_input_bypass --protocol 50 --jump ACCEPT
+	iptables -w --table filter --append vpn_input_bypass --protocol 51 --jump ACCEPT
+	#Allowing IPComp protocol in slow path
+	iptables -w --table filter --append vpn_input_bypass --protocol 108 --jump ACCEPT
+
+	#Bypass all DNAT based rules like port forwarding, port triggering.... etc for IPSec traffic as these rules are targeted for traffic coming from WAN
+	iptables -w --table nat --append vpn_nat_prerouting_bypass --match policy --dir in --pol ipsec --jump ACCEPT
+
+	vpnTimer & #start of timer module.
+	vpnLed & #start VPN LED Daemon
+
+	config_load strongswan
+	source uci_cache $IPGROUP_CONFIG
+	config_reload
+	exec_ipsec start     #function-call args1 args2 ...
+	config_clear strongswan #Unload configuration of strongswan 
+	#sleep 1
+
+	#check for multiple ip rules
+	check_dup=$(ip rule show | grep "^220:" | wc -l)
+	[ "$check_dup" == "2" ] && {
+		ip rule del pref 220
+	}
+
+	# Now bringing up all the connection records that are enabled.
+	local allSite2Site=$(uci show strongswan | grep -e "=site2site" | cut -f 2 -d . | cut -f 1 -d =)
+	local site2siteCount=$(echo $allSite2Site | wc -l)
+	local allclient2site=$(uci show strongswan | grep -e "=client2site" | cut -f 2 -d . | cut -f 1 -d =)
+	local client2siteCount=$(echo $allclient2site | wc -l)
+	local TVPNCCount=$(uci show strongswan | grep -e "=client$" | cut -f 2 -d . | cut -f 1 -d = | wc -l)
+	local allGRETunnelNames=$(uci show strongswan | grep -e "=greoipsec" | cut -f 2 -d . | cut -f 1 -d =)
+	local greoipsecCount=$(echo $allGRETunnelNames | wc -l )
+
+	#echo "Total $site2siteCount site2site records...!"
+	#echo "Total $client2siteCount client2site records...!"
+	#echo "Total $TVPNCCount Tele-Worker VPN Client records...!"
+	if [ $site2siteCount -gt 0 ]
+	then
+		#Handling site2site records
+		#local allSite2Site=$(uci show strongswan | grep -e "=site2site" | cut -f 2 -d . | cut -f 1 -d =)
+		local tunnel_name
+		for tunnel_name in $allSite2Site; do
+			local enable
+			config_get enable "$tunnel_name" enable
+			if [ "$enable" -eq 1 ]
+			then
+				local profile keying_mode
+				config_get profile "$tunnel_name" profile
+				config_get keying_mode "$profile" keying_mode
+				if [ "$keying_mode" = 'manual' ]
+				then
+					echo "do nothing already taken care in config_reload...!"
+				else
+					logger -t VPN-cfg "loading tunnel $tunnel_name..."
+
+					local keep_alive
+					config_get_bool keep_alive "$tunnel_name" keep_alive 0
+
+					uci_toggle_state dhcp splitdns $tunnel_name 0
+
+					#Note: During boot-up we are not going to bringup the tunnel. But since the tunnel is a routed one
+					#	if interesting traffic comes, it gets triggered automatically.
+					#ipsec up $tunnel_name &
+					[ $keep_alive -eq 1 ] && {
+						#Here if the tunnel is enabled with keep-alive, we gracefully bring it up if the peer is reachable.
+						timerHandler $tunnel_name 1 &
+						timerCtrl "+$tunnel_name"
+					}
+				fi
+			fi
+		done
+	fi
+	if [ $greoipsecCount -gt 0 ]
+	then
+		#local allGRETunnelNames=$(uci show strongswan | grep -e "=greoipsec" | cut -f 2 -d . | cut -f 1 -d =)
+		local gre_tunnel_name
+		for gre_tunnel_name in $allGRETunnelNames; do
+			local enable
+			config_get_bool enable "$gre_tunnel_name" enable 0
+			if [ $enable -eq 1 ]
+			then
+				logger -t VPN-cfg "Bringing UP connection:$gre_tunnel_name"
+				ipsec up $gre_tunnel_name &
+				local gre_interface_name=`uci get strongswan.$gre_tunnel_name.gre_interface_name`
+				#cmm -c tunnel gre-$gre_interface_name add gre ipsec 1
+			fi
+		done
+	fi
+	if [ $client2siteCount -gt 0 ]
+	then
+		#Handling client2site records
+		#local allclient2site=$(uci show strongswan | grep -e "=client2site" | cut -f 2 -d . | cut -f 1 -d =)
+		local group_name
+		for group_name in $allclient2site; do
+			local enable
+			config_get enable "$group_name" enable
+			if [ "$enable" -eq 1 ]
+			then
+				logger -t VPN-cfg "loading tunnel $group_name..."
+				#ipsec up "$group_name" &
+			fi
+		done
+	fi
+	if [ $TVPNCCount -gt 0 ]
+	then
+		#Handling TVPN client records. It is known that only one record of this type can be enabled.
+		local enableTVPNC=`uci get strongswan.@clientGlobal[0].client_status`
+		if [ "$enableTVPNC" -eq 1 ]
+		then
+			local allTVPNclient=$(uci show strongswan | grep -e "=client$" | cut -f 2 -d . | cut -f 1 -d =)
+			local client_name
+			for client_name in $allTVPNclient; do
+				local on_startup
+				config_get on_startup "$client_name" on_startup
+				if [ "$on_startup" -eq 1 ]
+				then
+					uci_set strongswan "$client_name" enable 1
+					uci commit strongswan
+					config_load strongswan
+					config_reload
+					exec_ipsec reload
+					logger -t VPN-cfg "loading tunnel $client_name..."
+					ipsec up "$client_name" &
+					sleep 1 #We may need this sleep for giving connection up in above some breather
+					timerCtrl "+$client_name"
+					break #only one record can be UP at any time, so exit after its loading.
+				fi
+			done
+		fi
+	fi
+	#TODO: Do we need to take any action for l2tp Over IPsec record?
+
+	#If any tunnel is configured and enabled, set the LED to amber by sending config_add command
+	local active_config=`uci show strongswan |grep "enable=1"|wc -l`
+
+	if [ $active_config -gt 0 ]
+	then
+	#{
+		vpnLedCtrl "config_add"
+	#}
+	fi
+}
+
+stop()
+{
+	if [ "$ru_check" = "RU" ]; then
+		exit 0
+	fi
+
+	#remove iptable rules accordingly.
+	iptables -w --table filter --delete vpn_input_bypass --protocol udp --dport 500 --jump ACCEPT
+	iptables -w --table filter --delete vpn_input_bypass --protocol udp --dport 4500 --jump ACCEPT
+	iptables -w --table filter --delete vpn_input_bypass --protocol 50 --jump ACCEPT
+	iptables -w --table filter --delete vpn_input_bypass --protocol 51 --jump ACCEPT
+	iptables -w --table filter --delete vpn_input_bypass --protocol 108 --jump ACCEPT
+
+	#Bypass all DNAT based rules like port forwarding, port triggering.... etc for IPSec traffic as these rules are targeted for traffic coming from WAN
+	iptables -w --table nat --delete vpn_nat_prerouting_bypass --match policy --dir in --pol ipsec --jump ACCEPT
+
+	rmmod /lib/modules/3.2.54/sbr_cdev.ko
+	rmmod /lib/modules/3.2.54/nbvpn.ko
+	vpnLedCtrl "ipsec_off"
+	killall -9 vpnTimer
+	#killall -9 vpnLed 2>/dev/null
+	exec_ipsec stop
+
+	#If IPSec is diabled globally, we may still need to have the table 220 and its services.
+	ip -4 rule add pref 220 lookup 220
+	setkey -F
+	setkey -FP
+}
+
+reload()
+{
+	## NOTE (IMP) : Upon understanding the GUI of various VPN pages, it is clear that only a single
+	#		record of site-to-site or client-to-site or tele-worker VPN client or a profile
+	#		may get changed. So we are handling the ADD/MOD/DEL cases with this assumption.
+	#		We should be cautios that if one profile gets changed then multiple connections
+	#		may need to be brought DOWN and UP.
+
+	## logic to parse the temp file.
+#echo > /etc/ipsec.conf
+	sed -i s/"'"//g $TEMPUCIPATH/strongswan
+	perl -in -pe 's/(.*preshared_key=)(.*)/\1"\2"/g' $TEMPUCIPATH/strongswan
+	perl -in -pe 's/(.*remote_identifier=)(.*)/\1"\2"/g' $TEMPUCIPATH/strongswan
+	perl -in -pe 's/(.*left_psk=)(.*)/\1"\2"/g' $TEMPUCIPATH/strongswan
+	perl -in -pe 's/(.*right_psk=)(.*)/\1"\2"/g' $TEMPUCIPATH/strongswan
+	config_load strongswan
+	source uci_cache $IPGROUP_CONFIG
+#config_foreach config_site2site site2site
+#return 0
+
+	ipsecGlobalStatus=1 #setting it to default value.
+	#START:Modification
+	#{
+	local tmpCount=$(grep -e "^|strongswan\|^strongswan" $TEMPUCIPATH/strongswan | wc -l)   #no.of lines with "strongswan" keyword in the beggining.
+	local tmpTotalCount=$(wc -l $TEMPUCIPATH/strongswan  | cut -f 1 -d ' ')   #no.of lines in the $TEMPUCIPATH/strongswan file.
+	local tmpDelRecCount=$(grep -e "^-strongswan" $TEMPUCIPATH/strongswan | wc -l)   #no.of lines with "-strongswan" keyword in the beggining.
+
+	if [ `expr $tmpCount + 1` -eq $tmpTotalCount  -a  $tmpDelRecCount -eq 1  -a  $tmpTotalCount -gt 1 ]
+	then
+	#{
+		local recordMod=$(grep -e "^strongswan" /tmp/.uci/strongswan | tail -n 1 | cut -f 2 -d .)
+		local configSectionType=`uci get strongswan.$recordMod`
+
+		if [ "$configSectionType" = 'ipsecGlobal' ]
+		then
+		#{
+			cp $UCIPATH/strongswan $UCIPATH/strongswan-bkp   #Have a backup to get old data of any record. Delete after use.
+
+			local newStatus
+			config_get_bool newStatus "$recordMod" status 0
+			local oldStatus=`uci get strongswan-bkp.$recordMod.status`
+			if [ "$newStatus" = "1" ] && [ "$oldStatus" = "0" ]
+			then
+				uci commit strongswan
+				logger -t VPN-cfg "Enabling IPSec globally."
+				start
+			elif [ "$newStatus" = "0" ] && [ "$oldStatus" = "1" ]
+			then
+				uci commit strongswan
+				logger -t VPN-cfg "Disabling IPSec globally."
+				stop
+			fi
+
+			rm $UCIPATH/strongswan-bkp
+			exit 0
+		#}
+		fi
+
+		#The above IF block will check if the global parameter of IPSec Enable/Disable is modified.
+		#	If that is not modified then we need to check first if it is enabled, then proceed further with any MOD/ADD/DEL
+		config_get_bool ipsecGlobalStatus "ipsecGlobal_0" status 1
+		#Any record modification is not allowed/just committed if the Global status is disabled, else allow it to finish.
+		[ "$ipsecGlobalStatus" = "0" ] && {
+			#Global status is disabled. Just commit the record and leave everything.
+			uci commit strongswan
+			logger -t VPN-cfg "IPSec is disabled globally hence modifications are just saved." 
+			exit 0
+		}
+
+		if [ "$configSectionType" = 'site2site' ]
+		then
+		#{
+			#START:site2site modification
+			local tunnel_name=""
+			config_get tunnel_name "$recordMod" tunnel_name #get d tunnel_name of it.
+			cp $UCIPATH/strongswan $UCIPATH/strongswan-bkp   #Have a backup to get old data of any record. Delete after use.
+
+			local newEnable
+			config_get newEnable "$tunnel_name" enable
+			local oldEnable=`uci get strongswan-bkp.$tunnel_name.enable`
+			if [ $newEnable -eq 0 ]
+			then
+			#{
+				vpnLedCtrl "config_del"
+				if [ $oldEnable -eq 0 ]
+				then
+				#{
+					#It means we are dealing with a disabled site2site record, whose fields are modified. Just commit and exit.
+					uci commit strongswan
+					rm $UCIPATH/strongswan-bkp
+					exit 0
+				#}
+				else
+				#{
+					#site2site record is disabled currently. So UNDO the old configuration and exit.
+					local profile=`uci get strongswan-bkp.$tunnel_name.profile`
+					local keying_mode
+					config_get keying_mode "$profile" keying_mode
+					if [ "$keying_mode" = 'manual' ]
+					then
+					#{
+						delete_ipxfrm $tunnel_name "MOD"
+						uci commit strongswan
+						rm $UCIPATH/strongswan-bkp
+						exit 0
+					#}
+					else
+					#{
+						#so previously this connection is enabled. but now it is disabled.
+						local ike_auth_type=`uci get strongswan-bkp.$tunnel_name.ike_auth_type`
+						local leftauth=`uci get strongswan-bkp.$tunnel_name.leftauth 2> /dev/null`
+						if [ "$ike_auth_type" = 'pubkey' ]
+						then
+						#{
+							local local_cert=`uci get strongswan-bkp.$tunnel_name.local_cert`
+							updateCertUsage del $local_cert "SiteToSite-$tunnel_name"
+						elif [ "$leftauth" = 'pubkey' ]
+						then
+							local left_cert=`uci get strongswan-bkp.$tunnel_name.left_cert`
+							updateCertUsage del $left_cert "SiteToSite-$tunnel_name"
+						#}
+						fi
+
+						local keep_alive=`uci get strongswan-bkp.$tunnel_name.keep_alive`
+						[ $keep_alive -eq 1 ] && {
+							timerCtrl "-$tunnel_name"
+						}
+
+						local split_dns=`uci get strongswan-bkp.$tunnel_name.split_dns`
+						[ $split_dns -eq 1 ] && {
+							local split_dns_server1=`uci get strongswan-bkp.$tunnel_name.split_dns_server1`
+							local split_dns_server2=`uci get strongswan-bkp.$tunnel_name.split_dns_server2`
+							local split_dns_domain=`uci get strongswan-bkp.$tunnel_name.split_dns_domain`
+							for tempDomain in $split_dns_domain
+							do
+								uci del_list dhcp.@dnsmasq[0].server="/$tempDomain/$split_dns_server1"
+								[ -n "$split_dns_server2" ] && {
+									uci del_list dhcp.@dnsmasq[0].server="/$tempDomain/$split_dns_server2"
+								}
+							done
+							uci commit dhcp
+							/etc/init.d/dnsmasq reload
+							uci_toggle_state dhcp splitdns $tunnel_name 0
+						}
+
+						uci commit strongswan
+						rm $UCIPATH/strongswan-bkp
+						config_reload
+						exec_ipsec reload
+						logger -t VPN-cfg "Bringing tunnel $tunnel_name down..."
+						ipsec down $tunnel_name
+						ipsec down "$tunnel_name"_bkp
+						exit 0
+					#}
+					fi
+				#}
+				fi
+			#}
+			else
+			#{
+				vpnLedCtrl "config_add"
+				if [ $oldEnable -eq 0 ]
+				then
+				#{
+					#It means previously it is disabled, but now it is enabled.
+					local profile keying_mode ike_version
+					config_get profile "$tunnel_name" profile
+					config_get keying_mode "$profile" keying_mode
+					config_get_bool non_rfc "$tunnel_name" non_rfc 0
+					if [ "$keying_mode" = 'auto' ]
+					then
+					#{
+						logger -t VPN-cfg "Adding site2site connection:$tunnel_name"
+						uci commit strongswan
+						config_reload
+						exec_ipsec reload
+						logger -t VPN-cfg "Bringing UP connection:$tunnel_name"
+						rm $UCIPATH/strongswan-bkp
+						#ipsec up $tunnel_name &
+
+						config_get ike_version "$profile" ike_version
+						if [ "$ike_version" = 'ikev1' ] || [ "$ike_version" = 'ikev2' -a "$non_rfc" = "1" ]
+						then
+							local count=$(uci_get_state strongswan.core."$tunnel_name")
+							for i in `seq 1 $count`
+							do
+								ipsec up "$tunnel_name"-"$i" &
+								sleep 0.5
+							done
+						else
+							#ikev2
+							ipsec up $tunnel_name &
+						fi
+
+						local keep_alive
+						config_get_bool keep_alive "$tunnel_name" keep_alive 0
+						[ $keep_alive -eq 1 ] && {
+							timerCtrl "+$tunnel_name"
+						}
+						exit 0
+					#}
+					else
+					#{
+						uci commit strongswan
+						rm $UCIPATH/strongswan-bkp
+						config_reload
+						exit 0
+					#}
+					fi
+				#}
+				else
+				#{
+					#It means the tunnel is previously UP and even now too.
+					local oldProfile=`uci get strongswan-bkp.$tunnel_name.profile`
+					local newProfile
+					config_get newProfile "$tunnel_name" profile
+					#if [ "$oldProfile" = "$newProfile" ]
+					#then
+					#	
+					#else
+					#get old keying_mode and undo its configuration
+					local oldKeying_mode=`uci get strongswan-bkp.$oldProfile.keying_mode`
+					if [ "$oldKeying_mode" = 'auto' ]
+					then
+					#{
+						local ike_auth_type=`uci get strongswan-bkp.$tunnel_name.ike_auth_type`
+						local leftauth=`uci get strongswan-bkp.$tunnel_name.leftauth 2> /dev/null`
+						if [ "$ike_auth_type" = 'pubkey' ]
+						then
+						#{
+							local local_cert=`uci get strongswan-bkp.$tunnel_name.local_cert`
+							updateCertUsage del $local_cert "SiteToSite-$tunnel_name"
+						elif [ "$leftauth" = 'pubkey' ]
+						then
+							local left_cert=`uci get strongswan-bkp.$tunnel_name.left_cert`
+							updateCertUsage del $left_cert "SiteToSite-$tunnel_name"
+						#}
+						fi
+
+						local split_dns=`uci get strongswan-bkp.$tunnel_name.split_dns`
+						[ $split_dns -eq 1 ] && {
+							local split_dns_server1=`uci get strongswan-bkp.$tunnel_name.split_dns_server1`
+							local split_dns_server2=`uci get strongswan-bkp.$tunnel_name.split_dns_server2`
+							local split_dns_domain=`uci get strongswan-bkp.$tunnel_name.split_dns_domain`
+							for tempDomain in $split_dns_domain
+							do
+								uci del_list dhcp.@dnsmasq[0].server="/$tempDomain/$split_dns_server1"
+								[ -n "$split_dns_server2" ] && {
+									uci del_list dhcp.@dnsmasq[0].server="/$tempDomain/$split_dns_server2"
+								}
+							done
+							uci commit dhcp
+							/etc/init.d/dnsmasq reload
+							uci_toggle_state dhcp splitdns $tunnel_name 0
+						}
+
+						logger -t VPN-cfg "Bringing tunnel $tunnel_name down..."
+						ipsec down $tunnel_name
+						ipsec down "$tunnel_name"_bkp
+
+						local keep_alive=`uci get strongswan-bkp.$tunnel_name.keep_alive`
+						[ $keep_alive -eq 1 ] && {
+							timerCtrl "-$tunnel_name"
+						}
+					#}
+					else
+					#{
+						delete_ipxfrm $tunnel_name "MOD"
+					#}
+					fi
+
+					local newKeying_mode ike_version
+					config_get newKeying_mode "$newProfile" keying_mode
+					if [ "$newKeying_mode" = 'auto' ]
+					then
+					#{
+						uci commit strongswan
+						rm $UCIPATH/strongswan-bkp
+						config_reload
+						exec_ipsec reload
+						#Just to ensure we don't see a case that mentioned in PPSBR-1476
+						ipsec down $tunnel_name
+						ipsec down "$tunnel_name"_bkp
+						logger -t VPN-cfg "Bringing UP tunnel $tunnel_name..."
+						#ipsec up $tunnel_name &
+
+						config_get ike_version "$newProfile" ike_version
+						config_get_bool non_rfc "$tunnel_name" non_rfc 0
+						if [ "$ike_version" = 'ikev1' ] || [ "$ike_version" = 'ikev2' -a "$non_rfc" = "1" ]
+						then
+							local count=$(uci_get_state strongswan.core."$tunnel_name")
+							for i in `seq 1 $count`
+							do
+								ipsec up "$tunnel_name"-"$i" &
+								sleep 0.5
+							done
+						else
+							ipsec up $tunnel_name &
+						fi
+
+						local keep_alive
+						config_get_bool keep_alive "$tunnel_name" keep_alive 0
+						[ $keep_alive -eq 1 ] && {
+							timerCtrl "+$tunnel_name"
+						}
+					#}
+					else
+					#{
+						uci commit strongswan
+						rm $UCIPATH/strongswan-bkp
+						config_reload
+						if [ "$oldKeying_mode" = 'auto' ]
+						then
+						#{
+							exec_ipsec reload
+						#}
+						fi
+					#}
+					fi
+					exit 0
+					#fi
+				#}
+				fi
+			#}
+			fi
+			#END:site2site modification
+		#}
+		fi
+
+		#TODO: As of now, we are not allowing profile modification if it referred by any conns. Needs confirmation! and needs review for IKEv2.
+		if [ "$configSectionType" = 'profile' ]
+		then
+		#{
+			local profile_name=""
+			local ike_version
+			config_get profile_name "$recordMod" profile_name #get d profile_name of it.
+			config_get ike_version "$profile_name" ike_version
+			local toReload=""
+			#START:profile modification
+			local allSite2Site=$(uci show strongswan | grep -e "=site2site" | cut -f 2 -d . | cut -f 1 -d =)
+			local allClient2Site=$(uci show strongswan | grep -e "=client2site" | cut -f 2 -d . | cut -f 1 -d =)
+			local allgreOipsec=$(uci show strongswan | grep -e "=greoipsec" | cut -f 2 -d . | cut -f 1 -d =)
+			local isL2TPoverIPSecEnable=`uci get l2tpd.global.ipsec_enable`
+			if [ -n "$allSite2Site"  -o  -n "$allClient2Site" -o -n "$allgreOipsec" -o "$isL2TPoverIPSecEnable" -eq 1 ]
+			then
+			#{
+				cp $UCIPATH/strongswan $UCIPATH/strongswan-bkp
+				for tunnel_name in $allSite2Site; do
+					local enable
+					config_get_bool enable "$tunnel_name" enable 0
+					if [ "$enable" -eq 1 ]
+					then
+					#{
+						local tun_profile_name
+						config_get tun_profile_name "$tunnel_name" profile
+						if [ "$profile_name" = "$tun_profile_name" ]
+						then
+						#{
+							#START:site2site modification
+							local keying_mode=`uci get strongswan-bkp.$tun_profile_name.keying_mode`
+							if [ "$keying_mode" = 'manual' ]
+							then
+							#{
+							#blindly delete the XFRM command and allow it to re add during the config_reload,
+							#	may b a parameter of it might be changed.
+								delete_ipxfrm $tunnel_name "MOD"
+							#}
+							else
+							#{
+							#just blindly commit and reload the connection.	
+								toReload="$toReload $tunnel_name"
+								ipsec down "$tunnel_name"_bkp
+							#}
+							fi
+							#END:site2site modification
+						#}
+						fi
+					#}
+					fi
+				done
+
+				for gre_tunnel_name in $allgreOipsec; do
+					local enable
+					config_get_bool enable "$gre_tunnel_name" enable 0
+					if [ "$enable" -eq 1 ]
+					then
+					#{
+						local tun_profile_name
+						config_get tun_profile_name "$gre_tunnel_name" profile
+						if [ "$profile_name" = "$tun_profile_name" ]
+						then
+						#{
+							#START:greOveripsec modification
+							toReload="$toReload $gre_tunnel_name"
+							#END:site2site modification
+						#}
+						fi
+					#}
+					fi
+				done
+
+				for group_name in $allClient2Site; do
+					local enable client_type
+					config_get_bool enable "$group_name" enable 0
+					if [ "$enable" -eq 1 ]
+					then
+					#{
+						local tun_profile_name
+						config_get tun_profile_name "$group_name" profile
+						if [ "$profile_name" = "$tun_profile_name" ]
+						then
+						#{
+							#START:client2site modification
+							logger -t VPN-cfg "Bringing DOWN tunnel(if exists!) $group_name..."
+							ipsec down $group_name
+							#END:client2site modification
+						#}
+						fi
+					#}
+					fi
+				done
+
+				if [ "$isL2TPoverIPSecEnable" -eq 1 ]
+				then
+				#{
+					local l2tpProfile
+					config_get l2tpProfile l2tpdipsec profile
+					if [ "$profile_name" = "$l2tpProfile" ]
+					then
+					#{
+						network_active_wan_interfaces_cached allWANiface
+						for iface in $allWANiface
+						do
+							local isGRE=`echo $iface | grep gre`
+							[ -n "$isGRE" ] && continue
+							local isIPv6=`uci get network.$iface.ipv6 2>/dev/null`
+							[ "$isIPv6" = "1" ] && continue
+							logger -t VPN-cfg "Bringing DOWN tunnel(if exists!) l2tp_l2tpOverIpsec_$iface ..."
+							ipsec down l2tp_l2tpOverIpsec_$iface
+						done
+					#}
+					fi
+				#}
+				fi
+
+				rm $UCIPATH/strongswan-bkp
+				uci commit strongswan
+				config_reload
+				exec_ipsec reload
+				for temp in $toReload; do
+					logger -t VPN-cfg "Reloading tunnel $temp... for the profile modification of $profile_name"
+
+					local keep_alive non_rfc
+					config_get_bool keep_alive "$temp" keep_alive 0
+
+					ipsec down $temp
+					[ $keep_alive -eq 1 ] && {
+						timerCtrl "-$temp"
+					}
+
+					config_get_bool non_rfc "$temp" non_rfc 0
+					if [ "$ike_version" = 'ikev1' ] || [ "$ike_version" = 'ikev2' -a "$non_rfc" = "1" ]
+					then
+						local count=$(uci_get_state strongswan.core."$temp")
+						for i in `seq 1 $count`
+						do
+							ipsec up "$temp"-"$i" &
+							sleep 0.5
+						done
+					else #ikev2
+						ipsec up $temp &
+					fi
+
+					[ $keep_alive -eq 1 ] && {
+						 timerCtrl "+$temp"
+					}
+				done
+				exit 0
+			#}
+			fi
+			uci commit strongswan
+			exit 0
+			#END:profile modification
+		#}
+		fi
+
+		#START: clientGlobal section modification
+		if [ "$configSectionType" = 'clientGlobal' ]
+		then
+		#{
+			local client_status=""
+			config_get client_status "$recordMod" client_status #get d client_status.
+			if [ "$client_status" -eq 0 ] || [ "$client_status" -eq 1 ]
+			then
+			#{
+				uci commit strongswan
+				[ "$client_status" -eq 0  ] && {
+					isRecordEnable=$(uci show strongswan | grep -e "strongswan\.tvpnc_.*\.enable=1")
+					[ -n "$isRecordEnable" ] && {
+						clientName=${isRecordEnable#*.}
+						clientName=${clientName%.*}
+						local ike_auth_type=`uci get strongswan.$clientName.ike_auth_type`
+						if [ "$ike_auth_type" = 'pubkey' ]
+						then
+						#{
+							local local_cert=`uci get strongswan.$clientName.local_cert`
+							updateCertUsage del $local_cert "Tele-WorkerVPN-$clientName"
+						#}
+						fi
+						config_reload
+						exec_ipsec reload
+						logger -t VPN-cfg "Bringing tunnel $clientName down..."
+						killall -9 tvpnc_timer
+						ipsec down $clientName
+						ipsec down "$clientName"_bkp0
+						ipsec down "$clientName"_bkp1
+						ipsec down "$clientName"_bkp2
+						ipsec down "$clientName"_bkp3
+						uci set strongswan.$clientName.enable=0
+						uci delete strongswan.$clientName.backup_server_auto
+						uci commit strongswan
+						iptables -w -F vpn_mangle_output -t mangle
+						iptables -w -A vpn_mangle_output -t mangle -j MARK --set-mark 0x20
+					}
+				}
+				if [ "$client_status" = '0' ]
+				then
+				#{
+					vpnLedCtrl "config_del"
+				#}
+				else
+				#{
+					vpnLedCtrl "config_add"
+				#}
+				fi
+				exit 0
+			#}
+			else  # Do we need this else case? TODO: may be removed
+			#{
+				echo "Invalid status!"
+			#}
+			fi
+		#}
+		fi
+		#END: clientGlobal section modification
+
+		#START: TVPC MOD
+		if [ "$configSectionType" = 'client' ]
+		then
+		#{
+			local client_name=""
+			config_get client_name "$recordMod" client_name #get d tunnel_name of it.
+			cp $UCIPATH/strongswan $UCIPATH/strongswan-bkp   #Have a backup to get old data of any record. Delete after use.
+			local newEnable
+			config_get_bool newEnable "$client_name" enable 0
+			local oldEnable=`uci get strongswan-bkp.$client_name.enable`
+			if [ "$1" == 'rpc' ]
+			then
+			#{
+				if [ $newEnable -eq 0 ]
+				then
+				#{
+					vpnLedCtrl "config_del"
+					if [ $oldEnable -eq 0 ]
+					then
+					#{
+						#It means we are dealing with a disabled TVPNC record, whose fields are modified. Just commit and exit.
+						uci commit strongswan
+						rm $UCIPATH/strongswan-bkp
+						exit 0
+					#}
+					else
+					#{
+						#TVPNC record is disabled now. So UNDO the old configuration and exit.
+						#so previously this connection is enabled. but now it is disabled.
+						local ike_auth_type=`uci get strongswan-bkp.$client_name.ike_auth_type`
+						if [ "$ike_auth_type" = 'pubkey' ]
+						then
+						#{
+							local local_cert=`uci get strongswan-bkp.$client_name.local_cert`
+							updateCertUsage del $local_cert "Tele-WorkerVPN-$client_name"
+						#}
+						fi
+
+						uci commit strongswan
+						rm $UCIPATH/strongswan-bkp
+						config_reload
+						exec_ipsec reload
+						logger -t VPN-cfg "Bringing tunnel $client_name down..."
+						killall -9 tvpnc_timer
+						ipsec down $client_name
+						ipsec down "$client_name"_bkp0
+						ipsec down "$client_name"_bkp1
+						ipsec down "$client_name"_bkp2
+						ipsec down "$client_name"_bkp3
+						iptables -w -F vpn_mangle_output -t mangle
+						iptables -w -A vpn_mangle_output -t mangle -j MARK --set-mark 0x20
+						exit 0
+					#}
+					fi
+				#}
+				else
+				#{
+					vpnLedCtrl "config_add"
+					if [ $oldEnable -eq 0 ]
+					then
+					#{
+						#It means previously it is disabled, but now it is enabled.
+						logger -t VPN-cfg "Adding TVPNC connection:$client_name"
+						uci commit strongswan
+						config_reload
+						exec_ipsec reload
+						logger -t VPN-cfg "Bringing UP connection:$client_name"
+						rm $UCIPATH/strongswan-bkp
+						rm $EZVPNFILE
+						ipsec up $client_name &
+						sleep 1 #We may need this sleep for giving connection up in above some breather
+						timerCtrl "+$client_name"
+						exit 0
+					#}
+					else
+					#{
+						local ike_auth_type=`uci get strongswan-bkp.$client_name.ike_auth_type`
+						if [ "$ike_auth_type" = 'pubkey' ]
+						then
+						#{
+							local local_cert=`uci get strongswan-bkp.$client_name.local_cert`
+							updateCertUsage del $local_cert "Tele-WorkerVPN-$client_name"
+						#}
+						fi
+
+						logger -t VPN-cfg "Bringing tunnel $client_name down..."
+						killall -9 tvpnc_timer
+						ipsec down $client_name
+						ipsec down "$client_name"_bkp0
+						ipsec down "$client_name"_bkp1
+						ipsec down "$client_name"_bkp2
+						ipsec down "$client_name"_bkp3
+						uci commit strongswan
+						rm $UCIPATH/strongswan-bkp
+						config_reload
+						exec_ipsec reload
+						logger -t VPN-cfg "Bringing UP tunnel $client_name..."
+						rm $EZVPNFILE
+						ipsec up $client_name &
+						sleep 1 #We may need this sleep for giving connection up in above some breather
+						timerCtrl "+$client_name"
+						exit 0
+					#}
+					fi
+				#}
+				fi
+			#}
+			elif [ "$1" == 'autobackup' ]
+			then   #These modifications are explicitly during tunnel UP time. We have to configure back-up and exit.
+			#{
+				uci commit strongswan
+				rm $UCIPATH/strongswan-bkp
+				config_reload "no-lock"
+				exec_ipsec reload
+				logger -t VPN-cfg "Handled Tele-worker server sent back-up configuration"
+				exit 0
+			#}
+			else #If modifications are over GUI, then old value should be retained.
+			#{
+				if [ $oldEnable -eq 0 ]
+				then
+				#{
+					#It means we are dealing with a disabled TVPNC record, whose fields are modified. Just commit and exit.
+					uci commit strongswan
+					rm $UCIPATH/strongswan-bkp
+					exit 0
+				#}
+				else
+				#{
+					local ike_auth_type=`uci get strongswan-bkp.$client_name.ike_auth_type`
+					if [ "$ike_auth_type" = 'pubkey' ]
+					then
+					#{
+						local local_cert=`uci get strongswan-bkp.$client_name.local_cert`
+						updateCertUsage del $local_cert "Tele-WorkerVPN-$client_name"
+					#}
+					fi
+
+					logger -t VPN-cfg "Bringing tunnel $client_name down..."
+					killall -9 tvpnc_timer
+					ipsec down $client_name
+					ipsec down "$client_name"_bkp0
+					ipsec down "$client_name"_bkp1
+					ipsec down "$client_name"_bkp2
+					ipsec down "$client_name"_bkp3
+					uci_set strongswan "$client_name" enable 1
+					uci commit strongswan
+					rm $UCIPATH/strongswan-bkp
+					config_reload
+					exec_ipsec reload
+					logger -t VPN-cfg "Bringing UP tunnel $client_name..."
+					rm $EZVPNFILE
+					ipsec up $client_name &
+					sleep 1 #We may need this sleep for giving connection up in above some breather
+					timerCtrl "+$client_name"
+					exit 0
+				#}
+				fi
+			#}
+			fi
+		#}
+		fi
+		#END: TVPC MOD
+
+		#START: client2site MOD
+		if [ "$configSectionType" = 'client2site' ]
+		then
+		#{
+			#START:client2site modification
+			local group_name=""
+			config_get group_name "$recordMod" group_name #get d tunnel_name of it.
+			cp $UCIPATH/strongswan $UCIPATH/strongswan-bkp   #Have a backup to get old data of any record. Delete after use.
+
+			local newEnable
+			config_get newEnable "$group_name" enable
+			local oldEnable=`uci get strongswan-bkp.$group_name.enable`
+			if [ $newEnable -eq 0 ]
+			then
+			#{
+				vpnLedCtrl "config_del"
+				if [ $oldEnable -eq 0 ]
+				then
+				#{
+					#It means we are dealing with a disabled client2site record, whose fields are modified. Just commit and exit.
+					uci commit strongswan
+					rm $UCIPATH/strongswan-bkp
+					exit 0
+				#}
+				else
+				#{
+					#so previously this connection is enabled. but now it is disabled.
+					local ike_auth_type=`uci get strongswan-bkp.$group_name.ike_auth_type`
+					if [ "$ike_auth_type" = 'pubkey' ]
+					then
+					#{
+						local local_cert=`uci get strongswan-bkp.$group_name.local_cert`
+						updateCertUsage del $local_cert "ClientToSite-$group_name"
+					#}
+					fi
+
+					uci commit strongswan
+					rm $UCIPATH/strongswan-bkp
+					config_reload
+					exec_ipsec reload
+					logger -t VPN-cfg "Bringing tunnel $group_name down..."
+					ipsec down $group_name
+					exit 0
+				#}
+				fi
+			#}
+			else
+			#{
+				vpnLedCtrl "config_add"
+				if [ $oldEnable -eq 0 ]
+				then
+				#{
+					#It means previously it is disabled, but now it is enabled.
+					logger -t VPN-cfg "Adding client2site connection:$group_name"
+					uci commit strongswan
+					config_reload
+					exec_ipsec reload
+					#logger -t VPN-cfg "Bringing UP connection:$tunnel_name"
+					rm $UCIPATH/strongswan-bkp
+					#ipsec up $group_name   #NOTE: We don't need to bringup this tunnel since we are server.
+					exit 0
+				#}
+				else
+				#{
+					#It means the tunnel is previously UP and even now too.
+					local ike_auth_type=`uci get strongswan-bkp.$group_name.ike_auth_type`
+					if [ "$ike_auth_type" = 'pubkey' ]
+					then
+					#{
+						local local_cert=`uci get strongswan-bkp.$group_name.local_cert`
+						updateCertUsage del $local_cert "ClientToSite-$group_name"
+					#}
+					fi
+
+					logger -t VPN-cfg "Bringing tunnel $group_name down..."
+					ipsec down $group_name
+					uci commit strongswan
+					rm $UCIPATH/strongswan-bkp
+					config_reload
+					exec_ipsec reload
+					#logger -t VPN-cfg "Bringing UP tunnel $group_name..."
+					#ipsec up $tunnel_name #NOTE: We don't need to bringup this tunnel since we are server.
+					exit 0
+				#}
+				fi
+			#}
+			fi
+			#END:client2site modification
+		#}
+		fi
+		#END: client2site MOD
+	#}
+	fi
+	#}
+	#END:Modification
+
+	config_get_bool ipsecGlobalStatus "ipsecGlobal_0" status 1
+	#Note: 
+	# 1. For Profile Addition and Deletion there is no dependency on IPSec global status.
+	# 2.
+
+	# For profile deletion
+	local isProfileDel=0
+	local for_profileDel=$(grep -e '-strongswan' $TEMPUCIPATH/strongswan | cut -f 2 -d .)   #With this statement, we get the section name into for_profileDel.
+	cp $UCIPATH/strongswan $UCIPATH/strongswan-bkp   #Have a backup to get old data of any record. Delete after use.
+	#It can be the case that there might be multiple profile del records. So handling them now.
+	for profDel in $for_profileDel; do
+		local profile_name=`uci get strongswan-bkp.$profDel.profile_name 2> /dev/null`
+		if [ -n "$profile_name" ]
+		then
+		#{
+			#If we are inside this TRUE block, it means that a profile is been deleted.
+			#For profile deletion our assumption is that it must not be reffered by any site2site VPN records.
+			# This assumption must be realised in GUI.
+			logger -t VPN-cfg "deleting profile,$profile_name from configuration"
+			isProfileDel=1
+		#}
+		fi
+	done
+	if [ "$isProfileDel" -eq 1 ]
+	then
+	#{
+		uci commit strongswan
+		rm $UCIPATH/strongswan-bkp
+		exit 0
+	#}
+	else
+	#{
+		rm $UCIPATH/strongswan-bkp
+	#}
+	fi
+	# profile deletion END
+
+	# site2site connection addition.
+	local site2site_add_recs=$(grep -we 'tunnel_name' $TEMPUCIPATH/strongswan  | cut -f 2 -d =)  #the variable will contain the record name.
+	if [ -n "$site2site_add_recs" ]
+	then
+	#{
+		#It means that a record of site-to-site is beeing added.
+		uci commit strongswan
+
+		#Below function is called before checking global status because we want to have certificate usages updated properly.
+		config_reload
+		[ "$ipsecGlobalStatus" = "0" ] && {
+			logger -t VPN-cfg "IPSec is disabled globally. configuration of $site2site_add_recs just saved."
+			exit 0
+		}
+		vpnLedCtrl "config_add"
+		exec_ipsec reload
+
+		for site2site_add in $site2site_add_recs; do
+		#{
+			logger -t VPN-cfg "Adding site-to-site connection:$site2site_add"
+
+			local enable ike_version
+			config_get_bool enable "$site2site_add" enable 0
+			if [ $enable -eq 1 ]
+			then
+			#{
+				config_get profile "$site2site_add" profile
+				config_get keying_mode "$profile" keying_mode
+				if [ "$keying_mode" = 'manual' ]
+				then
+				#{
+					logger -t VPN-cfg "Bringing UP connection:$site2site_add"
+				#}
+				else
+				#{
+					logger -t VPN-cfg "Bringing UP connection:$site2site_add"
+					uci_toggle_state dhcp splitdns $site2site_add 0
+					#ipsec up $site2site_add & #Enough for IKEv2.
+
+					config_get ike_version "$profile" ike_version
+					config_get_bool non_rfc "$site2site_add" non_rfc 0
+					if [ "$ike_version" = 'ikev1' ] || [ "$ike_version" = 'ikev2' -a "$non_rfc" = "1" ]
+					then
+						local count=$(uci_get_state strongswan.core."$site2site_add")
+						for i in `seq 1 $count`
+						do
+							ipsec up "$site2site_add"-"$i" &
+							sleep 0.5
+						done
+					else
+						ipsec up $site2site_add & #Enough for IKEv2.
+					fi
+
+					local keep_alive
+					config_get_bool keep_alive "$site2site_add" keep_alive 0
+					[ $keep_alive -eq 1 ] && {
+						timerCtrl "+$site2site_add"
+					}
+				#}
+				fi
+			#}
+			fi
+		#}
+		done
+		exit 0
+	#}
+	fi
+	# site2site connection addition END
+
+	# site2site connection deletion.
+	local isSite2SiteDel=0
+	local for_site2siteDel=$(grep -e '-strongswan' $TEMPUCIPATH/strongswan | cut -f 2 -d .)   #With this statement, we get the section name into for_site2siteDel.
+	cp $UCIPATH/strongswan $UCIPATH/strongswan-bkp   #Have a backup to get old data of any record. Delete after use.
+	for site2siteDel in $for_site2siteDel; do
+		#get the tunnel_name of it. If it is empty then, we are not dealing with tunnel deletion.
+		local tunnel_name=`uci get strongswan-bkp.$site2siteDel.tunnel_name 2> /dev/null`
+		if [ -n "$tunnel_name" ]
+		then
+			#It means that a record of site-to-site is being deleted.
+			#If the keying_mode of the connection is "manual" then the commands might have been added in XFRM.
+			#	so take care that they are withdrawn from XFRM before deleting the connection.
+			isSite2SiteDel=1
+			logger -t VPN-cfg "deleting connection:$tunnel_name"
+			local enable=`uci get strongswan-bkp.$tunnel_name.enable`
+			if [ "$enable" -eq 1 ]
+			then
+				local profile=`uci get strongswan-bkp.$tunnel_name.profile`
+				local keying_mode=`uci get strongswan-bkp.$profile.keying_mode`
+				if [ "$keying_mode" = 'manual' ]
+				then
+					[ "$ipsecGlobalStatus" = "0" ] && {
+						logger -t VPN-cfg "IPSec is disabled globally. configuration of $tunnel_name is deleted."
+						continue
+					}
+					delete_ipxfrm $tunnel_name "MOD"
+				else
+					#just blindly commit and bring down the connection.
+					local ike_auth_type=`uci get strongswan-bkp.$tunnel_name.ike_auth_type`
+					local leftauth=`uci get strongswan-bkp.$tunnel_name.leftauth 2> /dev/null`
+					if [ "$ike_auth_type" = 'pubkey' ]
+					then
+						local local_cert=`uci get strongswan-bkp.$tunnel_name.local_cert`
+						updateCertUsage del $local_cert "SiteToSite-$tunnel_name"
+					elif [ "$leftauth" = 'pubkey' ]
+					then
+						local left_cert=`uci get strongswan-bkp.$tunnel_name.left_cert`
+						updateCertUsage del $left_cert "SiteToSite-$tunnel_name"
+					fi
+					local keep_alive=`uci get strongswan-bkp.$tunnel_name.keep_alive`
+					[ $keep_alive -eq 1 ] && {
+						timerCtrl "-$tunnel_name"
+					}
+				fi
+			fi
+		fi
+	done
+	if [ "$isSite2SiteDel" -eq 1 ]
+	then
+		uci commit strongswan
+		[ "$ipsecGlobalStatus" = "0" ] && {
+			#config_reload() function need not be called because the certificate updations are performed already.
+			#logger -t VPN-cfg "IPSec is disabled globally. configuration of $site2site_add_recs just saved."
+			rm $UCIPATH/strongswan-bkp
+			exit 0
+		}
+		vpnLedCtrl "config_del"
+		config_reload
+		exec_ipsec reload
+		for site2siteDel in $for_site2siteDel; do
+		#get the tunnel_name of it. If it is empty then, we are not dealing with tunnel deletion.
+			local tunnel_name=`uci get strongswan-bkp.$site2siteDel.tunnel_name 2> /dev/null`
+			if [ -n "$tunnel_name" ]
+			then
+				logger -t VPN-cfg "Tearing down tunnel :$tunnel_name..."
+				ipsec down $tunnel_name
+			fi
+		done
+		rm $UCIPATH/strongswan-bkp
+		exit 0
+	else
+		rm $UCIPATH/strongswan-bkp
+	fi
+	# site2site connection deletion END
+
+	#START:Tele-worker VPN client connection addition.
+	local client_add=$(grep -e 'client_name=' $TEMPUCIPATH/strongswan  | cut -f 2 -d =)
+		 #the variable will contain the record name.
+	if [ -n "$client_add" ]
+	then
+		#It means that a record of Tele-worker VPN client is beeing added.
+		uci commit strongswan
+		[ "$ipsecGlobalStatus" = "0" ] && {
+			logger -t VPN-cfg "IPSec is disabled globally. configuration of $client_add is saved."
+			exit 0
+		}
+		logger -t VPN-cfg "Adding teleworker VPN client connection:$client_add"
+		vpnLedCtrl "config_add"
+		local enable
+		config_get_bool enable "$client_add" enable 0
+		local enableTVPNC=`uci get strongswan.@clientGlobal[0].client_status`
+		if [ $enable -eq 1 ] && [ "$enableTVPNC" -eq 1 ]
+		then
+		#if record is enabled then apply to strongswan too, else leave it
+			config_reload
+			exec_ipsec reload
+			logger -t VPN-cfg "Bringing UP teleworker VPN client connection:$client_add"
+			ipsec up $client_add &
+			sleep 1 #We may need this sleep for giving connection up in above some breather
+			timerCtrl "+$client_add"
+		fi
+		#sleep 2
+		exit 0
+	fi
+	#END:Tele-worker VPN client connection addition.
+
+	# START:Tele-worker VPN client connection deletion.
+	local isclientDel=0
+	local for_clientDel=$(grep -e '-strongswan' $TEMPUCIPATH/strongswan | cut -f 2 -d .)
+	#With this statement, we get the section name
+	cp $UCIPATH/strongswan $UCIPATH/strongswan-bkp   #Have a backup to get old data of any record. Delete after use.
+	for tVPNDel in $for_clientDel; do
+		#get the client_name of it. If it is empty then, we are not dealing with client deletion.
+		local client_name=`uci get strongswan-bkp.$tVPNDel.client_name 2> /dev/null`
+		if [ -n "$client_name" ]
+		then
+			#It means that a record of TVPNC is being deleted.
+			isclientDel=1
+			logger -t VPN-cfg "Deleting teleworker VPN client connection:$client_name"
+			local enable=`uci get strongswan-bkp.$client_name.enable`
+			if [ "$enable" -eq 1 ]
+			then
+				#just blindly commit and bring down the connection.
+				local ike_auth_type=`uci get strongswan-bkp.$client_name.ike_auth_type`
+				if [ "$ike_auth_type" = 'pubkey' ]
+				then
+					local local_cert=`uci get strongswan-bkp.$client_name.local_cert`
+					updateCertUsage del $local_cert "Tele-WorkerVPN-$client_name"
+				fi
+				[ "$ipsecGlobalStatus" = "0" ] && {
+					logger -t VPN-cfg "IPSec is disabled globally. configuration of $client_name is just deleted."
+					continue
+				}
+				logger -t VPN-cfg "Tearing down tunnel :$client_name..."
+				killall -9 tvpnc_timer
+				ipsec down $client_name
+				iptables -w -F vpn_mangle_output -t mangle
+				iptables -w -A vpn_mangle_output -t mangle -j MARK --set-mark 0x20
+			fi
+		fi
+	done
+	if [ "$isclientDel" -eq 1 ]
+	then
+		uci commit strongswan
+		[ "$ipsecGlobalStatus" = "0" ] && {
+			#config_reload() function need not be called because the certificate updations are performed already.
+			#logger -t VPN-cfg "IPSec is disabled globally. configuration of ---- just saved."
+			rm $UCIPATH/strongswan-bkp
+			exit 0
+		}
+
+		vpnLedCtrl "config_del"
+		config_reload
+		exec_ipsec reload
+		rm $UCIPATH/strongswan-bkp
+		exit 0
+	else
+		rm $UCIPATH/strongswan-bkp
+	fi
+	# END: Tele-worker VPN client connection deletion.
+
+	#START:client2site ADD
+	local client2site_add=$(grep -we 'group_name' $TEMPUCIPATH/strongswan  | cut -f 2 -d =)  #the variable will contain the record name.
+	if [ -n "$client2site_add" ]
+	then
+		#It means that a record of client-to-site is beeing added.
+		logger -t VPN-cfg "Adding client2site connection:$client2site_add"
+		uci commit strongswan
+
+		local enable
+		config_get_bool enable "$client2site_add" enable 0
+		if [ $enable -eq 1 ]
+		then
+			#Below function is called before checking global status because we want to have certificate usages updated properly.
+			config_reload
+			[ "$ipsecGlobalStatus" = "0" ] && {
+				logger -t VPN-cfg "IPSec is disabled globally. configuration of $client2site_add just saved."
+				exit 0
+			}
+			vpnLedCtrl "config_add"
+			exec_ipsec reload
+			#logger -t VPN-cfg "Bringing UP connection:$client2site_add"
+			#ipsec up $client2site_add   #NOTE: We don't need to bring up this connection since we are server.
+		fi
+		exit 0
+	fi
+	#END: client2site ADD
+
+	#START: client2site DEL
+	local isclient2siteDel=0
+	local for_client2siteDel=$(grep -e '-strongswan' $TEMPUCIPATH/strongswan | cut -f 2 -d .)   #With this statement,we get the section name into for_site2siteDel.
+	cp $UCIPATH/strongswan $UCIPATH/strongswan-bkp
+	for client2siteDel in $for_client2siteDel; do
+		#get the group_name of it.If it is empty then, we are not dealing with tunnel deletion.
+		local group_name=`uci get strongswan-bkp.$client2siteDel.group_name 2> /dev/null`
+		if [ -n "$group_name" ]
+		then
+			logger -t VPN-cfg "deleting connection:$group_name"
+			isclient2siteDel=1
+			local enable=`uci get strongswan-bkp.$group_name.enable`
+			if [ "$enable" -eq 1 ]
+			then
+				local ike_auth_type=`uci get strongswan-bkp.$group_name.ike_auth_type`
+				if [ "$ike_auth_type" = 'pubkey' ]
+				then
+					local local_cert=`uci get strongswan-bkp.$group_name.local_cert`
+					updateCertUsage del $local_cert "ClientToSite-$group_name"
+				fi
+
+				[ "$ipsecGlobalStatus" = "0" ] && {
+					logger -t VPN-cfg "IPSec is disabled globally. configuration of $group_name is deleted."
+					continue
+				}
+				#just blindly commit and bring down the connection.
+				logger -t VPN-cfg "Tearing down tunnel :$group_name..."
+				ipsec down $group_name
+			fi
+		fi
+	done
+	if [ "$isclient2siteDel" -eq 1 ]
+	then
+		uci commit strongswan
+		[ "$ipsecGlobalStatus" = "0" ] && {
+			#config_reload() function need not be called because the certificate updations are performed already.
+			#logger -t VPN-cfg "IPSec is disabled globally. configuration of $site2site_add_recs just saved."
+			rm $UCIPATH/strongswan-bkp
+			exit 0
+		}
+		config_reload
+		vpnLedCtrl "config_del"
+		exec_ipsec reload
+		rm $UCIPATH/strongswan-bkp
+		exit 0
+	else
+		rm $UCIPATH/strongswan-bkp
+	fi
+	#END: client2site DEL
+
+	## For profile Addition
+	local profile_add=$(grep -e 'profile_name' $TEMPUCIPATH/strongswan  | cut -f 2 -d =)
+	if [ -n "$profile_add" ]
+	then
+	#{
+		#If we are inside this TRUE block, it means that a new profile addition is going on.
+		#This doesn't need any other action. Just commit and exit.
+		#echo $profile_add
+		logger -t VPN-cfg "Adding profile:$profile_add"
+		uci commit strongswan
+		exit 0
+	#}
+	fi
+	# profile Addition END.
+
+	#START:L2TP over IPSEC ADD
+	local for_l2tpOverIPSecAdd=$(grep -e 'strongswan.l2tpdipsec=l2tpdipsec' $TEMPUCIPATH/strongswan)
+	if [ -n "$for_l2tpOverIPSecAdd" ]
+	then
+		logger -t VPN-cfg "Adding L2TP Over ipsec configuration...!"
+		uci set strongswan.l2tpdipsec.enable=1
+		uci commit strongswan
+		[ "$ipsecGlobalStatus" = "0" ] && {
+			logger -t VPN-cfg "IPSec is disabled globally. Configuration of L2TP over IPSec is just saved."
+			exit 0
+		}
+		vpnLedCtrl "config_add"
+		ipsec down l2tp_l2tpOverIpsec_wan1 #Static name for L2TP over IPSec tunnel.
+		ipsec down l2tp_l2tpOverIpsec_wan2 #Static name for L2TP over IPSec tunnel.
+		config_reload
+		exec_ipsec reload
+		exit 0
+	fi
+	#END: L2TP over IPSEC ADD
+
+	#START: L2TP over IPSEC DEL
+	local for_l2tpOverIPSecDel=$(grep -e '-strongswan.l2tpdipsec' $TEMPUCIPATH/strongswan)   #With this statement,we get the section name into for_site2siteDel.
+	if [ -n "$for_l2tpOverIPSecDel" ]
+	then
+		logger -t VPN-cfg "Deleting L2TP Over ipsec configuration...!"
+		uci commit strongswan
+		[ "$ipsecGlobalStatus" = "0" ] && {
+			logger -t VPN-cfg "IPSec is disabled globally. Configuration of L2TP over IPSec is just saved."
+			exit 0
+		}
+		vpnLedCtrl "config_del"
+		ipsec down l2tp_l2tpOverIpsec_wan1 #Static name for L2TP over IPSec tunnel.
+		ipsec down l2tp_l2tpOverIpsec_wan2 #Static name for L2TP over IPSec tunnel.
+		config_reload
+		exec_ipsec reload
+		exit 0
+	fi
+	#END: L2TP over IPSEC DEL
+}

@@ -1,0 +1,55 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+
+START=24
+STOP=76
+IPTABLES="/usr/sbin/iptables -w"
+IP6TABLES="/usr/sbin/ip6tables -w"
+
+start() {
+	$IPTABLES --table filter --append rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth0+ --jump DROP
+	$IPTABLES --table filter --append rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth2+ --jump DROP
+	$IPTABLES --table filter --append rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface br-vlan+ --jump DROP
+	$IPTABLES --table filter --append rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth3+ --jump DROP
+	$IPTABLES --table filter --append rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface ppp+ --jump DROP
+	$IPTABLES --table filter --append rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface l2tp+ --jump DROP
+	$IPTABLES --table filter --append rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface ppoe+ --jump DROP
+	$IPTABLES --table filter --append rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface pptp+ --jump DROP
+	$IPTABLES --table filter --append rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface 3g-usb+ --jump DROP
+	$IPTABLES --table filter --append rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface wwan+ --jump DROP
+	$IP6TABLES --table filter --append ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth0+ --jump DROP
+	$IP6TABLES --table filter --append ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth2+ --jump DROP
+	$IP6TABLES --table filter --append ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface br-vlan+ --jump DROP
+	$IP6TABLES --table filter --append ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth3+ --jump DROP
+	$IP6TABLES --table filter --append ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface ppp+ --jump DROP
+	$IP6TABLES --table filter --append ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface l2tp+ --jump DROP
+	$IP6TABLES --table filter --append ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface ppoe+ --jump DROP
+	$IP6TABLES --table filter --append ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface pptp+ --jump DROP
+	$IP6TABLES --table filter --append ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface 3g-usb+ --jump DROP
+	$IP6TABLES --table filter --append ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface wwan+ --jump DROP
+	/usr/sbin/quagga.init start
+}
+
+stop() {
+	$IPTABLES --table filter --delete rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth0+ --jump DROP
+	$IPTABLES --table filter --delete rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth2+ --jump DROP
+	$IPTABLES --table filter --delete rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface br-vlan+ --jump DROP
+	$IPTABLES --table filter --delete rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth3+ --jump DROP
+	$IPTABLES --table filter --delete rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface ppp+ --jump DROP
+	$IPTABLES --table filter --delete rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface l2tp+ --jump DROP
+	$IPTABLES --table filter --delete rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface ppoe+ --jump DROP
+	$IPTABLES --table filter --delete rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface pptp+ --jump DROP
+	$IPTABLES --table filter --delete rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface 3g-usb+ --jump DROP
+	$IPTABLES --table filter --delete rip_fw_bypass --protocol tcp --dport 2601:2603 --in-interface wwan+ --jump DROP
+	$IP6TABLES --table filter --delete ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth0+ --jump DROP
+	$IP6TABLES --table filter --delete ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth2+ --jump DROP
+	$IP6TABLES --table filter --delete ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface br-vlan+ --jump DROP
+	$IP6TABLES --table filter --delete ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface eth3+ --jump DROP
+	$IP6TABLES --table filter --delete ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface ppp+ --jump DROP
+	$IP6TABLES --table filter --delete ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface l2tp+ --jump DROP
+	$IP6TABLES --table filter --delete ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface ppoe+ --jump DROP
+	$IP6TABLES --table filter --delete ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface pptp+ --jump DROP
+	$IP6TABLES --table filter --delete ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface 3g-usb+ --jump DROP
+	$IP6TABLES --table filter --delete ripng_fw_bypass --protocol tcp --dport 2601:2603 --in-interface wwan+ --jump DROP
+	/usr/sbin/quagga.init stop
+}

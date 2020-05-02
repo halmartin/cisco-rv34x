@@ -1,0 +1,104 @@
+--- a/include/uapi/linux/netfilter/nf_conntrack_common.h	2017-03-23 16:55:50.159149493 +0530
++++ b/include/uapi/linux/netfilter/nf_conntrack_common.h	2017-03-23 16:59:34.831423448 +0530
+@@ -134,6 +134,7 @@ enum ip_conntrack_events {
+ 	IPCT_LABEL,		/* new connlabel has been set */
+     IPCT_DROP,      /* dropping packets enabled on this connection */
+     IPCT_QOSCONNMARK,   /* new qosconnmark has been set */
++    IPCT_DPI_ALLOWED,   /* set dpi_allowed bit in conntrack status */
+ };
+ 
+ enum ip_conntrack_expect_events {
+--- a/include/net/netfilter/nf_conntrack.h	2017-03-23 16:57:42.159118479 +0530
++++ b/include/net/netfilter/nf_conntrack.h	2017-03-23 17:00:28.246116101 +0530
+@@ -311,7 +311,8 @@ struct kernel_param;
+ extern int nf_conntrack_set_drop_enable_report(struct sk_buff *skb);
+ extern int nf_conntrack_set_drop_tuple_enable_report(struct nf_conntrack_tuple tuple);
+ extern int nf_conntrack_set_dpi_allow_report(struct sk_buff *skb);
+-extern int nf_conntrack_set_dpi_allow_and_mark(struct sk_buff *skb, int mark);
++extern int nf_conntrack_set_dpi_allow_and_mark(struct sk_buff *skb, unsigned int mask, unsigned int mark);
++extern int nf_conntrack_set_dpi_allow_and_qosconnmark(struct sk_buff *skb, uint64_t mask, uint64_t mark);
+ #endif
+ int nf_conntrack_set_hashsize(const char *val, struct kernel_param *kp);
+ extern unsigned int nf_conntrack_htable_size;
+--- a/net/netfilter/nf_conntrack_core.c	2017-03-23 16:58:30.211131188 +0530
++++ b/net/netfilter/nf_conntrack_core.c	2017-03-23 17:05:38.120967678 +0530
+@@ -1642,7 +1642,7 @@ int nf_conntrack_set_dpi_allow_report(st
+ 
+ 	set_bit(IPS_DPI_ALLOWED_BIT, &ct->status);
+ 
+-	nf_conntrack_event_cache(IPCT_PROTOINFO, ct);
++    nf_conntrack_event_cache(IPCT_DPI_ALLOWED, ct);
+ 
+ 	nf_conntrack_put(skb->nfct);
+ 
+@@ -1650,26 +1650,67 @@ int nf_conntrack_set_dpi_allow_report(st
+ }
+ EXPORT_SYMBOL(nf_conntrack_set_dpi_allow_report);
+ 
+-int nf_conntrack_set_dpi_allow_and_mark(struct sk_buff *skb, int mark)
++int nf_conntrack_set_dpi_allow_and_mark(struct sk_buff *skb, unsigned int mask, unsigned int mark)
+ {
+ 	int err = 0;
+ 	struct nf_conn *ct = (struct nf_conn *)skb->nfct;
++    unsigned int new_mark;
++       
++    if (!ct)
++        return -ENOENT;
++
+ 
+ 	nf_conntrack_get(skb->nfct);
+ 
+ 	set_bit(IPS_DPI_ALLOWED_BIT, &ct->status);
+ 
++    nf_conntrack_event_cache(IPCT_DPI_ALLOWED, ct);
++
+ #ifdef CONFIG_NF_CONNTRACK_MARK
+-	ct->mark = mark;
++    new_mark = (ct->mark & ~mask) | mark;
++    if (new_mark != ct->mark)
++        {
++            ct->mark = new_mark;
++            nf_conntrack_event_cache(IPCT_MARK, ct);
++        }
+ #endif
+ 
+-	nf_conntrack_event_cache(IPCT_PROTOINFO, ct);
+ 
+ 	nf_conntrack_put(skb->nfct);
+ 
+ 	return err;
+ }
++int nf_conntrack_set_dpi_allow_and_qosconnmark(struct sk_buff *skb, uint64_t mask, uint64_t mark)
++{
++    int err = 0;
++    struct nf_conn *ct = (struct nf_conn *)skb->nfct;
++    uint64_t new_mark;
++          
++    if (!ct)
++        return -ENOENT;
++        
++    nf_conntrack_get(skb->nfct);
++        
++    set_bit(IPS_DPI_ALLOWED_BIT, &ct->status);
++    nf_conntrack_event_cache(IPCT_DPI_ALLOWED, ct);
++        
++#if defined(CONFIG_COMCERTO_FP)
++    new_mark = (ct->qosconnmark & ~mask) | mark ;
++        
++    if (new_mark != ct->qosconnmark)
++    {
++        ct->qosconnmark = new_mark;
++        nf_conntrack_event_cache(IPCT_QOSCONNMARK, ct);
++    }
++#endif
++            
++    nf_conntrack_put(skb->nfct);
++        
++    return err;
++}
++
+ EXPORT_SYMBOL(nf_conntrack_set_dpi_allow_and_mark);
++EXPORT_SYMBOL(nf_conntrack_set_dpi_allow_and_qosconnmark);
+ #endif
+ 
+ int nf_conntrack_set_hashsize(const char *val, struct kernel_param *kp)

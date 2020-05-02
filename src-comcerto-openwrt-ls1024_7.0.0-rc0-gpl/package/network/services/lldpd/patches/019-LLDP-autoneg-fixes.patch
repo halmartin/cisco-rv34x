@@ -1,0 +1,45 @@
+diff -ruaN x/src/interfaces.c y/src/interfaces.c
+--- x/src/interfaces.c	2017-11-22 14:27:35.243067429 +0530
++++ y/src/interfaces.c	2017-11-22 14:55:57.863067225 +0530
+@@ -604,7 +604,6 @@
+ 		{ADVERTISED_Asym_Pause, LLDP_DOT3_LINK_AUTONEG_FDX_APAUSE},
+ 		{ADVERTISED_2500baseX_Full, LLDP_DOT3_LINK_AUTONEG_OTHER},
+ 		{0,0}};
+-
+ 	if (priv_ethtool(hardware->h_ifname, &ethc) == 0) {
+ 		port->p_macphy.autoneg_support = (ethc.supported & SUPPORTED_Autoneg) ? 1 : 0;
+ 		port->p_macphy.autoneg_enabled = (ethc.autoneg == AUTONEG_DISABLE) ? 0 : 1;
+@@ -647,6 +646,7 @@
+ 		if (ethc.port == PORT_AUI) port->p_macphy.mau_type = LLDP_DOT3_MAU_AUI;
+ 	}
+ #endif
++	port->p_macphy.autoneg_support = 1;
+ }
+ 
+ static void
+diff -ruaN x/src/lldpd.c y/src/lldpd.c
+--- x/src/lldpd.c	2017-11-22 14:58:34.503067207 +0530
++++ y/src/lldpd.c	2017-11-22 15:00:23.047067194 +0530
+@@ -967,11 +967,18 @@
+ 	{
+ 
+ 		fp = fopen("/sys/class/gpio/gpio6/value", "r");
+-		ch = fgetc(fp);
+-		if((ch == '0') || (ch == "0"))
+-			LOCAL_CHASSIS(cfg)->c_cap_enabled |= LLDP_CAP_WLAN;
++		if(fp != NULL)
++		{
++			ch = fgetc(fp);
++			if((ch == '0') || (ch == "0"))
++				LOCAL_CHASSIS(cfg)->c_cap_enabled |= LLDP_CAP_WLAN;
+ 		
+-		pclose(fp);
++			pclose(fp);
++		}
++		else
++		{
++			LLOG_WARN("Not able to open file");
++		}
+ 	}
+ 
+ #ifdef ENABLE_LLDPMED

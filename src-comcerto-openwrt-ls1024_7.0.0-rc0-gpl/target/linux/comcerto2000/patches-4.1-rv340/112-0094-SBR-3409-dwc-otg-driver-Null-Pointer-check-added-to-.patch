@@ -1,0 +1,58 @@
+From ee0fe56e3043f1e857ca566b0ec1cc98b8f40c2a Mon Sep 17 00:00:00 2001
+From: Abdul Moiz <abdul.moiz@nxp.com>
+Date: Thu, 27 Oct 2016 00:18:12 +0530
+Subject: [PATCH 094/100] SBR-3409 dwc-otg driver Null Pointer check added to
+ avoid kernel panic
+
+Signed-off-by: Abdul Moiz <abdul.moiz@nxp.com>
+---
+ drivers/usb/dwc_otg/dwc_otg_hcd.c       | 13 +++++++++++++
+ drivers/usb/dwc_otg/dwc_otg_hcd_linux.c |  7 +++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/drivers/usb/dwc_otg/dwc_otg_hcd.c b/drivers/usb/dwc_otg/dwc_otg_hcd.c
+index d49f475..2d272a9 100755
+--- a/drivers/usb/dwc_otg/dwc_otg_hcd.c
++++ b/drivers/usb/dwc_otg/dwc_otg_hcd.c
+@@ -496,7 +496,20 @@ int dwc_otg_hcd_urb_dequeue(dwc_otg_hcd_t * hcd,
+ 	dwc_otg_qtd_t *urb_qtd;
+ 
+ 	urb_qtd = dwc_otg_urb->qtd;
++	// NULL pointer check added
++	if(!urb_qtd)
++	{
++		printk("%s:%d:	ERROR:	urb_qtd is NULL\n", __func__, __LINE__);
++		return 0;
++	}
+ 	qh = urb_qtd->qh;
++	// NULL pointer check added
++	if(!qh)
++	{
++		printk("%s:%d:	ERROR:	qh is NULL\n", __func__, __LINE__);
++		return 0;
++	}
++
+ #ifdef DEBUG
+ 	if (CHK_DEBUG_LEVEL(DBG_HCDV | DBG_HCD_URB)) {
+ 		if (urb_qtd->in_process) {
+diff --git a/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c b/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c
+index 23bef622..ea78d93 100755
+--- a/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c
++++ b/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c
+@@ -762,6 +762,13 @@ static int urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
+ 	dwc_otg_hcd_t *dwc_otg_hcd;
+ 	DWC_DEBUGPL(DBG_HCD, "DWC OTG HCD URB Dequeue\n");
+ 
++	// NULL pointer check added
++	if(!(urb->hcpriv))
++	{
++		printk("%s:%d:  ERROR:	urb->hcpriv is NULL\n",__func__, __LINE__);
++		return 0;
++	}
++
+ 	dwc_otg_hcd = hcd_to_dwc_otg_hcd(hcd);
+ 
+ #ifdef DEBUG
+-- 
+1.9.1
+

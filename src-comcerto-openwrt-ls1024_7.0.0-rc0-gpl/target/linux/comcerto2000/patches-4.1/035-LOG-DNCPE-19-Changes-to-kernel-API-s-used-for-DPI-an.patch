@@ -1,0 +1,59 @@
+--- a/include/uapi/linux/netfilter/nf_conntrack_common.h	2017-03-23 17:13:40.622084709 +0530
++++ b/include/uapi/linux/netfilter/nf_conntrack_common.h	2017-03-23 17:13:52.808174201 +0530
+@@ -132,9 +132,7 @@ enum ip_conntrack_events {
+ 	IPCT_NATSEQADJ = IPCT_SEQADJ,
+ 	IPCT_SECMARK,		/* new security mark has been set */
+ 	IPCT_LABEL,		/* new connlabel has been set */
+-    IPCT_DROP,      /* dropping packets enabled on this connection */
+     IPCT_QOSCONNMARK,   /* new qosconnmark has been set */
+-    IPCT_DPI_ALLOWED,   /* set dpi_allowed bit in conntrack status */
+ };
+ 
+ enum ip_conntrack_expect_events {
+--- a/net/netfilter/nf_conntrack_core.c	2017-03-23 17:12:36.882232414 +0530
++++ b/net/netfilter/nf_conntrack_core.c	2017-03-23 17:16:32.143798070 +0530
+@@ -1599,7 +1599,7 @@ int nf_conntrack_set_drop_enable_report(
+     
+     set_bit(IPS_DROP_CONN_BIT, &ct->status);
+     
+-    nf_conntrack_event_cache(IPCT_DROP, ct);
++    nf_conntrack_event_cache(IPCT_PROTOINFO, ct);
+     
+     nf_conntrack_put(skb->nfct);
+     
+@@ -1623,7 +1623,7 @@ int nf_conntrack_set_drop_tuple_enable_r
+     ct = nf_ct_tuplehash_to_ctrack(h);
+         
+     prev = test_and_set_bit(IPS_DROP_CONN_BIT, &ct->status);
+-    err = nf_conntrack_event(IPCT_DROP, ct);
++    err = nf_conntrack_event(IPCT_PROTOINFO, ct);
+     if(err < 0 && prev == 0)
+         clear_bit(IPS_DROP_CONN_BIT, &ct->status);
+     nf_ct_put(ct);
+@@ -1642,7 +1642,7 @@ int nf_conntrack_set_dpi_allow_report(st
+ 
+ 	set_bit(IPS_DPI_ALLOWED_BIT, &ct->status);
+ 
+-    nf_conntrack_event_cache(IPCT_DPI_ALLOWED, ct);
++    nf_conntrack_event_cache(IPCT_PROTOINFO, ct);
+ 
+ 	nf_conntrack_put(skb->nfct);
+ 
+@@ -1664,7 +1664,7 @@ int nf_conntrack_set_dpi_allow_and_mark(
+ 
+ 	set_bit(IPS_DPI_ALLOWED_BIT, &ct->status);
+ 
+-    nf_conntrack_event_cache(IPCT_DPI_ALLOWED, ct);
++    nf_conntrack_event_cache(IPCT_PROTOINFO, ct);
+ 
+ #ifdef CONFIG_NF_CONNTRACK_MARK
+     new_mark = (ct->mark & ~mask) | mark;
+@@ -1692,7 +1692,7 @@ int nf_conntrack_set_dpi_allow_and_qosco
+     nf_conntrack_get(skb->nfct);
+         
+     set_bit(IPS_DPI_ALLOWED_BIT, &ct->status);
+-    nf_conntrack_event_cache(IPCT_DPI_ALLOWED, ct);
++    nf_conntrack_event_cache(IPCT_PROTOINFO, ct);
+         
+ #if defined(CONFIG_COMCERTO_FP)
+     new_mark = (ct->qosconnmark & ~mask) | mark ;

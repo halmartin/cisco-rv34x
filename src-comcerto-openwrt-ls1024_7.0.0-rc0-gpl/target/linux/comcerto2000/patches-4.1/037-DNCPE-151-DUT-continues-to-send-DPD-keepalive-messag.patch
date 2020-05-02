@@ -1,0 +1,59 @@
+From c07d42380c48c5fb649b0a1e461678924604ecd5 Mon Sep 17 00:00:00 2001
+From: Abhinav <abhinav.podduturi@nxp.com>
+Date: Wed, 24 Feb 2016 12:44:53 +0530
+Subject: [PATCH 14/19] DNCPE-151: DUT continues to send DPD keepalive
+ messages , even when traffic is flowing through the
+ IPSec tunnel
+
+Strongswan is checking last used time stamp of Secure policies(SP) to send DPD keep alive messages.
+We are only updating statistics of SA's and not updating SP's time stamp. To resolve this a new member
+"curr_time" is added to struct xfrm_state. "curr_time" is updated when there is change in stats of SA and
+returned when ever Strongswan queries for SA stats. Changes are made in Strongswan to check the time
+stamp of SA also while sending DPD keepalive messages.
+---
+ include/net/xfrm.h |    3 ++-
+ net/key/af_key.c   |    7 +++++++
+ 2 files changed, 9 insertions(+), 1 deletions(-)
+
+diff --git a/include/net/xfrm.h b/include/net/xfrm.h
+index 44de314..dfdd14a 100644
+--- a/include/net/xfrm.h
++++ b/include/net/xfrm.h
+@@ -236,7 +236,8 @@ struct xfrm_state {
+ #if defined(CONFIG_INET_IPSEC_OFFLOAD) || defined(CONFIG_INET6_IPSEC_OFFLOAD)
+ 	 /* Intended direction of this state, used for offloading */
+ 	int	dir;
+-	int	offloaded;	
++	int	offloaded;
++	u64	curr_time;
+ #endif
+ };
+ 
+diff --git a/net/key/af_key.c b/net/key/af_key.c
+index 0f315d1..04bea99 100644
+--- a/net/key/af_key.c
++++ b/net/key/af_key.c
+@@ -1050,6 +1050,11 @@ static struct sk_buff *__pfkey_xfrm_state2msg(const struct xfrm_state *x,
+ 	lifetime->sadb_lifetime_bytes = x->curlft.bytes;
+ 	lifetime->sadb_lifetime_addtime = x->curlft.add_time;
+ 	lifetime->sadb_lifetime_usetime = x->curlft.use_time;
++
++#if defined(CONFIG_INET_IPSEC_OFFLOAD)|| defined(CONFIG_INET6_IPSEC_OFFLOAD)
++	lifetime->sadb_lifetime_usetime = x->curr_time;
++#endif
++
+ 	/* src address */
+ 	addr = (struct sadb_address*) skb_put(skb,
+ 					      sizeof(struct sadb_address)+sockaddr_size);
+@@ -4031,6 +4036,8 @@ static void ipsec_nlkey_rcv(struct sk_buff *skb)
+ 			if (x) {
+ 				spin_lock(&x->lock);
+ 
++				if (x->curlft.bytes != sa_info_msg.bytes)
++					x->curr_time = get_seconds();
+ 				x->curlft.bytes = sa_info_msg.bytes;
+ 				x->curlft.packets = sa_info_msg.packets;
+ 
+-- 
+1.7.7.4
+

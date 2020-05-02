@@ -1,0 +1,21 @@
+diff -aurN a/src/lib/krb5/os/sendto_kdc.c b/src/lib/krb5/os/sendto_kdc.c
+--- a/src/lib/krb5/os/sendto_kdc.c	2016-05-17 13:18:09.071912769 +0530
++++ b/src/lib/krb5/os/sendto_kdc.c	2016-05-17 13:17:08.343913810 +0530
+@@ -54,7 +54,7 @@
+ #endif
+ #endif
+ 
+-#define MAX_PASS                    3
++#define MAX_PASS                    1
+ #define DEFAULT_UDP_PREF_LIMIT   1465
+ #define HARD_UDP_LIMIT          32700 /* could probably do 64K-epsilon ? */
+ 
+@@ -1182,7 +1182,7 @@
+                 void *msg_handler_data)
+ {
+     int pass;
+-    int delay_this_pass = 2;
++    int delay_this_pass = 1;
+     krb5_error_code retval;
+     struct conn_state *conns = NULL;
+     krb5_data *callback_data = NULL;

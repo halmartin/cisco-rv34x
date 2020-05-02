@@ -1,0 +1,20 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Disable CONFIG_DRIVER_CFI.
+--- barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig.org	2017-01-19 16:21:44.355877342 +0800
++++ barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	2017-01-19 16:22:28.675254236 +0800
+@@ -300,14 +300,7 @@
+ #
+ # flash drivers
+ #
+-CONFIG_DRIVER_CFI=y
+-CONFIG_DRIVER_CFI_INTEL=y
+-CONFIG_DRIVER_CFI_AMD=y
+-CONFIG_DRIVER_CFI_BANK_WIDTH_1=y
+-CONFIG_DRIVER_CFI_BANK_WIDTH_2=y
+-CONFIG_DRIVER_CFI_BANK_WIDTH_4=y
+-# CONFIG_DRIVER_CFI_BANK_WIDTH_8 is not set
+-CONFIG_CFI_BUFFER_WRITE=y
++# CONFIG_DRIVER_CFI is not set
+ CONFIG_MTD=y
+ CONFIG_NAND=y
+ CONFIG_MTD_NAND_ECC_BCH=y

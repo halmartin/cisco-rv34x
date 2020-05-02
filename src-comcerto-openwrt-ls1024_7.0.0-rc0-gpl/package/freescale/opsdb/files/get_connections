@@ -1,0 +1,4 @@
+#!/bin/sh
+local connections
+connections=`conntrack -C`
+echo $connections > /tmp/stats/currentconnections

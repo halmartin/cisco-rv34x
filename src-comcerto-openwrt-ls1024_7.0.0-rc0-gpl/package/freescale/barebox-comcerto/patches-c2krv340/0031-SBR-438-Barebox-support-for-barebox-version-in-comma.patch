@@ -1,0 +1,42 @@
+From 29aafe0f0d1348a22b579f47ae9f08a27c5cfd47 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Mon, 4 Jan 2016 18:46:41 +0530
+Subject: [PATCH 31/60] SBR-438 Barebox support for barebox version in
+ commandline for uci
+
+Signed-off-by: nageshkoneti <b47094@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/env/bin/boot | 4 ++++
+ commands/version.c                          | 1 +
+ 2 files changed, 5 insertions(+)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/boot b/arch/arm/boards/comcerto-rv340/env/bin/boot
+index ec4005a..091e87e 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/boot
++++ b/arch/arm/boards/comcerto-rv340/env/bin/boot
+@@ -232,6 +232,10 @@ if [ -n $pci_data ]; then
+   bootargs="$bootargs $pci_data"
+ fi
+ 
++version
++if [ -n $bootver ]; then
++  bootargs="$bootargs bareboxver="$bootver""
++fi
+ echo "booting kernel of type $kernelimage_type from $kdev"
+ 
+ if [ x$kernelimage_type = xuimage ]; then
+diff --git a/commands/version.c b/commands/version.c
+index 2b3ac05..46ba527 100644
+--- a/commands/version.c
++++ b/commands/version.c
+@@ -27,6 +27,7 @@
+ static int do_version(struct command *cmdtp, int argc, char *argv[])
+ {
+ 	printf ("\n%s\n", version_string);
++	setenv("bootver",version_string);
+ 	return 0;
+ }
+ 
+-- 
+2.7.4
+

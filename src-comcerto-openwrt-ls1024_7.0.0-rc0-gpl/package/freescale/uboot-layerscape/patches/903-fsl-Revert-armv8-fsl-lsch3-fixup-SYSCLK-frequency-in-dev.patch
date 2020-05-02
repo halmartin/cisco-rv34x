@@ -1,0 +1,28 @@
+From 38c98eb0c188307903ada2fbec672ad20960d982 Mon Sep 17 00:00:00 2001
+From: Kavi Akhila-B46177 <b46177@lvd5291.ap.freescale.net>
+Date: Thu, 3 Nov 2016 13:03:49 +0530
+Subject: [PATCH] Revert "armv8: fsl-lsch3: fixup SYSCLK frequency in device
+ tree"
+
+This reverts commit 8356e463b243d4e4ff9df63bcaf3a0ed4833835e.
+---
+ arch/arm/cpu/armv8/fsl-layerscape/fdt.c |    3 ---
+ 1 files changed, 0 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/cpu/armv8/fsl-layerscape/fdt.c b/arch/arm/cpu/armv8/fsl-layerscape/fdt.c
+index 206b6a2..76f2cfb 100644
+--- a/arch/arm/cpu/armv8/fsl-layerscape/fdt.c
++++ b/arch/arm/cpu/armv8/fsl-layerscape/fdt.c
+@@ -299,9 +299,6 @@ void ft_cpu_setup(void *blob, bd_t *bd)
+ 			       "clock-frequency", CONFIG_SYS_NS16550_CLK, 1);
+ #endif
+ 
+-	do_fixup_by_compat_u32(blob, "fixed-clock",
+-			       "clock-frequency", CONFIG_SYS_CLK_FREQ, 1);
+-
+ #ifdef CONFIG_PCI
+ 	ft_pci_setup(blob, bd);
+ #endif
+-- 
+1.7.7.4
+

@@ -1,0 +1,51 @@
+From 0a48b2e4459e9e6e7cf90ccfdad984189b584f7f Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Wed, 7 Oct 2015 13:22:23 +0530
+Subject: [PATCH 21/60] SBR-92 Resized env, boardinfo, dtb NAND partitions to
+ 128k
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/env/config |  2 +-
+ arch/arm/lib/bootb.c                      | 12 ++++++------
+ 2 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index 701af7c..f5fb2ea 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -38,7 +38,7 @@ fast_spi_device="spi1.0"
+ fast_spi_parts="128k(uloader)ro,512k(barebox),128k(env),128k(board-info)ro"
+ 
+ nand_device="comcertonand"
+-nand_parts="512k(barebox),512k(bareboxfact)ro,512k(env),512k(boardinfo)ro,8M(kernel1),72M(rootfs1),512k(reserved_dtb1)ro,8M(kernel2),72M(rootfs2),512k(reserved_dtb2)ro,2M(configcert),12M(avcsign),32M(webrootdb),1M(license)"
++nand_parts="512k(barebox),512k(bareboxfact)ro,128k(env),128k(boardinfo)ro,8M(kernel1),72M(rootfs1),128k(reserved_dtb1)ro,8M(kernel2),72M(rootfs2),128k(reserved_dtb2)ro,2M(configcert),12M(avcsign),32M(webrootdb),1M(license)"
+ 
+ autoboot_timeout=3
+ 
+diff --git a/arch/arm/lib/bootb.c b/arch/arm/lib/bootb.c
+index a612caf..c1d2ea7 100644
+--- a/arch/arm/lib/bootb.c
++++ b/arch/arm/lib/bootb.c
+@@ -146,12 +146,12 @@ static int do_bootb_barebox(void)
+ 
+ #if ( CONFIG_COMCERTO_NAND_ULOADER && CONFIG_MACH_COMCERTO_C2K_RV340 )
+   if (boot_addr == NULL) {
+-	  /* this option is used when uloader is in NOR flash or I2C EEPROM and
+-   	   barebox is in NAND */
+-		printf("\nActive Image validation error");
+-  	printf("\nCopying Barebox from NAND Flash(bootopt=%d) @offset = 0x%0X\n", bootopt, (unsigned)BAREBOX_PART_SIZE);
+-	  read_nand(BAREBOX_LODING_ADDR, BAREBOX_PART_SIZE, count);
+-	  boot_addr = (void *) verify_and_authenticate_boot_image((u8 *)BAREBOX_LODING_ADDR);
++    /* this option is used when uloader is in NOR flash or I2C EEPROM and
++     barebox is in NAND */
++    printf("\nActive Image validation error");
++    printf("\nCopying Barebox from NAND Flash(bootopt=%d) @offset = 0x%0X\n", bootopt, (unsigned)BAREBOX_PART_SIZE);
++    read_nand(BAREBOX_LODING_ADDR, BAREBOX_PART_SIZE, count);
++    boot_addr = (void *) verify_and_authenticate_boot_image((u8 *)BAREBOX_LODING_ADDR);
+   }
+ #endif
+ 
+-- 
+2.7.4
+

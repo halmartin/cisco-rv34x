@@ -1,0 +1,237 @@
+#!/bin/sh /etc/rc.common
+
+#/usr/lib/webif/functions.sh
+#/lib/config/uci.sh
+
+. /etc/boardInfo
+START=22
+STOP=78
+EXTRA_COMMANDS="set_dst_and_timezone update_dst_param"
+SET_NTP=0
+SET_MANUAL=1
+DEFAULT_MODE=0
+USER_DEFINED_MODE=1
+CISCO_SERVER1="0.ciscosb.pool.ntp.org"
+CISCO_SERVER2="1.ciscosb.pool.ntp.org"
+CISCO_SERVER3="2.ciscosb.pool.ntp.org"
+CISCO_SERVER4="3.ciscosb.pool.ntp.org"
+NTPD_UPDATE="/usr/bin/ntpd_update"
+dummy_year=2001
+JULIAN_MODE=0
+RECURRING_MODE=1
+
+update_dst_param() {
+	dst_mode="$1"
+	dst_start_time="$2"
+	dst_end_time="$3"
+	orig_offset="$4"
+	srctimezone="$5"
+	dsttimezone="$6"
+	curr_year=`date -u "+%Y"`
+
+	dst_start_time_hour=`echo $dst_start_time | cut -d - -f2| cut -d : -f1`
+	dst_start_time_min=`echo $dst_start_time | cut -d - -f2| cut -d : -f2`
+	dst_end_time_hour=`echo $dst_end_time | cut -d - -f2| cut -d : -f1`
+	dst_end_time_min=`echo $dst_end_time | cut -d - -f2| cut -d : -f2`
+
+	if [ "$dst_mode" = $RECURRING_MODE ];then
+		# Get the month & day
+	       	start_month=`echo $dst_start_time | cut -d - -f1| cut -d . -f1`
+               	start_week=`echo $dst_start_time | cut -d - -f1| cut -d . -f2`
+               	start_day=`echo $dst_start_time | cut -d - -f1| cut -d . -f3`
+               	end_month=`echo $dst_end_time | cut -d - -f1| cut -d . -f1`
+               	end_week=`echo $dst_end_time | cut -d - -f1| cut -d . -f2`
+               	end_day=`echo $dst_end_time | cut -d - -f1| cut -d . -f3`
+	       	recurring_output="$(/usr/bin/get_timezoneday $curr_year $start_month $start_week $start_day $end_month $end_week $end_day)"
+		local oIFS="$IFS"; IFS="."
+        	set $recurring_output
+        	IFS="$oIFS"
+        	dst_start_month=$1;dst_start_day=$2;dst_end_month=$3;dst_end_day=$4
+	else
+		dst_start_month=`echo $dst_start_time | cut -d - -f1| cut -d . -f1`
+		dst_start_day=`echo $dst_start_time | cut -d - -f1| cut -d . -f2`
+   	        dst_end_month=`echo $dst_end_time | cut -d - -f1| cut -d . -f1`
+         	dst_end_day=`echo $dst_end_time | cut -d - -f1| cut -d . -f2`
+	fi
+
+	`sed -i "/ #DST_MODE/c\mode=$dst_mode #DST_MODE" $DSTHANDLERFILE`
+	`sed -i "/ #START_TIMEZONE/c\src_time_zone=$srctimezone #START_TIMEZONE" $DSTHANDLERFILE`
+	`sed -i "/ #DST_TIMEZONE/c\dst_time_zone=$dsttimezone #DST_TIMEZONE" $DSTHANDLERFILE`
+	`sed -i "/ #START_MONTH/c\dst_start_month=$dst_start_month #START_MONTH" $DSTHANDLERFILE`
+	`sed -i "/ #START_DAY/c\dst_start_day=$dst_start_day #START_DAY" $DSTHANDLERFILE`
+	`sed -i "/ #START_HOUR/c\dst_start_time_hour=$dst_start_time_hour #START_HOUR" $DSTHANDLERFILE`
+	`sed -i "/ #START_MIN/c\dst_start_time_min=$dst_start_time_min #START_MIN" $DSTHANDLERFILE`
+	`sed -i "/ #END_MONTH/c\dst_end_month=$dst_end_month #END_MONTH" $DSTHANDLERFILE`
+	`sed -i "/ #END_DAY/c\dst_end_day=$dst_end_day #END_DAY" $DSTHANDLERFILE`
+	`sed -i "/ #END_HOUR/c\dst_end_time_hour=$dst_end_time_hour #END_HOUR" $DSTHANDLERFILE`
+	`sed -i "/ #END_MIN/c\dst_end_time_min=$dst_end_time_min #END_MIN" $DSTHANDLERFILE`
+	`sed -i "/ #DST_OFFSET/c\offset=$orig_offset #DST_OFFSET" $DSTHANDLERFILE`
+	`sed -i "/ #CONFIG_YEAR/c\YEAR=$curr_year #CONFIG_YEAR" $DSTHANDLERFILE`
+	`sed -i "/ #DST_ENABLED/c\ENABLED=1 #DST_ENABLED" $DSTHANDLERFILE`
+}
+
+stop_ntpd() {
+	`killall ntpd` >/dev/null 2>&1
+}
+
+stop() {
+	stop_ntpd
+}
+
+run_ntpd() {
+	ntp_mode=`uci get system.ntp.server_mode`
+	if [ "$ntp_mode" = "$DEFAULT_MODE" ];then
+		SERVER="-p "${CISCO_SERVER1}" -p "${CISCO_SERVER2}" -p "${CISCO_SERVER3}" -p "${CISCO_SERVER4}
+		logger -t ntpd -p local0.info "querying for $CISCO_SERVER1 $CISCO_SERVER2 $CISCO_SERVER3 $CISCO_SERVER4"
+	elif [ "$ntp_mode" = "$USER_DEFINED_MODE" ] ;then
+		server1=`uci get system.ntp.server1` >/dev/null 2>&1
+                server2=`uci get system.ntp.server2` >/dev/null 2>&1
+		server3=`uci get system.ntp.server3` >/dev/null 2>&1
+                server4=`uci get system.ntp.server4` >/dev/null 2>&1
+		SERVER="-p "${server1}
+		[ -n "$server2" ] && SERVER=${SERVER}" -p "${server2}
+		[ -n "$server3" ] && SERVER=${SERVER}" -p "${server3}
+		[ -n "$server4" ] && SERVER=${SERVER}" -p "${server4}
+		logger -t ntpd -p local0.info "querying for $server1 $server2 $server3 $server4"
+	fi
+	# Run ntpd
+	`ntpd -d $SERVER -S $NTPD_UPDATE`
+}
+
+set_dst_and_timezone() {
+	date_time_type="$1"
+	timezone=`uci get system.systemtimezone.timezone`
+	timezonesign=
+	# set the TZ
+	case $timezone in
+		*+*)
+			srcTZ=`echo $timezone | cut -d + -f 2-`
+			srcTZHour=`echo $srcTZ | cut -d : -f 1`
+			srcTZMin=`echo $srcTZ | cut -d : -f 2`
+			srctimezone="GMT-${srcTZ}"
+			timezonesign=1 #positive
+		;;
+		*)
+			srcTZ=`echo $timezone | cut -d - -f 2-`
+			srcTZHour=`echo $srcTZ | cut -d : -f 1`
+			srcTZMin=`echo $srcTZ | cut -d : -f 2`
+			srctimezone="GMT+${srcTZ}"
+			timezonesign=0 #negative
+		;;
+	esac
+
+	dst_value=`uci get system.day_light.day_light_enable`
+	if [ "$dst_value" = 1 ]; then
+		dst_mode=`uci get system.day_light.dst_mode`
+		offset=`uci get system.day_light.dst_offset`
+		dst_start_time=`uci get system.day_light.start_time`
+		dst_end_time=`uci get system.day_light.end_time`
+		orig_offset="$offset"
+
+		case $offset in
+			*-*)
+				# Remove the - sign (if any)
+				offset=`echo $offset | cut -d - -f2`
+				if [ "$timezonesign" = 1 ];then
+					dstTotalMin=$(( (srcTZHour * 60 + srcTZMin - offset) ))
+					dstTzTotalHour=$(( dstTotalMin / 60 ))
+					dstTzTotalMin=$(( dstTotalMin - dstTzTotalHour * 60 ))
+					if [ "$dstTotalMin" -gt 0 ];then
+						dsttimezone="GMT-${dstTzTotalHour}:${dstTzTotalMin}"
+					else
+						dstTzTotalHour=`echo $dstTzTotalHour | cut -d - -f2`
+						dstTzTotalMin=`echo $dstTzTotalMin | cut -d - -f2`
+						dsttimezone="GMT+${dstTzTotalHour}:${dstTzTotalMin}"
+					fi
+				else
+					dstTotalMin=$(( (srcTZHour * 60 + srcTZMin + offset) ))
+					dstTzTotalHour=$(( dstTotalMin / 60 ))
+					dstTzTotalMin=$(( dstTotalMin - dstTzTotalHour * 60 ))
+					dsttimezone="GMT+${dstTzTotalHour}:${dstTzTotalMin}"
+				fi
+			;;
+			*)
+				# Remove the + sign (if any)
+				offset=`echo $offset | cut -d + -f2`
+				if [ "$timezonesign" = 1 ];then
+					# Add offset
+					dstTotalMin=$(( (srcTZHour * 60 + srcTZMin + offset) ))
+					dstTzTotalHour=$(( dstTotalMin / 60 ))
+					dstTzTotalMin=$(( dstTotalMin - dstTzTotalHour * 60 ))
+					dsttimezone="GMT-${dstTzTotalHour}:${dstTzTotalMin}"
+				else
+					dstTotalMin=$(( (srcTZHour * 60 + srcTZMin - offset) ))
+					dstTzTotalHour=$(( dstTotalMin / 60 ))
+					dstTzTotalMin=$(( dstTotalMin - dstTzTotalHour * 60 ))
+					if [ "$dstTotalMin" -gt 0 ];then
+						dsttimezone="GMT+${dstTzTotalHour}:${dstTzTotalMin}"
+					else
+						dstTzTotalHour=`echo $dstTzTotalHour | cut -d - -f2`
+						dstTzTotalMin=`echo $dstTzTotalMin | cut -d - -f2`
+						dsttimezone="GMT-${dstTzTotalHour}:${dstTzTotalMin}"	
+					fi
+				fi
+			;;
+		esac
+
+		update_dst_param "$dst_mode" "$dst_start_time" "$dst_end_time" "$orig_offset" "$srctimezone" "$dsttimezone"
+
+		# Add a cron job
+		uci del crontabs.dstTime
+		uci set crontabs.dstTime=crontab
+		uci set crontabs.dstTime.minutes=*/1
+		uci set crontabs.dstTime.hours=*
+		uci set crontabs.dstTime.days=*
+		uci set crontabs.dstTime.months=*
+		uci set crontabs.dstTime.weekdays=*
+		uci set crontabs.dstTime.command=/usr/bin/dstHandler
+		uci set crontabs.dstTime.enabled=1
+
+		uci set crontabs.every_1minute=crontab
+		uci set crontabs.every_1minute.minutes="*/1"
+		uci set crontabs.every_1minute.hours="*"
+		uci set crontabs.every_1minute.days="*"
+		uci set crontabs.every_1minute.months="*"
+		uci set crontabs.every_1minute.weekdays="*"
+		uci set crontabs.every_1minute.command="/usr/bin/cron.d/command/every_1minute"
+		uci set crontabs.every_1minute.enabled=1
+		uci commit crontabs
+		/etc/init.d/cron reload
+	else
+		`sed -i "/ #DST_ENABLED/c\ENABLED=0 #DST_ENABLED" $DSTHANDLERFILE`
+		temp=`cat $CronJobFile | grep "dstHandler"`
+		[ -n "$temp" ] && {
+			# Delete the cron job
+			uci del crontabs.dstTime
+			uci commit crontabs
+			/etc/init.d/cron reload
+		}
+	fi
+	echo "$srctimezone" > $TZFile
+
+	if [ "$dst_value" = 1 ] && [ "$date_time_type" = $SET_NTP ]; then
+                /usr/bin/dstHandler
+        fi
+
+	stop_ntpd
+	if [ "$date_time_type" = $SET_NTP ];then
+		run_ntpd
+	fi
+	date -k
+}
+
+start() {
+	date_time_type=`uci get system.systemtimezone.date_time_type`
+	set_dst_and_timezone $date_time_type
+	ps | grep [l]ed | cut -d" " -f2 | xargs kill -9 > /dev/null
+	#echo 1 > /proc/power_led
+
+	# This case is when user enabled DST, so after reboot we immediately sync with dstHander
+        /usr/bin/dstHandler
+}
+
+reload () {
+	date_time_type=`uci get system.systemtimezone.date_time_type`
+	set_dst_and_timezone $date_time_type
+}
+

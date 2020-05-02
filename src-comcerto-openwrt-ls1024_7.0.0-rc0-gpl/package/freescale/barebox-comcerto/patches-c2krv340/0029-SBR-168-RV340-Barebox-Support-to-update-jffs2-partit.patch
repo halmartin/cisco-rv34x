@@ -1,0 +1,131 @@
+From 093312bfc1bf00ee9669a218bcc329a5a33bd7f9 Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Wed, 23 Dec 2015 19:52:10 +0530
+Subject: [PATCH 29/60] SBR-168 RV340 Barebox Support to update jffs2
+ partitions
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/env/bin/_update_help    | 15 ++++++++++-----
+ arch/arm/boards/comcerto-rv340/env/bin/update          |  8 ++++++++
+ arch/arm/boards/comcerto-rv340/env/bin/update_firmware |  4 ++--
+ arch/arm/boards/comcerto-rv340/env/bin/update_jffs2    | 16 ++++++++++++++++
+ arch/arm/boards/comcerto-rv340/env/config              |  8 +++++++-
+ 5 files changed, 43 insertions(+), 8 deletions(-)
+ create mode 100644 arch/arm/boards/comcerto-rv340/env/bin/update_jffs2
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/_update_help b/arch/arm/boards/comcerto-rv340/env/bin/_update_help
+index 666ac2b..4dd358b 100644
+--- a/arch/arm/boards/comcerto-rv340/env/bin/_update_help
++++ b/arch/arm/boards/comcerto-rv340/env/bin/_update_help
+@@ -1,6 +1,6 @@
+ #!/bin/sh
+ 
+-echo "usage: update -t <uloader|barebox|bareboxenv|kernel1|kernel2|rootfs1|rootfs2> -d <nor|nand|i2c|spi|fastspi> [-m tftp|xmodem|ddr] [-f imagename|-a address] -c"
++echo "usage: update -t <uloader | barebox | bareboxenv | kernel1 | kernel2 | rootfs1 | rootfs2> -d <nand | fastspi> [-m tftp|xmodem|ddr] [-f imagename |-a address] -c"
+ echo "update tools."
+ echo ""
+ echo "options"
+@@ -8,7 +8,12 @@ echo " -c     to check the crc32 for the image and flashed one"
+ echo ""
+ echo "default mode is tftp"
+ echo "type update -t uloader -d fastspi [-m tftp|xmodem|ddr] [-f imagename|-a address] to update uloader into flash"
+-echo "type update -t barebox -d <fastspi|nand> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update barebox into flash"
+-echo "type update -t <kernel1|kernel2> -d <nand> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update kernel into flash"
+-echo "type update -t <rootfs1|rootfs2> -d <nand> [-m tftp|xmodem|ddr] [-f imagename|-a address] to update rootfs into flash"
+-echo "type update -t bareboxenv -d fastspi [-m tftp|xmodem|ddr] [-f imagename|-a address] to update bareboxenv into flash"
++echo "type update -t barebox -d nand [-m tftp|xmodem|ddr] [-f imagename|-a address] to update barebox into flash"
++echo "type update -t <kernel1 | kernel2> -d nand [-m tftp|xmodem|ddr] [-f imagename| -a address] to update kernel into flash"
++echo "type update -t <rootfs1 | rootfs2> -d nand [-m tftp|xmodem|ddr] [-f imagename| -a address] to update rootfs into flash"
++echo "type update_firmware <image1 | image2> to update kernel, rootfs on image1 OR image2"
++echo "type update -t configcert -d nand to update jffs2 partition : config "
++echo "type update -t avcsign -d nand to update jffs2 partition : avcsign"
++echo "type update -t webrootdb -d nand to update jffs2 partition : webrootdb"
++echo "type update -t license -d nand to update jffs2 partition : license"
++echo "type update_jffs2 to update all jffs2 partitions config, avcsign, webrootdb, license"
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/update b/arch/arm/boards/comcerto-rv340/env/bin/update
+index dda0c3d..10ff4d3 100644
+--- a/arch/arm/boards/comcerto-rv340/env/bin/update
++++ b/arch/arm/boards/comcerto-rv340/env/bin/update
+@@ -46,6 +46,14 @@ elif [ x${type} = xbareboxenv ]; then
+ 		image=bareboxenv.bin
+ 	fi
+ 	type=env
++elif [ x${type} = xconfigcert ]; then
++  image=$imageconfig
++elif [ x${type} = xavcsign ]; then
++	image=$imageavc
++elif [ x${type} = xwebrootdb ]; then
++	image=$imageweb
++elif [ x${type} = xlicense ]; then
++	image=$imagelic
+ else
+ 	. /env/bin/_update_help
+ 	exit 1
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/update_firmware b/arch/arm/boards/comcerto-rv340/env/bin/update_firmware
+index 012e710..e3ad8ae 100644
+--- a/arch/arm/boards/comcerto-rv340/env/bin/update_firmware
++++ b/arch/arm/boards/comcerto-rv340/env/bin/update_firmware
+@@ -16,9 +16,9 @@ else
+   rootfs=rootfs1
+ fi
+ echo "Updating Kernel with Image : $kernelimage ..."
+-. /env/bin/update -t $kernel -d nand -m tftp -f $kernelimage
++update -t $kernel -d nand
+ echo "done Kernel Update"
+ echo "Updating Rootfs with Image : $rootfsimage ..."
+-. /env/bin/update -t $rootfs -d nand -m tftp -f $rootfsimage
++update -t $rootfs -d nand
+ echo "done Rootfs Update"
+ echo "To set last updated image as default (active), Please set active/backup environment variables by editing and saving File: /env/config and reset board"
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/update_jffs2 b/arch/arm/boards/comcerto-rv340/env/bin/update_jffs2
+new file mode 100644
+index 0000000..9619bb3
+--- /dev/null
++++ b/arch/arm/boards/comcerto-rv340/env/bin/update_jffs2
+@@ -0,0 +1,16 @@
++#!/bin/sh
++
++. /env/config
++
++echo "Updating configcert with Image : $imageconfig ..."
++update -t configcert -d nand
++echo "done."
++echo "Updating avcsign with Image : $imageavc ..."
++update -t avcsign -d nand
++echo "done."
++echo "Updating webrootdb with Image : $imageweb ..."
++update -t webrootdb -d nand
++echo "done."
++echo "Updating license with Image : $imagelic ... "
++update -t license -d nand
++echo "done."
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index 37a2558..d34fd8a 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -20,7 +20,7 @@ kernel_loc=nand
+ rootfs_loc=nand
+ 
+ # barebox images
+-uloaderimage=microloader-nor-M86298-c2krv340.bin
++uloaderimage=microloader-nand-M86298-c2krv340.bin
+ bareboximage=barebox-c2krv340.bin
+ 
+ # can be either 'jffs2' , 'ubifs' or 'ext4
+@@ -31,6 +31,12 @@ rootfsimage=openwrt-comcerto2000-hgw-rootfs-ubi_nand.img
+ kernelimage_type=uimage
+ kernelimage=openwrt-comcerto2000-hgw-uImage.img
+ 
++# jffs2 custom images
++imageconfig=root_configcert.jffs2
++imageavc=root_avcsign.jffs2
++imageweb=root_webrootdb.jffs2
++imagelic=root_license.jffs2
++
+ active=image1
+ inactive=image2
+ 
+-- 
+2.7.4
+

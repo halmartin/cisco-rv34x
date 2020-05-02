@@ -1,0 +1,31 @@
+diff -rauN a/arch/arm/mach-comcerto/board-c2krv16x-26x.c b/arch/arm/mach-comcerto/board-c2krv16x-26x.c
+--- a/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-11-08 16:54:07.024603977 +0530
++++ b/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-11-08 16:56:14.116601799 +0530
+@@ -859,7 +859,7 @@
+ 		.gem_id = 1,
+ 		.mac_addr = (u8[])GEM1_MAC,
+ 	},
+-
++#if 0 //removed eth3
+ 	.comcerto_eth_pdata[2] = {
+ 		.name = GEM2_ITF_NAME,
+ 		.device_flags = CONFIG_COMCERTO_GEMAC,
+@@ -869,6 +869,7 @@
+ 		.gem_id = 2,
+ 		.mac_addr = (u8[])GEM2_MAC,
+ 	},
++#endif
+ 
+ 	/**
+ 	 * There is a single mdio bus coming out of C2K.  And that's the one
+diff -rauN a/arch/arm/mach-comcerto/include/mach/comcerto-2000.h b/arch/arm/mach-comcerto/include/mach/comcerto-2000.h
+--- a/arch/arm/mach-comcerto/include/mach/comcerto-2000.h	2017-11-08 16:57:59.316599996 +0530
++++ b/arch/arm/mach-comcerto/include/mach/comcerto-2000.h	2017-11-08 16:08:16.432651115 +0530
+@@ -263,6 +263,6 @@
+ #define comcerto_timer5_get()		__raw_readl(COMCERTO_TIMER5_CURRENT_COUNT)
+ 
+ /* Number of gemacs supported in comcerto 2000 */
+-#define NUM_GEMAC_SUPPORT	3
++#define NUM_GEMAC_SUPPORT	2
+ 
+ #endif

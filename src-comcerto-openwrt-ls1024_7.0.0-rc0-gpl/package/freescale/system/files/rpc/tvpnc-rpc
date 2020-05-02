@@ -1,0 +1,40 @@
+#!/bin/sh
+# input: "ACTION connection-name <connection-name>"
+# output: "code <int32> errstr <string>"
+
+ACTION=$1
+CONNNAME="tvpnc_$3"
+
+logger -t VPN-RPC "Executing RPC for connection $3 to bring $1"
+UCIRECORD=`uci show strongswan.$CONNNAME | grep -v backup_server_auto`
+
+uci del strongswan.$CONNNAME >/dev/null 2>&1
+for line in $UCIRECORD; do
+	uci set $line
+done
+
+if [ "$ACTION" == 'up' ]
+then
+	uci set strongswan.$CONNNAME.enable=1 >/dev/null 2>&1
+else
+	uci set strongswan.$CONNNAME.enable=0 >/dev/null 2>&1
+fi
+
+/etc/init.d/strongswan reload "rpc" >/dev/null 2>&1
+if [ "$?" -ne 0 ]
+then
+	errcode=1
+	errstring="Failed"
+else
+	errcode=0
+	errstring="Success"
+fi
+
+# input: ""
+# output: "code <int32> errstr <string>"
+if [ "$errcode" -ne 0 ];then
+	echo "error-message $errstring"
+	exit 1
+else
+	exit 0
+fi

@@ -1,0 +1,95 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Make bcm54210s support both copper and fiber modes.
+--- linux-4.1.8/drivers/net/phy/broadcom.c.org	2017-01-18 09:01:08.085253766 +0800
++++ linux-4.1.8/drivers/net/phy/broadcom.c	2017-01-18 09:07:27.668378080 +0800
+@@ -247,12 +247,14 @@
+ static int bcm54210s_config_init(struct phy_device *phydev)
+ {
+ 	if (phydev->drv->phy_id == PHY_ID_BCM54210S) {
+-		phy_write(phydev, 0x1e, 0x21);
+-		phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(3 << 1));
+-		phy_write(phydev, 0x1e, 0x810);
+-		phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
+ 		phy_write(phydev, 0x1e, 0x2f);
+ 		phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 7));
++		phy_write(phydev, 0x1e, 0x810);
++		phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
++		//phy_write(phydev, 0x1e, 0x235);  //It is needed by LCP-1250R-J3SR-S, not to be needed by others.
++		//phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (3 << 0));
++		phy_write(phydev, 0x1e, 0x23e);
++		phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) | (1 << 1)));
+ 	}
+ 
+ 	return 0;
+@@ -268,6 +270,62 @@
+ 	return ret;
+ }
+ 
++static int bcm54210s_read_status(struct phy_device *phydev)
++{
++	static int phy_mode = 0;
++	int err, reg;
++
++	err = genphy_read_status(phydev);
++	if (phydev->drv->phy_id == PHY_ID_BCM54210S) {
++		phy_write(phydev, 0x1e, 0x21);
++		reg = phy_read(phydev, 0x1f);
++		/* Fiber */
++		if ((reg & (1 << 6)) == (1 << 6)) {
++			if (phy_mode == 1)
++				return err;
++
++			phy_mode = 1;
++
++			phy_write(phydev, 0x1e, 0x23e);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
++
++			phy_write(phydev, 0x1e, 0x21);
++			phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) & ~(2 << 1)) | (1 << 0));
++
++			phy_write(phydev, 0x1e, 0x23e);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
++
++			/* SFP only support speed 1000 duplex full autoneg off */
++			phydev->autoneg = AUTONEG_DISABLE;
++			phydev->speed = SPEED_1000;
++			phydev->duplex = DUPLEX_FULL;
++		}
++		/* Copper */
++		else if ((reg & (1 << 7)) == (1 << 7)) {
++			if (phy_mode == 2)
++				return err;
++
++			phy_mode = 2;
++
++			phy_write(phydev, 0x1e, 0x23e);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
++
++			phy_write(phydev, 0x1e, 0x21);
++			phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) & ~(3 << 1)) & ~(1 << 0));
++
++			phydev->autoneg = AUTONEG_ENABLE;
++		}
++		else {
++			phy_mode = 0;
++
++			phy_write(phydev, 0x1e, 0x23e);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
++		}
++	}
++
++	return err;
++}
++
+ static int bcm5482_config_init(struct phy_device *phydev)
+ {
+ 	int err, reg;
+@@ -568,7 +626,7 @@
+ 	.flags      = PHY_HAS_MAGICANEG | PHY_HAS_INTERRUPT,
+ 	.config_init    = bcm54210s_config_init,
+ 	.config_aneg    = bcm54210s_config_aneg,
+-	.read_status    = genphy_read_status,
++	.read_status    = bcm54210s_read_status,
+ 	.ack_interrupt  = bcm54xx_ack_interrupt,
+ 	.config_intr    = bcm54xx_config_intr,
+ 	.driver     = { .owner = THIS_MODULE },

@@ -1,0 +1,142 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Optimize sfp to compatible with more modules.
+--- linux-4.1.8/drivers/net/phy/broadcom.c.org	2017-01-18 09:19:34.387128117 +0800
++++ linux-4.1.8/drivers/net/phy/broadcom.c	2017-01-18 09:29:56.668387928 +0800
+@@ -17,6 +17,7 @@
+ #include <linux/module.h>
+ #include <linux/phy.h>
+ #include <linux/brcmphy.h>
++#include <linux/delay.h>
+ 
+ 
+ #define BRCM_PHY_MODEL(phydev) \
+@@ -251,8 +252,6 @@
+ 		phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 7));
+ 		phy_write(phydev, 0x1e, 0x810);
+ 		phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
+-		//phy_write(phydev, 0x1e, 0x235);  //It is needed by LCP-1250R-J3SR-S, not to be needed by others.
+-		//phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (3 << 0));
+ 		phy_write(phydev, 0x1e, 0x23e);
+ 		phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) | (1 << 1)));
+ 	}
+@@ -274,15 +273,67 @@
+ {
+ 	static int phy_mode = 0;
+ 	int err, reg;
++	int retry;
+ 
+-	err = genphy_read_status(phydev);
+ 	if (phydev->drv->phy_id == PHY_ID_BCM54210S) {
+ 		phy_write(phydev, 0x1e, 0x21);
+ 		reg = phy_read(phydev, 0x1f);
++		if (((reg & (1 << 4)) != (1 << 4))) {
++			phy_write(phydev, 0x1e, 0x202);
++			reg = phy_read(phydev, 0x1f);
++			if (((reg & 0x1F) != 0xD) && ((reg & 0x1F) != 0xE) && ((reg & 0x1F) != 0xF)) {
++				phy_write(phydev, 0x1e, 0x233);
++				reg = phy_read(phydev, 0x1f);
++				if ((reg & (1 << 0)) == 0) {
++					phy_write(phydev, 0x1e, 0x233);
++					phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
++					mdelay(500);
++					phy_write(phydev, 0x1e, 0x21);
++					reg = phy_read(phydev, 0x1f);
++					if ((reg & (1 << 4)) != (1 << 4)) {
++						phy_write(phydev, 0x1e, 0x233);
++						phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
++						mdelay(500);
++					}
++				}
++				else {
++					phy_write(phydev, 0x1e, 0x233);
++					phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
++					mdelay(500);
++				}
++			}
++		}
++
++		phy_write(phydev, 0x1e, 0x21);
++		reg = phy_read(phydev, 0x1f);
++		if (((reg & (1 << 4)) == (1 << 4)) && ((reg & (1 << 6)) != (1 << 6))) {
++			/* Only for such as LCP-1250R-J3SR-S */
++			phy_write(phydev, 0x1e, 0x235);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
++			mdelay(500);
++
++			for (retry = 9; retry >= 0; retry--) {
++				phy_write(phydev, 0x1e, 0x21);
++				reg = phy_read(phydev, 0x1f);
++				if ((reg & (1 << 6)) == (1 << 6)) {
++					break;
++				}
++				else {
++					if (retry == 0) {
++						phy_write(phydev, 0x1e, 0x235);
++						phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(3 << 0));
++						mdelay(500);
++					}
++				}
++			}
++		}
++
++		phy_write(phydev, 0x1e, 0x21);
++		reg = phy_read(phydev, 0x1f);
+ 		/* Fiber */
+ 		if ((reg & (1 << 6)) == (1 << 6)) {
+ 			if (phy_mode == 1)
+-				return err;
++				goto out_err;
+ 
+ 			phy_mode = 1;
+ 
+@@ -295,15 +346,37 @@
+ 			phy_write(phydev, 0x1e, 0x23e);
+ 			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
+ 
+-			/* SFP only support speed 1000 duplex full autoneg off */
+ 			phydev->autoneg = AUTONEG_DISABLE;
+-			phydev->speed = SPEED_1000;
+-			phydev->duplex = DUPLEX_FULL;
++			phy_write(phydev, 0x1e, 0x233);
++			reg = phy_read(phydev, 0x1f);
++			if ((reg & (1 << 0)) == 0) {
++				/* speed 1000 duplex full */
++				phy_write(phydev, 0x0, 0x140);
++			}
++			else {
++				/* speed 100 duplex full */
++				phy_write(phydev, 0x1e, 0x233);
++				phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
++				mdelay(500);
++				phy_write(phydev, 0x1e, 0x21);
++				reg = phy_read(phydev, 0x1f);
++				if ((reg & (1 << 4)) != (1 << 4)) {
++					phy_write(phydev, 0x1e, 0x233);
++					phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 0));
++					mdelay(500);
++					/* speed 100 duplex full */
++					phy_write(phydev, 0x0, 0x2100);
++				}
++				else {
++					/* speed 1000 duplex full */
++					phy_write(phydev, 0x0, 0x140);
++				}
++			}
+ 		}
+ 		/* Copper */
+ 		else if ((reg & (1 << 7)) == (1 << 7)) {
+ 			if (phy_mode == 2)
+-				return err;
++				goto out_err;
+ 
+ 			phy_mode = 2;
+ 
+@@ -323,6 +396,8 @@
+ 		}
+ 	}
+ 
++out_err:
++	err = genphy_read_status(phydev);
+ 	return err;
+ }
+ 

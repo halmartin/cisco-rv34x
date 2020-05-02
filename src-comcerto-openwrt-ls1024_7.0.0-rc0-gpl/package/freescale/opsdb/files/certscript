@@ -1,0 +1,166 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+CERT_STATS_FILE_FINAL="/tmp/stats/certstats"
+CERT_STATS_FILE="/tmp/stats/certstats.tmp"
+index=0
+
+rm -rf $CERT_STATS_FILE
+touch $CERT_STATS_FILE
+
+get_cert_details () {
+	local cfg="$1"
+	local cert_name 
+	local CertType
+	local useby
+	local duration 
+	local sub_country_name
+        local sub_state 
+	local sub_locality_name 
+	local sub_organization_name 
+	local sub_organization_unit_name 
+	local sub_common_name 
+	local sub_email_address 
+	local issuer_country_name
+        local issuer_state 
+	local issuer_locality_name 
+	local issuer_organization_name 
+	local issuer_organization_unit_name 
+	local issuer_common_name 
+	local issuer_email_address 
+	local has_private_key 
+	local is_imported
+        local is_ca_enabled	
+	local key_encryption 
+	local sub_alt_name_type
+	local sub_alt_name
+	local allow_export
+	local source
+	
+	config_get cert_name "$cfg" cert_name "-"
+	config_get CertType "$cfg" CertType "-"
+	if [ "$CertType" == "-" ];then
+		 config_get CertType "$cfg" type 0
+	fi
+	config_get useby "$cfg" useby "-"
+	config_get duration "$cfg" duration "-"
+	config_get sub_country_name "$cfg" sub_country_name "-"
+	if [ "$sub_country_name" == "-" ];then                                      
+        config_get sub_country_name "$cfg" country_name "-"                        
+    fi
+
+	config_get sub_state "$cfg" sub_state "-"
+	if [ "$sub_state" == "-" ];then                              
+        config_get sub_state "$cfg" state "-"        
+    fi
+
+	config_get sub_locality_name "$cfg" sub_locality_name "-"
+	if [ "$sub_locality_name" == "-" ];then                          
+        config_get sub_locality_name "$cfg" locality_name "-"
+    fi
+
+	config_get sub_organization_name "$cfg" sub_organization_name "-"
+	if [ "$sub_organization_name" == "-" ];then
+        config_get sub_organization_name "$cfg" organization_name "-"
+    fi
+	
+	config_get sub_organization_unit_name "$cfg" sub_organization_unit_name "-"
+	if [ "$sub_organization_unit_name" == "-" ];then
+        config_get sub_organization_unit_name "$cfg" organization_unit_name "-"
+    fi
+
+	config_get sub_common_name "$cfg" sub_common_name "-"
+	if [ "$sub_common_name" == "-" ];then
+        config_get sub_common_name "$cfg" common_name "-"
+    fi
+
+	config_get sub_email_address "$cfg" sub_email_address "-"
+	if [ "$sub_email_address" == "-" ];then
+        config_get sub_email_address "$cfg" email_address "-"
+    fi
+	config_get issuer_country_name "$cfg" issuer_country_name "-"
+	if [ "$issuer_country_name" = "-" -a "$CertType" = "0" ];then
+		issuer_country_name=$sub_country_name
+	fi
+	
+	config_get issuer_state "$cfg" issuer_state "-"
+	if [ "$issuer_state" = "-" -a "$CertType" = "0" ]                     
+    then                                                                       
+        issuer_state=$sub_state             
+    fi
+	config_get issuer_locality_name "$cfg" issuer_locality_name "-"
+	if [ "$issuer_locality_name" = "-" -a "$CertType" = "0" ]                                 
+    then                                                                             
+        issuer_locality_name=$sub_locality_name                                
+    fi 
+	config_get issuer_organization_name "$cfg" issuer_organization_name "-"
+	if [ "$issuer_organization_name" = "-" -a "$CertType" = "0" ]                                 
+    then                                                                             
+        issuer_organization_name=$sub_organization_name
+    fi 
+	config_get issuer_organization_unit_name "$cfg" issuer_organization_unit_name "-"
+	if [ "$issuer_organization_unit_name" = "-" -a "$CertType" = "0" ]                                 
+    then                                                                             
+        issuer_organization_unit_name=$sub_organization_unit_name                                 
+    fi 
+	config_get issuer_common_name "$cfg" issuer_common_name "-"
+	if [ "$issuer_common_name" = "-" -a "$CertType" = "0" ]                                 
+    then                                                                             
+        issuer_common_name=$sub_common_name                                 
+    fi 
+	config_get issuer_email_address "$cfg" issuer_email_address "-"
+	if [ "$issuer_email_address" = "-" -a "$CertType" = "0" ]                                 
+    then                                                                             
+        issuer_email_address=$sub_email_address                                 
+    fi 
+	config_get has_private_key "$cfg" has_private_key 0
+	config_get is_imported "$cfg" is_imported 0
+	config_get is_ca_enabled "$cfg" is_ca_enabled 0
+	config_get key_encryption "$cfg" key_encryption 0
+	config_get sub_alt_name_type "$cfg" sub_alt_name_type "-"
+	config_get sub_alt_name "$cfg" sub_alt_name "-"
+	config_get allow_export "$cfg" allow_export 0
+	if [ "$CertType" = "0" -o "$CertType" = "2" ];then
+	    allow_export=1
+	fi
+	config_get source "$cfg" source 1
+	index=`expr $index + 1`
+
+	echo "+$index?$cert_name?$CertType?$useby?$duration?$sub_country_name?$sub_state?$sub_locality_name?$sub_organization_name?$sub_organization_unit_name?$sub_common_name?$sub_email_address?$issuer_country_name?$issuer_state?$issuer_locality_name?$issuer_organization_name?$issuer_organization_unit_name?$issuer_common_name?$issuer_email_address?$has_private_key?$is_ca_enabled?$key_encryption?$sub_alt_name_type?$sub_alt_name?$allow_export?$source" >> $CERT_STATS_FILE 
+	certscriptCtrl "+$index?$cert_name?$CertType?$useby?$duration?$sub_country_name?$sub_state?$sub_locality_name?$sub_organization_name?$sub_organization_unit_name?$sub_common_name?$sub_email_address?$issuer_country_name?$issuer_state?$issuer_locality_name?$issuer_organization_name?$issuer_organization_unit_name?$issuer_common_name?$issuer_email_address?$has_private_key?$is_ca_enabled?$key_encryption?$sub_alt_name_type?$sub_alt_name?$allow_export?$source"
+}
+
+cert_stats (){
+	config_foreach get_cert_details generated_certificate
+	config_foreach get_cert_details imported_certificate
+	config_load preinstalled_certificate 
+	config_foreach get_cert_details preinstalled_certificate
+}
+
+modify_cert_details (){
+	local cfg="$1"
+	local cert_name
+	local useby
+
+	config_get cert_name "$cfg" cert_name "-"
+	config_get useby "$cfg" useby "-"
+	certscriptCtrl "*$cert_name?$useby"
+}
+
+config_load certificate
+if [ "$1" ==  "boot" ]; then
+	cert_stats
+fi
+if [ "$1" == "add" ]; then
+	get_cert_details $2
+fi
+if [ "$1" == "update" ]; then
+	modify_cert_details $2
+fi
+if [ "$1" == "del" ]; then
+	certscriptCtrl "-$2"
+fi
+
+cp -f $CERT_STATS_FILE $CERT_STATS_FILE_FINAL

@@ -1,0 +1,95 @@
+#!/bin/sh
+
+APS_FILE="/tmp/stats/aps_stats"
+APS_LOG="/tmp/nbr_aps.log"
+
+cat /dev/null > ${APS_FILE}
+touch ${APS_LOG}
+cat /dev/null > ${APS_LOG}.new
+
+local i=-1
+board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+while grep -qs "^ *wl$((++i)):" /proc/net/dev; do
+	device="wl$i"
+	isup="$(wl -i $device isup)"
+	[ "$isup" = "0" ] && continue
+	wl -i $device scan
+
+	while [ true ];do
+		wl -i $device scanresults > /dev/null 2>&1
+		[ "$?" = "0" ] && break
+	done
+
+	wl -i $device scanresults 1 > /tmp/${device}.scanresults
+	sed -i 's/\\/\\\\/g' /tmp/${device}.scanresults
+
+	while read line; do
+		SSID="${line#*SSID:}"
+        # when SSID is hidden, will show \x00
+		SSID="$(echo -e $SSID)"
+		local oIFS="$IFS"; IFS=","
+		set $line
+		MAC="$1"
+
+		if [ "$board" = "RV160W" ];then
+			if [ "$device" = "wl0" ];then
+				RADIO="WLAN1"
+				BAND_IN_USE="1"
+			else
+				RADIO="WLAN0"
+				BAND_IN_USE="0"
+			fi
+		elif [ "$board" = "RV340W" ];then
+			if [ "$device" = "wl0" ];then
+				RADIO="WLAN1"
+				BAND_IN_USE="0"
+			else
+				RADIO="WLAN2"
+				BAND_IN_USE="1"
+			fi
+		else
+			if [ "$device" = "wl0" ];then
+				RADIO="WLAN0"
+				BAND_IN_USE="0"
+			else
+				RADIO="WLAN1"
+				BAND_IN_USE="1"
+			fi
+		fi
+		SIGNAL_STRENTGH="$2"
+		CHANNEL_IN_USE="$3"
+		PRIVACY="$4"
+		TRUSTED="$4"
+		RATES_STR="$5"
+		RATES=
+		BEACONS="1"
+
+		YEAR="`date +%Y`"
+		MONTH="`date +%m`"
+		DAY="`date +%d`"
+		HOUR="`date +%H`"
+		MIN="`date +%M`"
+		SEC="`date +%S`"
+
+		inc=`cat $APS_LOG | awk -F',' '{if ("'$MAC'" == $1){print $2;exit}}'`
+		if [ -n "$inc" ];then
+			BEACONS="$inc"
+			inc="$(( $inc + 1 ))"
+			echo "$MAC,$inc" >> ${APS_LOG}.new
+		else
+			echo "$MAC,1" >> ${APS_LOG}.new
+		fi
+
+		IFS=" "
+		for d in $RATES_STR;do
+			d_r="$(echo $d | awk '{printf ("%.0f", $1*10)}')"
+			RATES="${RATES}${d_r} "
+		done
+
+		echo "$MAC,$RADIO,$PRIVACY,$BAND_IN_USE,$CHANNEL_IN_USE,$SIGNAL_STRENTGH,$BEACONS,$YEAR,$MONTH,$DAY,$HOUR,$MIN,$SEC,$RATES,$TRUSTED,SSID:$SSID" >> ${APS_FILE}
+	done < /tmp/${device}.scanresults
+done
+
+[ -e /${APS_LOG}.new ] && {
+	cp ${APS_LOG}.new ${APS_LOG}
+}

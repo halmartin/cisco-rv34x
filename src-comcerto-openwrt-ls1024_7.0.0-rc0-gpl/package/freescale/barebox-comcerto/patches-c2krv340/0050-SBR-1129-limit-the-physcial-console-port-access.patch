@@ -1,0 +1,49 @@
+From 0cb9c2f8ad40ba60e23fbf4f5af6c4d9c6117e81 Mon Sep 17 00:00:00 2001
+From: user <abdul.moiz@nxp.com>
+Date: Tue, 16 Aug 2016 17:30:14 +0530
+Subject: [PATCH 50/60] SBR-1129 limit the physcial console port access Adding
+ Password support in barebox
+
+Signed-off-by: user <abdul.moiz@nxp.com>
+---
+ arch/arm/boards/comcerto-rv340/env/bin/init   | 1 +
+ arch/arm/boards/comcerto-rv340/env/etc/passwd | 1 +
+ commands/version_rv340.c                      | 2 +-
+ 3 files changed, 3 insertions(+), 1 deletion(-)
+ create mode 100644 arch/arm/boards/comcerto-rv340/env/etc/passwd
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/init b/arch/arm/boards/comcerto-rv340/env/bin/init
+index ea7e9ac..7c25251 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/init
++++ b/arch/arm/boards/comcerto-rv340/env/bin/init
+@@ -45,6 +45,7 @@ chkreset
+ if [ $? -ge 100 ]; then
+ 	gpio_direction_output $GPIO_LED_DIAG $ON
+ 	gpio_set_value $GPIO_LED_DIAG $ON
++	login
+         . /env/bin/_update_help
+         exit
+ fi
+diff --git a/arch/arm/boards/comcerto-rv340/env/etc/passwd b/arch/arm/boards/comcerto-rv340/env/etc/passwd
+new file mode 100644
+index 0000000..c749c92
+--- /dev/null
++++ b/arch/arm/boards/comcerto-rv340/env/etc/passwd
+@@ -0,0 +1 @@
++70acd6fefe44c03c1aa785da2c56155b
+diff --git a/commands/version_rv340.c b/commands/version_rv340.c
+index 148107c..4a84aa4 100644
+--- a/commands/version_rv340.c
++++ b/commands/version_rv340.c
+@@ -24,7 +24,7 @@
+ #include <common.h>
+ #include <command.h>
+ 
+-const char version_string_rv340[] = "1.0.00.00";
++const char version_string_rv340[] = "1.0.00.02";
+ 
+ static int do_version_rv340(struct command *cmdtp, int argc, char *argv[])
+ {
+-- 
+2.7.4
+

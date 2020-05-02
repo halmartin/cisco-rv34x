@@ -1,0 +1,414 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add pca9555 support.
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-01-17 17:18:58.658378013 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-01-17 17:26:44.388377980 +0800
+@@ -35,6 +35,10 @@
+ #include <linux/spi/spi.h>
+ #endif
+ 
++#if defined(CONFIG_COMCERTO_I2C_SUPPORT)
++#include <linux/i2c.h>
++#endif
++
+ #include <asm/sizes.h>
+ #include <asm/setup.h>
+ #include <asm/mach-types.h>
+@@ -528,6 +532,12 @@
+ 	.num_resources  = ARRAY_SIZE(comcerto_i2c_resources),
+ 	.resource       = comcerto_i2c_resources,
+ };
++
++static struct i2c_board_info comcerto_i2c_board_info[] = {
++	{
++		I2C_BOARD_INFO("pca9555", 0x21),
++	},
++};
+ #endif
+ 
+ /* --------------------------------------------------------------------
+@@ -846,6 +856,10 @@
+ 	device_init();
+ 	board_gpio_init();
+ 
++#if defined(CONFIG_COMCERTO_I2C_SUPPORT)
++	i2c_register_board_info(0, comcerto_i2c_board_info, ARRAY_SIZE(comcerto_i2c_board_info));
++#endif
++
+ #if defined(CONFIG_SPI_MSPD_LOW_SPEED) || defined(CONFIG_SPI_MSPD_HIGH_SPEED)
+ 	spi_register_board_info(comcerto_spi_board_info, ARRAY_SIZE(comcerto_spi_board_info));
+ #endif
+--- linux-4.1.8/drivers/i2c/chips/Makefile.org	2017-01-17 17:18:25.788378171 +0800
++++ linux-4.1.8/drivers/i2c/chips/Makefile	2017-01-17 17:24:04.188377767 +0800
+@@ -11,6 +11,7 @@
+ #
+ 
+ obj-$(CONFIG_EEPROM_AT)	+= eeprom.o
++obj-$(CONFIG_PCA9555)   += i2c-pca9555.o
+ 
+ ifeq ($(CONFIG_I2C_DEBUG_CHIP),y)
+ EXTRA_CFLAGS += -DDEBUG
+--- linux-4.1.8/drivers/i2c/chips/Kconfig.org	2017-01-17 17:18:10.438377664 +0800
++++ linux-4.1.8/drivers/i2c/chips/Kconfig	2017-01-17 17:24:04.188377767 +0800
+@@ -12,4 +12,10 @@
+ 	help
+ 	  This provides an interface to read and write the EEPROM and reset the chip.
+ 
++config PCA9555
++	tristate "I2c-pca9555"
++	depends on I2C
++	help
++	  This provides to read and write pca9555 chip.
++
+ endmenu
+--- linux-4.1.8/drivers/i2c/busses/i2c-comcerto.c.org	2017-01-17 17:18:49.298378131 +0800
++++ linux-4.1.8/drivers/i2c/busses/i2c-comcerto.c	2017-01-17 17:24:04.188377767 +0800
+@@ -632,7 +632,7 @@
+ 	else
+ 		i2c->irq = -1;
+ 
+-	if (i2c_add_adapter(&comcerto_i2c_adapter) != 0) {
++	if (i2c_add_numbered_adapter(&comcerto_i2c_adapter) != 0) {
+ 		dev_err(i2c->dev, "%s: failed to add I2C adapter\n", __FUNCTION__);
+ 		goto err3;
+ 	}
+--- linux-4.1.8/drivers/i2c/chips/i2c-pca9555.c.org	1970-01-01 07:00:00.000000000 +0700
++++ linux-4.1.8/drivers/i2c/chips/i2c-pca9555.c	2017-02-04 16:00:09.208378053 +0800
+@@ -0,0 +1,338 @@
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/delay.h>
++#include <linux/errno.h>
++#include <linux/i2c.h>
++#include <asm/uaccess.h>
++#include <linux/proc_fs.h>
++#include <linux/seq_file.h>
++
++#define INPUT_PORT0_REG         0x00
++#define INPUT_PORT1_REG         0x01
++#define OUTPUT_PORT0_REG        0x02
++#define OUTPUT_PORT1_REG        0x03
++#define POLARITY_PORT0_REG      0x04
++#define POLARITY_PORT1_REG      0x05
++#define CONFIG_PORT0_REG        0x06
++#define CONFIG_PORT1_REG        0x07
++
++#define I2C_PORT0               0
++#define I2C_PORT1               1
++
++#define I2C_READ                0
++#define I2C_WRITE               1
++
++#define SFP_TXFAULT_EN         (1<<0)
++#define SFP_PRESENT_EN         (1<<1)
++#define SFP_LOS_EN             (1<<2)
++#define SFP_DISABLE_EN         (1<<2)
++
++#define SFP_TXFAULT             0x00
++#define SFP_PRESENT             0x01
++#define SFP_LOS                 0x02
++#define SFP_DISABLE             0x12
++
++static struct i2c_client *g_client = NULL;
++static struct proc_dir_entry *proc_dir = NULL;
++static struct proc_dir_entry *sfp_reg_file = NULL;
++
++int pca9555_read(u8 reg)
++{
++	int ret, retry = 0;
++
++	if(g_client == NULL)
++	{
++		printk(KERN_ERR "pca9555 i2c g_client dont exit\n");
++		return -1;
++	}
++	ret = i2c_smbus_read_byte_data(g_client,reg);
++
++	while((ret < 0) && (retry < 50))
++	{
++		retry++;
++		ret = i2c_smbus_read_byte_data(g_client,reg);
++	}
++
++	if(ret < 0){
++		printk(KERN_ERR "pca9555 i2c read fail! reg=%d \n",reg);
++	}
++	return ret;
++}
++
++int pca9555_write(u8 reg, u8 val)
++{
++	int ret, retry = 0;
++
++	if(g_client == NULL)
++	{
++		printk(KERN_ERR "pca9555 i2c g_client dont exit(write)\n");
++		return -1;
++	}
++
++	ret = i2c_smbus_write_byte_data(g_client,reg,val);
++
++	while((ret < 0) && (retry < 50))
++	{
++		retry++;
++		ret = i2c_smbus_write_byte_data(g_client,reg,val);
++	}
++	
++	if(ret < 0){
++		printk(KERN_ERR "pca9555 i2c write fail! reg =%d\n",reg);
++	}
++
++	return ret;
++}
++
++int pca9555_config(u8 port_option, u8 port_group, u8 port_gpio, u8 port_val)
++{
++	unsigned int output_val=0;
++	unsigned int Port_config=0;
++
++	if(port_group == I2C_PORT0)
++	{
++		if(port_option == I2C_READ)
++		{
++			output_val = pca9555_read(OUTPUT_PORT0_REG);
++			printk("ready to read value:%x\n",output_val);
++		}
++		else if(port_option == I2C_WRITE)
++		{
++			output_val = pca9555_read(OUTPUT_PORT0_REG);
++			printk("Before write value:%x\n",output_val);
++			switch(port_gpio)
++			{
++				case SFP_TXFAULT:
++					Port_config = SFP_TXFAULT_EN;
++					break;
++				case SFP_PRESENT:
++					Port_config = SFP_PRESENT_EN;
++					break;
++				case SFP_LOS:
++					Port_config = SFP_LOS_EN;
++					break;
++			}
++			if (!port_val) {
++				output_val &= (~Port_config);
++			} else {
++				output_val |= Port_config;
++			}
++			pca9555_write(CONFIG_PORT0_REG,0x00);
++			pca9555_write(OUTPUT_PORT0_REG,output_val);
++			printk("ready to write value= [%x]\n",output_val);
++		}
++	}
++	if(port_group == I2C_PORT1)
++	{
++		if(port_option == I2C_READ)
++		{
++			output_val = pca9555_read(OUTPUT_PORT1_REG);
++			printk("ready to read value:%x\n",output_val);
++		}
++		else if(port_option == I2C_WRITE)
++		{
++			output_val = pca9555_read(OUTPUT_PORT1_REG);
++			printk("Before write value:%x\n",output_val);
++			switch(port_gpio)
++			{
++				case SFP_DISABLE:
++					Port_config = SFP_DISABLE_EN;
++					break;
++			}
++			if (!port_val) {
++				output_val &= (~Port_config);
++			} else {
++				output_val |= Port_config;
++			}
++			pca9555_write(CONFIG_PORT1_REG,0x00);
++			pca9555_write(OUTPUT_PORT1_REG,output_val);
++			printk("ready to write value= [%x]\n",output_val);
++		}
++	}
++	return 0;
++}
++EXPORT_SYMBOL_GPL(pca9555_config);
++
++static int sfp_reg_show(struct seq_file *seq, void *v)
++{
++	seq_printf(seq,
++		"Usage:\n"
++		"sfp read:  echo r disable > /proc/pca9555/sfp_reg\n"
++		"sfp write: echo w disable [low or high] > /proc/pca9555/sfp_reg\n");
++
++	return 0;
++}
++
++static int sfp_reg_open(struct inode *inode, struct file *file)
++{
++	return single_open(file, sfp_reg_show, PDE_DATA(inode));
++}
++
++static int sfp_reg_write(struct file *file, const char __user * user_buffer, size_t count, loff_t * ppos)
++{
++	char line[64] = {0};
++	char buffer1[16] = {0};
++	char buffer2[8] = {0};
++	char *p = NULL;
++	int  ret = 0;
++
++	ret = copy_from_user(line, user_buffer, count);
++	if(ret)
++		return -EFAULT;
++
++	if(!strncmp(line, "w", 1))
++	{
++		p = strchr(line, ' ');
++		if(p != NULL)
++		{
++			p++;
++			sscanf(p, "%s %s", buffer1, buffer2);
++
++			if(strcmp(buffer1, "disable") == 0)
++			{
++				if(strcmp(buffer2, "low") == 0)
++				{
++					pca9555_config(I2C_WRITE, I2C_PORT1, SFP_DISABLE, 0);
++				}
++				else if(strcmp(buffer2, "high") == 0)
++				{
++					pca9555_config(I2C_WRITE, I2C_PORT1, SFP_DISABLE, 1);
++				}
++			}
++		}
++	}
++	else if(!strncmp(line, "r", 1))
++	{
++		p = strchr(line, ' ');
++		if(p != NULL)
++		{
++			p++;
++			sscanf(p, "%s", buffer1);
++
++			if(strcmp(buffer1, "disable") == 0)
++			{
++				pca9555_config(I2C_READ, I2C_PORT1, SFP_DISABLE, 0);
++			}
++		}
++	}
++
++	return count;
++}
++
++static struct file_operations pca9555_proc_fops =
++{
++	.owner = THIS_MODULE,
++	.open = sfp_reg_open,
++	.read = seq_read,
++	.write = sfp_reg_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static int pca9555_proc_fs_create(void)
++{
++	proc_dir = proc_mkdir("pca9555", NULL);
++	if(!proc_dir)
++		return -ENOMEM;
++
++	sfp_reg_file = proc_create("sfp_reg", 0644, proc_dir, &pca9555_proc_fops);
++	if(!sfp_reg_file)
++		 return -ENOMEM;
++
++	return 0;
++}
++
++static int pca9555_proc_fs_destroy(void)
++{
++	remove_proc_entry("pca9555/sfp_reg", NULL);
++
++	return 0;
++}
++static int pca9555_suspend(struct i2c_client *client, pm_message_t state)
++{
++	printk("pca9555 suspend\n");
++	return 0;
++}
++
++static int pca9555_resume(struct i2c_client *client)
++{
++	printk("pca9555 resume\n");
++	return 0;
++}
++
++static int pca9555_shutdown(struct i2c_client *client)
++{
++	printk("pca9555 shutdown\n");
++	return 0;
++}
++
++static int pca9555_probe(struct i2c_client *client, const struct i2c_device_id *id)
++{
++	printk("pca9555 probe\n");
++
++	g_client = client;
++	pca9555_proc_fs_create();
++
++	/* Init: the group for sfp_txfault sfp_present sfp_los all-->input */
++	pca9555_write(CONFIG_PORT0_REG,0xff);
++
++	/* Init: the group for sfp_disable all-->output, and sfp_disable pull to be low, others pull to be high */
++	pca9555_write(CONFIG_PORT1_REG,0x00);
++	pca9555_write(OUTPUT_PORT1_REG,0xfb);
++	printk("ready to write value= [0xfb]\n");
++
++	return 0;
++}
++
++static int pca9555_remove(struct i2c_client *client)
++{
++	printk("pca9555_remove\n!");
++	pca9555_proc_fs_destroy();
++	return 0;
++}
++
++static const struct i2c_device_id pca9555_id[] = {
++	{"pca9555", 0x21},
++	{ },
++};
++MODULE_DEVICE_TABLE(i2c, pca9555_id);
++
++static struct i2c_driver pca9555_driver = {
++	.driver = {
++		.name = "pca9555",
++		.owner=THIS_MODULE,
++		.suspend = pca9555_suspend,
++		.resume = pca9555_resume,
++	},
++	.probe = pca9555_probe,
++	.remove = pca9555_remove,
++	.id_table = pca9555_id,
++	.shutdown = pca9555_shutdown,
++};
++
++static int __init pca9555_init(void)
++{
++	int ret;
++
++	printk("pca9555 init!\n");
++	ret = i2c_add_driver(&pca9555_driver);
++	if(ret < 0) {
++		i2c_del_driver(&pca9555_driver);
++		return ret;
++	}
++
++	return 0;
++}
++
++static void __exit pca9555_exit(void)
++{
++	i2c_del_driver(&pca9555_driver);
++}
++
++module_init(pca9555_init);
++module_exit(pca9555_exit);
++
++MODULE_DESCRIPTION("pca9555 driver");
++MODULE_LICENSE("GPL");
++

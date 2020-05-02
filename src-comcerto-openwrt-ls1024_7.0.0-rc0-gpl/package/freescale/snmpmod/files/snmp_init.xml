@@ -1,0 +1,46 @@
+<config xmlns="http://tail-f.com/ns/config/1.0">
+  <confdConfig xmlns="http://tail-f.com/ns/confd_dyncfg/1.0">
+      <!-- <logs>
+          <snmpLog>
+              <enabled>true</enabled>
+              <file>
+                  <enabled>true</enabled>
+                  <name>snmp.log</name>
+              </file>
+              <syslog>
+                  <enabled>false</enabled>
+              </syslog>
+          </snmpLog>
+      </logs>-->
+      <snmpAgent>
+      <enabled>false</enabled>
+      <extraIpPorts>[::]</extraIpPorts>
+      <snmpVersions>
+        <v3>false</v3>
+      </snmpVersions>
+      <mibs>
+        <file>/etc/confd/snmp/IANAifType-MIB.bin</file>
+        <file>/etc/confd/snmp/IF-MIB.bin</file>
+        <file>/etc/confd/snmp/INET-ADDRESS-MIB.bin</file>
+        <file>/etc/confd/snmp/IP-MIB.bin</file>
+        <file>/etc/confd/snmp/TCP-MIB.bin</file>
+        <file>/etc/confd/snmp/UDP-MIB.bin</file>
+        <file>/etc/confd/snmp/UCD-SNMP-MIB.bin</file>
+        <file>/etc/confd/snmp/ENTITY-MIB.bin</file>
+        <file>/etc/confd/snmp/POWER-ETHERNET-MIB.bin</file>
+        <file>/etc/confd/snmp/CISCOSB-MODEL-MIB.bin</file>
+      </mibs>
+      <snmpEngine>
+        <snmpEngineID>80:00:61:81:05:01</snmpEngineID>
+      </snmpEngine>
+      <system>
+        <sysDescr>RV340</sysDescr>
+        <sysObjectID>1.3.6.1.4.1.9</sysObjectID>
+      </system>
+    </snmpAgent>
+  </confdConfig>
+  <snmp xmlns="http://cisco.com/ns/ciscosb/snmp">
+    <allow-access-from-wan>false</allow-access-from-wan>
+    <allow-access-from-vpn>false</allow-access-from-vpn>
+  </snmp>
+</config>

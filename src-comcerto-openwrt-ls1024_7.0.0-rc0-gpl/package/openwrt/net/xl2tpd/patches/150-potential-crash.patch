@@ -1,0 +1,12 @@
+--- orig-xl2tpd-1.3.1/xl2tpd.c	2011-10-07 00:52:05.000000000 +0530
++++ xl2tpd-1.3.1/xl2tpd.c	2016-05-16 17:40:05.738080000 +0530
+@@ -745,7 +920,8 @@
+     }
+     if (!lac->active)
+     {
+-        l2tp_log (LOG_DEBUG, "%s: LAC %s not active", __FUNCTION__, lac->entname);
++        if(lac->entname)
++            l2tp_log (LOG_DEBUG, "%s: LAC %s not active", __FUNCTION__, lac->entname);
+         return;
+     }
+     lac->rsched = NULL;

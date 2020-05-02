@@ -1,0 +1,23 @@
+config system
+	option hostname	OpenWrt
+	option timezone	UTC
+
+config system systemtimezone
+	option timezone 'GMT'
+	option date_time_type '0'
+
+config man_time 'manualtime'
+	option value '2015.01.01-12:00:00'
+
+config timeserver 'ntp'
+	option server1 '0.ciscosb.pool.ntp.org'
+	option server2 '1.ciscosb.pool.ntp.org'
+	option enable_server '0'
+	option server_mode	'0'
+
+config dst day_light
+	option	day_light_enable	'0'
+	option	dst_mode		'0'
+	option	start_time		'00.00-00:00'
+	option	end_time		'00.00-00:00'
+	option	dst_offset		'0'

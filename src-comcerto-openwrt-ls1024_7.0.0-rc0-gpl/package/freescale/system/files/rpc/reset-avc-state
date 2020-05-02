@@ -1,0 +1,26 @@
+#!/bin/sh
+
+# Lionic command to reset the statistics
+statsreset_result='lcstat reset stat'
+`$statsreset_result`
+
+if [ "$?" -ne 0 ];then
+   errcode=1
+   errstring="Failed"
+else
+   errcode=0
+   errstring="Success"
+fi
+
+# Store the time & display in GUI
+reset_uptime=`cat /proc/uptime | cut -d " " -f 1 | cut -d . -f 1`
+echo "$reset_uptime" > /tmp/stats/avc_last_reset_time
+                                
+# input: ""
+# output: "code <int32> errstr <string>"
+if [ "$errcode" -ne 0 ];then
+	echo "error-message $errstring"
+	exit 1
+else
+	exit 0
+fi

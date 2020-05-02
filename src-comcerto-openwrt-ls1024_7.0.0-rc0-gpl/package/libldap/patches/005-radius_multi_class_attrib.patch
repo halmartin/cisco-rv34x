@@ -1,0 +1,35 @@
+diff -rauN e/pam_ldap.c f/pam_ldap.c
+--- e/pam_ldap.c	2016-05-23 10:33:23.512284496 +0530
++++ f/pam_ldap.c	2016-05-23 10:34:14.634067487 +0530
+@@ -3494,13 +3494,13 @@
+             }
+        if (rc == PAM_SUCCESS && session->info->group != NULL)
+           {
+-              (void) pam_set_data (pamh, "groupattr",
++              (void) pam_set_data (pamh, "groupattr0",
+                                     (void *) strdup (session->info->group),
+                                               _cleanup_data);
+           }
+        else if(rc == PAM_SUCCESS && session->info->group == NULL)
+        {
+-            (void) pam_set_data (pamh, "groupattr",
++            (void) pam_set_data (pamh, "groupattr0",
+                                     (void *) strdup ("default"),
+                                      _cleanup_data);
+        
+@@ -3550,13 +3550,13 @@
+ 
+    if (rc == PAM_SUCCESS && session->info->group != NULL)
+     {
+-      (void) pam_set_data (pamh, "groupattr",
++      (void) pam_set_data (pamh, "groupattr0",
+                            (void *) strdup (session->info->group),
+                            _cleanup_data);
+    }
+    else if (rc == PAM_SUCCESS && session->info->group == NULL)
+    {
+-        (void) pam_set_data (pamh, "groupattr",
++        (void) pam_set_data (pamh, "groupattr0",
+                             (void *) strdup ("default"),
+                             _cleanup_data);
+    }

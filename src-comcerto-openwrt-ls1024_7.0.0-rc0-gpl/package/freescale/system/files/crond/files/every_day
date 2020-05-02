@@ -1,0 +1,5 @@
+#!/bin/sh
+
+for script in $(ls /usr/bin/cron.d/daily/* 2>&-); do (
+	[ -f $script ] && . $script
+); done

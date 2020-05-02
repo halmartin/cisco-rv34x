@@ -1,0 +1,39 @@
+diff -aurN a/src/source/eapol_sm.c b/src/source/eapol_sm.c
+--- a/src/source/eapol_sm.c	2016-05-27 16:36:55.776523884 +0530
++++ b/src/source/eapol_sm.c	2016-05-27 18:25:03.172523110 +0530
+@@ -168,7 +168,6 @@
+ 	}
+ 
+ 	SM_ENTRY(AUTH_PAE, CONNECTING, auth_pae);
+-	SM_STATS_ENTRY(auth_pae);
+ 
+ #ifdef CONFIG_RV34X_8021X
+ 	/* don't send second identity packet to group mac */
+@@ -604,7 +603,7 @@
+ 	char str[MAX_COMMAND_STR];
+ 	
+ 	memset(str, 0 , MAX_COMMAND_STR);
+-	sprintf(str, "rtkssdk port_stats -p %d -g 1", aid);
++	sprintf(str, "rtkssdk dot1x -p %d -g 1", aid);
+ 
+ 	if((fp = popen(str,"r")) !=NULL)
+ 	{
+diff -aurN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-05-27 16:36:37.704523886 +0530
++++ b/src/source/ieee802_1x.c	2016-05-27 19:14:09.716522758 +0530
+@@ -108,7 +108,6 @@
+     DBGPRINT(RT_DEBUG_ERROR, "Failed to get nasIP Address\n");
+ 
+   DBGPRINT(RT_DEBUG_INFO,"RADIUS NAS IP Address = %04x\n", ntohl(*nasIP));
+-  printf("RADIUS OWN IP Address = %04x\n", ntohl(*nasIP));
+ 
+ /** Get the interface name and RADIUS called-station-id **/
+ 
+@@ -361,6 +360,7 @@
+ 	{
+ 		DBGPRINT(RT_DEBUG_WARN,"IEEE 802.1X: TxReq(%d) - changing id from %d\n", id, eap->identifier);
+ 		eap->identifier = id;
++		return;
+ 	}
+ 
+ 	ieee802_1x_send(rtapd, sta, IEEE802_1X_TYPE_EAP_PACKET,	sta->last_eap_radius, sta->last_eap_radius_len);

@@ -1,0 +1,73 @@
+diff -aurN a/ripd/ripd.c b/ripd/ripd.c
+--- a/ripd/ripd.c	2016-04-20 15:06:40.258350424 +0530
++++ b/ripd/ripd.c	2016-04-20 15:52:40.822402249 +0530
+@@ -1786,7 +1786,7 @@
+ {
+   int ret;
+   int sock;
+-  char buf[RIP_PACKET_MAXSIZ];
++  char buf[RIP_PACKET_MAXSIZ_IOS];
+   struct sockaddr_in from;
+   unsigned int ifindex;
+   
+@@ -1795,7 +1795,7 @@
+   rip_event (RIP_READ, sock);
+ 
+   /* Read RIP packet. */
+-  ret = rip_recvmsg (sock, buf, RIP_PACKET_MAXSIZ, &from, (int *)&ifindex);
++  ret = rip_recvmsg (sock, buf, RIP_PACKET_MAXSIZ_IOS, &from, (int *)&ifindex);
+   if (ret < 0)
+     {
+       zlog_warn ("Can't read RIP packet: %s", safe_strerror (errno));
+@@ -1834,7 +1834,14 @@
+   memset (&from, 0, sizeof (struct sockaddr_in));
+   fromlen = sizeof (struct sockaddr_in);
+ 
+-  len = recvfrom (sock, (char *)&rip_buf.buf, sizeof (rip_buf.buf), 0, 
++ /* IOS apparently sends authentication info as an extra entry, ie IOS still
++ * will send 25 routing entries, for a total of 26, rather than counting
++ * the auth info entry towards the 25 allowed entries. See RFC2453
++ * Section 4.1, paragraph 1. See also [zebra 19024].
++ * To cope with this the input buffer needs to be one entry bigger than
++ * RFC mandated size.
++ */
++  len = recvfrom (sock, (char *)&rip_buf.buf_ios_bug,sizeof (rip_buf.buf_ios_bug), 0, 
+ 		  (struct sockaddr *) &from, &fromlen);
+   if (len < 0) 
+     {
+@@ -1885,10 +1892,10 @@
+       rip_peer_bad_packet (&from);
+       return len;
+     }
+-  if (len > RIP_PACKET_MAXSIZ)
++  if ( (len > RIP_PACKET_MAXSIZ) && (len != RIP_PACKET_MAXSIZ_IOS) )
+     {
+-      zlog_warn ("packet size %d is larger than max size %d",
+-		 len, RIP_PACKET_MAXSIZ);
++      zlog_warn ("packet size %d is > max size %d and != IOS bug size %d",
++                 len, RIP_PACKET_MAXSIZ, RIP_PACKET_MAXSIZ_IOS);
+       rip_peer_bad_packet (&from);
+       return len;
+     }
+diff -aurN a/ripd/ripd.h b/ripd/ripd.h
+--- a/ripd/ripd.h	2016-04-20 15:06:58.250350761 +0530
++++ b/ripd/ripd.h	2016-04-20 15:56:17.130406310 +0530
+@@ -44,6 +44,10 @@
+ /* Normal RIP packet min and max size. */
+ #define RIP_PACKET_MINSIZ                4
+ #define RIP_PACKET_MAXSIZ              512
++/* IOS apparently will send 26 entry packets when auth is used
++ * see [zebra 19024]
++ */
++#define RIP_PACKET_MAXSIZ_IOS 524
+ 
+ #define RIP_HEADER_SIZE                  4
+ #define RIP_RTE_SIZE                    20
+@@ -179,6 +183,7 @@
+ {
+   struct rip_packet rip_packet;
+   char buf[RIP_PACKET_MAXSIZ];
++  char buf_ios_bug[RIP_PACKET_MAXSIZ_IOS];
+ };
+ 
+ /* RIP route information. */

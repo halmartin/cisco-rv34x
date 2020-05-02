@@ -1,0 +1,127 @@
+--- a/Makefile.am	2015-07-03 17:44:28.930870192 +0530
++++ b/Makefile.am	2015-07-03 17:43:10.587047598 +0530
+@@ -23,12 +23,12 @@ install-exec-local: pam_ldap.so
+ 	@$(NORMAL_INSTALL)
+ 	$(mkinstalldirs) $(DESTDIR)$(libdir)/security
+ if EXTENSION_SO
+-	$(INSTALL_PROGRAM) -o root -g root pam_ldap.so $(DESTDIR)$(libdir)/security/pam_ldap.so
++	$(INSTALL_PROGRAM) pam_ldap.so $(DESTDIR)$(libdir)/security/pam_ldap.so
+ else
+ if EXTENSION_1
+-	$(INSTALL_PROGRAM) -o root -g root pam_ldap.so $(DESTDIR)$(libdir)/security/libpam_ldap.1
++	$(INSTALL_PROGRAM) pam_ldap.so $(DESTDIR)$(libdir)/security/libpam_ldap.1
+ else
+-	$(INSTALL_PROGRAM) -o root -g root pam_ldap.so $(DESTDIR)$(libdir)/security/pam_ldap.so.1
++	$(INSTALL_PROGRAM) pam_ldap.so $(DESTDIR)$(libdir)/security/pam_ldap.so.1
+ 	(cd $(DESTDIR)$(libdir)/security; rm -f pam_ldap.so; ln -s pam_ldap.so.1 pam_ldap.so)
+ endif
+ endif
+@@ -37,7 +37,7 @@ install-data-local:
+ 	@$(NORMAL_INSTALL)
+ 	@if test ! -f $(DESTDIR)$(sysconfdir)/ldap.conf; then \
+ 		$(mkinstalldirs) $(DESTDIR)$(sysconfdir); \
+-		$(INSTALL_DATA) -o root -g root $(srcdir)/ldap.conf $(DESTDIR)$(sysconfdir)/ldap.conf; \
++		$(INSTALL_DATA) $(srcdir)/ldap.conf $(DESTDIR)$(sysconfdir)/ldap.conf; \
+ 	fi
+ 
+ uninstall-local:
+--- a/Makefile.in	2015-07-03 17:44:42.220055039 +0530
++++ b/Makefile.in	2015-07-03 17:43:23.880230396 +0530
+@@ -709,16 +709,16 @@ uninstall-man: uninstall-man5
+ install-exec-local: pam_ldap.so
+ 	@$(NORMAL_INSTALL)
+ 	$(mkinstalldirs) $(DESTDIR)$(libdir)/security
+-@EXTENSION_SO_TRUE@	$(INSTALL_PROGRAM) -o root -g root pam_ldap.so $(DESTDIR)$(libdir)/security/pam_ldap.so
+-@EXTENSION_1_TRUE@@EXTENSION_SO_FALSE@	$(INSTALL_PROGRAM) -o root -g root pam_ldap.so $(DESTDIR)$(libdir)/security/libpam_ldap.1
+-@EXTENSION_1_FALSE@@EXTENSION_SO_FALSE@	$(INSTALL_PROGRAM) -o root -g root pam_ldap.so $(DESTDIR)$(libdir)/security/pam_ldap.so.1
++@EXTENSION_SO_TRUE@	$(INSTALL_PROGRAM) pam_ldap.so $(DESTDIR)$(libdir)/security/pam_ldap.so
++@EXTENSION_1_TRUE@@EXTENSION_SO_FALSE@	$(INSTALL_PROGRAM) pam_ldap.so $(DESTDIR)$(libdir)/security/libpam_ldap.1
++@EXTENSION_1_FALSE@@EXTENSION_SO_FALSE@	$(INSTALL_PROGRAM) pam_ldap.so $(DESTDIR)$(libdir)/security/pam_ldap.so.1
+ @EXTENSION_1_FALSE@@EXTENSION_SO_FALSE@	(cd $(DESTDIR)$(libdir)/security; rm -f pam_ldap.so; ln -s pam_ldap.so.1 pam_ldap.so)
+ 
+ install-data-local:
+ 	@$(NORMAL_INSTALL)
+ 	@if test ! -f $(DESTDIR)$(sysconfdir)/ldap.conf; then \
+ 		$(mkinstalldirs) $(DESTDIR)$(sysconfdir); \
+-		$(INSTALL_DATA) -o root -g root $(srcdir)/ldap.conf $(DESTDIR)$(sysconfdir)/ldap.conf; \
++		$(INSTALL_DATA) $(srcdir)/ldap.conf $(DESTDIR)$(sysconfdir)/ldap.conf; \
+ 	fi
+ 
+ uninstall-local:
+--- a/pam_ldap.c	2015-07-03 17:44:55.833073816 +0530
++++ b/pam_ldap.c	2015-07-03 17:43:40.343787318 +0530
+@@ -2691,16 +2691,16 @@ _get_user_info (pam_ldap_session_t * ses
+   int rc;
+   LDAPMessage *res, *msg;
+   pam_ssd_t *ssd, ssdummy;
+-
++  char *group;
+   rc = _connect_anonymously (session);
+   if (rc != PAM_SUCCESS)
+     return rc;
+ 
+ #if defined(HAVE_LDAP_SET_OPTION) && defined(LDAP_OPT_SIZELIMIT)
+-  rc = 1;
++  rc = 0;
+   (void) ldap_set_option (session->ld, LDAP_OPT_SIZELIMIT, &rc);
+ #else
+-  session->ld->ld_sizelimit = 1;
++  session->ld->ld_sizelimit = 0;
+ #endif
+ 
+   rc = _escape_string (user, escapedUser, sizeof (escapedUser));
+@@ -2860,6 +2860,28 @@ nxt:
+   _get_long_integer_value (session->ld, msg, "shadowFlag",
+ 			   &session->info->shadow.flag);
+ 
++  snprintf (filter, sizeof filter, "(memberUid=%s)",
++               escapedUser);
++
++  rc = ldap_search_s (session->ld, ssd->base, ssd->scope,
++                      filter, _pam_ldap_attrs, 0, &res);
++
++  if (rc != LDAP_SUCCESS &&
++      rc != LDAP_TIMELIMIT_EXCEEDED && rc != LDAP_SIZELIMIT_EXCEEDED)
++    {
++      syslog (LOG_ERR, "pam_ldap: ldap_search_s %s", ldap_err2string (rc));
++      return PAM_USER_UNKNOWN;
++    }
++  
++  for ( msg = ldap_first_entry( session->ld, res ); msg != NULL;
++               msg = ldap_next_entry( session->ld, msg ) ) {
++
++       session->info->groupdn = ldap_get_dn( session->ld, msg );
++       group = strtok(session->info->groupdn,",");
++       group = strtok(group,"=");
++       group = strtok(NULL,"\0");
++       session->info->group = strdup(group);       
++    }   
+   ldap_msgfree (res);
+ 
+   return PAM_SUCCESS;
+@@ -3508,6 +3530,12 @@ pam_sm_authenticate (pam_handle_t * pamh
+       rc = pam_set_item (pamh, PAM_USER, (void *) session->info->username);
+     }
+ 
++   if (rc == PAM_SUCCESS && session->info->group != NULL)
++    {
++      (void) pam_set_data (pamh, "groupattr",
++                           (void *) strdup (session->info->group),
++                           _cleanup_data);
++   }
+   return rc;
+ }
+ 
+--- a/pam_ldap.h	2015-07-03 17:45:07.459111583 +0530
++++ b/pam_ldap.h	2015-07-03 17:43:52.161726673 +0530
+@@ -229,8 +229,10 @@ typedef struct pam_ldap_user_info
+   {
+     /* user name, to validate info cache */
+     char *username;
++    char *group;
+     /* DN of user in directory */
+     char *userdn;
++    char *groupdn;
+     /* temporary cache of user's bind credentials for rebind function */
+     char *userpw;
+     /* host attribute from account objectclass */

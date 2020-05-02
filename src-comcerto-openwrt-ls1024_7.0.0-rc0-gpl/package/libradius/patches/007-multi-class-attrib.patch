@@ -1,0 +1,53 @@
+diff -rauN c/src/pam_radius_auth.c d/src/pam_radius_auth.c
+--- c/src/pam_radius_auth.c	2016-05-20 15:08:22.547706339 +0530
++++ d/src/pam_radius_auth.c	2016-05-23 14:23:17.722484885 +0530
+@@ -58,6 +58,7 @@
+ #include <limits.h>
+ #include <errno.h>
+ #include <sys/time.h>
++#include <syslog.h>
+ 
+ #include "pam_radius_auth.h"
+ 
+@@ -374,8 +375,8 @@
+ {
+    unsigned char atype;
+    unsigned char alen;
+-   int rlen;
+-   char* attr_val_p;
++   int rlen, flag=FALSE, ii=0;
++   char* attr_val_p, *data_module;
+    AUTH_HDR* phdr = ((AUTH_HDR*)resp_buf);
+    char* p = phdr->data;
+ 
+@@ -404,9 +405,13 @@
+                attr_val_p[alen-2] = '\0';
+                *attr_len_p = alen-2;
+                *attr_val_pp = attr_val_p;
++               data_module = (char*) calloc(1, strlen("groupattr")+2);
++               sprintf(data_module,"groupattr%d",ii++);
++
+                 char *dupvalue = strdup(attr_val_p);
+-                pam_set_data( pamh, "groupattr", dupvalue , _int_free );
+-                return (0);
++                pam_set_data( pamh, data_module, dupvalue , _int_free );
++                flag = TRUE;
++                free(data_module);
+             }
+          }
+       }
+@@ -414,8 +419,12 @@
+       p += alen; /* alen includes type, len, and attribute */
+    }
+    /*if group is not configured in server set the group  to default group*/
+-   pam_set_data( pamh, "groupattr", strdup("default") , _int_free );
+-   return (-1);
++   if (flag == FALSE)
++   {
++     pam_set_data( pamh, "groupattr0", strdup("default") , _int_free );
++     return (-1);
++   }
++   return flag;
+ }
+ 
+ /**************************************************************************

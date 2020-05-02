@@ -1,0 +1,7 @@
+SOURCE:https://github.com/cpatulea/openwrt-packages.git
+commit 6702dce159be17f24c1c3b6d79413dbd6928f7f4
+Author: Catalin Patulea <cat@vv.carleton.ca>
+Date:   Tue Apr 1 03:15:56 2014 -0400
+
+    mii-tool: update to 2014-02-18
+

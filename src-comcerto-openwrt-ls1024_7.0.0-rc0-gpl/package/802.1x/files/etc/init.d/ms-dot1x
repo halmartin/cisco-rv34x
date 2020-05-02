@@ -1,0 +1,73 @@
+#!/bin/sh /etc/rc.common
+
+START=47
+STOP=47
+board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+start() {
+        local status
+	if [ "$board" != "RV345" -a "$board" != "RV345P" ]; then
+		return 0;
+	fi
+
+        [ -x "/usr/bin/rtdot1xd" ] && {
+                status=$(uci get switch.dot1x_status.state)
+                #It is expected that Administrator enables 802.1x explicitely from UI
+                if [ $status = "enable" ]
+                then
+                {
+                #Call switch command to set CPUTAG TRAPPING for 802.1x frames
+                /usr/sbin/rtkssdk_diag -F 1 -d 1
+
+                #Create stats files for monitoring dot1x state
+                ports='0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15'
+		for p in $ports;do
+		touch /tmp/stats/dot1x_port$p
+		done
+
+		#Start the daemon
+                /usr/bin/rtdot1xd -d 2
+                }
+                fi
+        }
+}
+stop() {
+	if [ "$board" != "RV345" -a "$board" != "RV345P" ]; then
+		return 0;
+	fi
+        [ -x "/usr/bin/rtdot1xd" ] && {
+                #Call switch command to reset CPUTAG TRAPPING for 802.1x frames
+                /usr/sbin/rtkssdk_diag -F 1 -d 0
+                
+                #Stop the daemon if exists
+                local z=""
+                z=$(pgrep rtdot1xd)
+                
+                if [ -n "$z" ]
+                then
+                killall rtdot1xd
+
+		#Removing dot1x stats files
+             	rm -rf /tmp/stats/dot1x_port*
+               
+                #Authorizing all ports 
+                ports='0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15'
+                for p in $ports;do
+                rtkssdk_diag -D -p $p -a 1
+                done
+                fi
+        }
+}
+
+reload() {
+	local pid
+	if [ "$board" != "RV345" -a "$board" != "RV345P" ]; then
+		return 0;
+	fi
+        [ -x "/usr/bin/rtdot1xd" ] && {
+			pid=$(pgrep rtdot1xd)                                                                           
+			if [ -n "$pid" ]; then                                                                                     
+				`kill -SIGUSR2 $pid`                                     
+			fi                                       
+        }
+}
+

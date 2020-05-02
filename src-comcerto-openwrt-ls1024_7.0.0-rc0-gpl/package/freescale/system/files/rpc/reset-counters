@@ -1,0 +1,36 @@
+#!/bin/sh
+# send signal to operdb_stats to clear the saved counters
+
+if [ "$1" = "refresh" ];then
+	`/usr/bin/sendOpsdbSignal.sh SIGHUP`
+else
+	`/usr/bin/sendOpsdbSignal.sh SIGUSR2`
+
+	pid=$(uci get systeminfo.sysinfo.pid)
+	case $pid in
+        *345*)
+		rtkssdk_diag -S 1 -r 1
+        ;;
+        *340*)
+		rtkssdk port_stats -r 1
+        ;;
+
+        *160* | *260*)
+		/usr/sbin/bcmssdk -S 1 -r 1
+        ;;
+	esac
+
+	case $pid in
+        *345* | *340*)
+		# clear the ethtool counters
+		phy_interface1=`uci get network.wan1.ifname | sed -e "s/eth3.[0-9]*//g" | sed -e "s/^ *//g"`
+		phy_interface2=`uci get network.wan2.ifname | sed -e "s/eth3.[0-9]*//g" | sed -e "s/^ *//g"`
+		`ethtool -S $phy_interface2 > /dev/null`
+        ;;
+        *160* | *260*)
+		# clear the ethtool counters
+		phy_interface1=`uci get network.wan1.ifname | sed -e "s/eth2.[0-9]*//g" | sed -e "s/^ *//g"`
+        ;;
+	esac
+	`ethtool -S $phy_interface1 > /dev/null`
+fi

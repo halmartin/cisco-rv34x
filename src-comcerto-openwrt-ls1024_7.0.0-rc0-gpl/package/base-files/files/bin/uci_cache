@@ -1,0 +1,1 @@
+eval `uci -d ',' show $1 | awk 'BEGIN {FS="="} { gsub(/[^0-9a-zA-Z]/,"_",$1); print $1"="$2}'`

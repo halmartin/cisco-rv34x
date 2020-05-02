@@ -1,0 +1,24 @@
+--- a/net/netfilter/nf_conntrack_core.c	2017-04-14 00:07:08.577786344 -0500
++++ b/net/netfilter/nf_conntrack_core.c	2017-04-14 00:08:21.665789725 -0500
+@@ -1621,7 +1621,10 @@ int nf_conntrack_set_drop_tuple_enable_r
+         return -ENOENT;
+         
+     ct = nf_ct_tuplehash_to_ctrack(h);
+-        
++
++    if (!ct)
++      return -ENOENT;
++
+     prev = test_and_set_bit(IPS_DROP_CONN_BIT, &ct->status);
+     err = nf_conntrack_event(IPCT_PROTOINFO, ct);
+     if(err < 0 && prev == 0)
+@@ -1638,6 +1641,9 @@ int nf_conntrack_set_dpi_allow_report(st
+ 	int err = 0;
+ 	struct nf_conn *ct = (struct nf_conn *)skb->nfct;
+ 
++	if (!ct)
++		return -ENOENT;
++
+ 	nf_conntrack_get(skb->nfct);
+ 
+ 	set_bit(IPS_DPI_ALLOWED_BIT, &ct->status);

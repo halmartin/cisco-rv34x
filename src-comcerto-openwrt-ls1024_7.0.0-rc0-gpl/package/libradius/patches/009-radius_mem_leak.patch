@@ -1,0 +1,18 @@
+--- a/src/pam_radius_auth.c	2016-06-24 13:17:55.947326806 +0530
++++ b/src/pam_radius_auth.c	2016-06-24 13:18:10.702701431 +0530
+@@ -412,6 +412,7 @@ static int pam_radius_extract_radresp_at
+                 pam_set_data( pamh, data_module, dupvalue , _int_free );
+                 flag = TRUE;
+                 free(data_module);
++                //free(attr_val_p);
+             }
+          }
+       }
+@@ -1271,6 +1272,7 @@ PAM_EXTERN int pam_sm_authenticate(pam_h
+         else if(strcmp(var,"3rdparty") == 0)
+           strcpy(config.client_id, "3rdparty");
+         }
++         free(connection_name);
+ }
+ 
+ 

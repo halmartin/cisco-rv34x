@@ -1,0 +1,13 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Correct MDC clock to make it reach around 2MHZ clock.
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-01-18 11:05:46.568378106 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-01-18 11:07:19.658378007 +0800
+@@ -769,7 +769,7 @@
+ 	.comcerto_mdio_pdata[0] = {
+ 		.enabled = 1,
+ 		.phy_mask = 0xFFFFFFFD,
+-		.mdc_div = 96,
++		.mdc_div = 128,
+ 		.irq = {
+ 			[1] = PHY_POLL,
+ 		},

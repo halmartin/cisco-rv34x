@@ -1,0 +1,48 @@
+From 3920417422653c3afacfecdf3dc47fcf526c2ae7 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy <ganesh.reddy@nxp.com>
+Date: Mon, 4 Feb 2019 15:03:33 +0530
+Subject: [PATCH] regenarted-patch from DNCPE-644
+ linux_3_2_bridge_route_fix.patch
+
+Signed-off-by: Ganesh Reddy <ganesh.reddy@nxp.com>
+---
+ include/linux/if_bridge.h |  1 +
+ net/bridge/br_fdb.c       | 10 ++++++----
+ 2 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux/if_bridge.h b/include/linux/if_bridge.h
+index 7d171a7..f434965 100644
+--- a/include/linux/if_bridge.h
++++ b/include/linux/if_bridge.h
+@@ -55,6 +55,7 @@ extern br_should_route_hook_t __rcu *br_should_route_hook;
+ struct brevent_fdb_update{
+ 	char * mac_addr;
+ 	struct net_device * dev;
++	struct net_device * brdev;
+ };
+ 
+ enum brevent_notif_type {
+diff --git a/net/bridge/br_fdb.c b/net/bridge/br_fdb.c
+index b07d272..5009050 100644
+--- a/net/bridge/br_fdb.c
++++ b/net/bridge/br_fdb.c
+@@ -634,10 +634,12 @@ void br_fdb_update(struct net_bridge *br, struct net_bridge_port *source,
+ 
+ 				fdb_update.dev = source->dev;
+ 				fdb_update.mac_addr = fdb->addr.addr;
+-				/* rtmsg_ifinfo/__rtmsg_ifinfo needs to be called under lock */
+-				rtnl_lock();
+-				rtmsg_ifinfo(RTM_NEWLINK,br->dev, 0, GFP_ATOMIC);
+-				rtnl_unlock();
++				/*
++				 * __rtmsg_ifinfo requires rtnl lock, it is mutex lock.
++				 * So, from here(softirq context) can not call this call,
++				 * from auto bridge module calling this function from work queue.
++				 */
++				fdb_update.brdev = br->dev;
+ 				call_brevent_notifiers(BREVENT_FDB_UPDATE, &fdb_update);
+ #endif
+ 				fdb->dst = source;
+-- 
+1.9.1
+

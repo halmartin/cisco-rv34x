@@ -1,0 +1,18 @@
+--- a/pam_ldap.c	2016-06-21 15:18:03.880916731 +0530
++++ b/pam_ldap.c	2016-06-21 15:18:29.220915825 +0530
+@@ -1111,6 +1111,7 @@ _read_config (const char *configFile, pa
+        * According to PAM Documentation, such an error in a config file
+        * SHOULD be logged at LOG_ALERT level
+        */
++        fclose(fp);
+       syslog (LOG_ALERT, "pam_ldap: missing \"host\" in file \"%s\"",
+ 	      configFile);
+       return PAM_SERVICE_ERR;
+@@ -1121,6 +1122,7 @@ _read_config (const char *configFile, pa
+     {
+       syslog (LOG_ERR, "pam_ldap: SASL mechanism \"%s\" requested, "
+ 	      "but module not built with SASL support", result->sasl_mechanism);
++      fclose(fp);
+       return PAM_SERVICE_ERR;
+     }
+ #endif

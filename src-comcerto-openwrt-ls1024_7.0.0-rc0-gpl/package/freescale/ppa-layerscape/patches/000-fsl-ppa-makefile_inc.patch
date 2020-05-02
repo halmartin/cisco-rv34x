@@ -1,0 +1,12 @@
+diff -Naur ppa-generic/ppa/common/makefile.inc ppa-generic-new/ppa/common/makefile.inc
+--- ppa-generic/ppa/common/makefile.inc	2016-11-17 16:58:47.252191000 +0530
++++ ppa-generic-new/ppa/common/makefile.inc	2016-11-17 17:00:41.735693000 +0530
+@@ -25,7 +25,7 @@
+ CC64		= $(CROSS_COMPILE)gcc
+ LD64		= $(CROSS_COMPILE)ld
+ OBJ64		= $(CROSS_COMPILE)objcopy
+-MKIMAGE		= mkimage
++MKIMAGE		= $(BUILD_BIN)/mkimage
+ MAKE        = @make --no-print-directory
+ 
+ CFLAGS64		= $(CFLAGS) -Wa,-march=armv8-a -Wa,-EL -c

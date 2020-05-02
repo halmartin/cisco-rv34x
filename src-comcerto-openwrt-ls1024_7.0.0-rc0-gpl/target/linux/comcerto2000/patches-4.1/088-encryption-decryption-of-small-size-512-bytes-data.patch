@@ -1,0 +1,52 @@
+From 94c7b0a5f48322a9491cdb7fcba5678bd5b4f91c Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@freescale.com>
+Date: Tue, 15 Sep 2015 22:31:15 +0530
+Subject: [PATCH] encryption/decryption of small size(<512 bytes) data in user
+ space.
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@freescale.com>
+---
+ crypto/ocf/cryptodev.h | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/crypto/ocf/cryptodev.h b/crypto/ocf/cryptodev.h
+index 6067541..2688b6f 100755
+--- a/crypto/ocf/cryptodev.h
++++ b/crypto/ocf/cryptodev.h
+@@ -189,6 +189,15 @@
+ #define CRYPTO_FLAG_HARDWARE	0x01000000	/* hardware accelerated */
+ #define CRYPTO_FLAG_SOFTWARE	0x02000000	/* software implementation */
+ 
++#define AES_MAXNR 14
++
++/* This should be a hidden type, but EVP requires that the size be known */
++struct aes_key_st {
++    unsigned int rd_key[4 *(AES_MAXNR + 1)];
++    int rounds;
++};
++
++
+ /* NB: deprecated */
+ struct session_op {
+ 	u_int32_t	cipher;		/* ie. CRYPTO_DES_CBC */
+@@ -200,6 +209,8 @@ struct session_op {
+ 	caddr_t		mackey;
+ 
+   	u_int32_t	ses;		/* returns: session # */ 
++  	struct aes_key_st      aes_enckey;       
++    struct aes_key_st      aes_deckey;       
+ };
+ 
+ struct session2_op {
+@@ -212,6 +223,8 @@ struct session2_op {
+ 	caddr_t		mackey;
+ 
+   	u_int32_t	ses;		/* returns: session # */ 
++  	struct aes_key_st      aes_enckey;       
++    struct aes_key_st      aes_deckey;       
+ 	int		crid;		/* driver id + flags (rw) */
+ 	int		pad[4];		/* for future expansion */
+ };
+-- 
+1.9.1
+

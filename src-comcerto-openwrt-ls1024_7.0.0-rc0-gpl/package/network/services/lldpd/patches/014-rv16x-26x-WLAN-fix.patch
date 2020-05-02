@@ -1,0 +1,51 @@
+diff -ruaN c/src/lldp.c d/src/lldp.c
+--- c/src/lldp.c	2017-10-09 15:31:43.903354084 +0530
++++ d/src/lldp.c	2017-10-09 15:36:50.339354047 +0530
+@@ -563,7 +563,7 @@
+ 	      POKE_START_LLDP_TLV(LLDP_TLV_END) &&
+ 	      POKE_END_LLDP_TLV))
+ 		goto toobig;
+-
++#if 0
+ 	//LLOG_INFO("LLDP packet sending out cputag[0] = %x : cputag[1] = %x", cputag[0], cputag[1]);
+         if (strcmp(hardware->h_ifname, LAN_INTERFACE)==0)
+ 	{
+@@ -573,7 +573,7 @@
+ 	{
+ 		 LLOG_INFO("LLDP packet sent on WAN interface %s\n",hardware->h_ifname);
+ 	}
+-
++#endif
+  
+ 	if (hardware->h_ops->send(global, hardware,
+ 		(char *)packet, pos - packet) == -1) {
+@@ -675,7 +675,7 @@
+         	if ((strcmp(PID_RV34X,"RV260") == 0) || (strcmp(PID_RV34X,"RV160") == 0))
+         	{
+ 			portno=frame[BCM_PORTOFFSET];
+-			LLOG_INFO("LLDP packet received on LAN port [%d] on interface %s", (portno+1), hardware->h_ifname);
++			//LLOG_INFO("LLDP packet received on LAN port [%d] on interface %s", (portno+1), hardware->h_ifname);
+ 			memmove(frame+BCM_CPUTAGLEN,frame,2*ETH_ALEN);
+ 			frame=frame+BCM_CPUTAGLEN;
+ 			s=s-BCM_CPUTAGLEN;
+diff -ruaN c/src/lldpd.c d/src/lldpd.c
+--- c/src/lldpd.c	2017-10-09 15:19:36.651354171 +0530
++++ d/src/lldpd.c	2017-10-09 15:22:15.423354152 +0530
+@@ -1245,8 +1245,15 @@
+ 	if ((lchassis = (struct lldpd_chassis*)
+ 		calloc(1, sizeof(struct lldpd_chassis))) == NULL)
+ 		fatal(NULL);
+-	lchassis->c_cap_available = LLDP_CAP_BRIDGE | LLDP_CAP_WLAN |
+-	    LLDP_CAP_ROUTER;
++
++	if ((strncmp(PID_RV34X,"RV260W",6) == 0) || (strncmp(PID_RV34X,"RV160W",6) == 0))
++	{
++		lchassis->c_cap_available = LLDP_CAP_BRIDGE | LLDP_CAP_WLAN | LLDP_CAP_ROUTER;
++	}
++	else
++	{
++		lchassis->c_cap_available = LLDP_CAP_BRIDGE | LLDP_CAP_ROUTER;
++	}
+ 	TAILQ_INIT(&lchassis->c_mgmt);
+ #ifdef ENABLE_LLDPMED
+ 	if (lldpmed > 0) {

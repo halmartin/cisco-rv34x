@@ -1,0 +1,51 @@
+diff -aurN '--exclude-from=/tmp/files' linux-4.1.8-orig/drivers/net/phy/realtek.c linux-4.1.8/drivers/net/phy/realtek.c
+--- linux-4.1.8-orig/drivers/net/phy/realtek.c	2017-08-16 16:10:38.619537052 +0530
++++ linux-4.1.8/drivers/net/phy/realtek.c	2017-08-16 16:12:05.995535391 +0530
+@@ -29,6 +29,18 @@
+ MODULE_AUTHOR("Johnson Leung");
+ MODULE_LICENSE("GPL");
+ 
++static int rtl821x_config_init(struct phy_device *phydev)
++{
++	if (phydev->phy_id == 0x001cc916) {
++		phy_write(phydev, 0x1f, 0xd04);
++		phy_write(phydev, 0x10, 0x201b);
++		phy_write(phydev, 0x11, 0x0);
++		phy_write(phydev, 0x1f, 0xa42);
++	}
++
++	return 0;
++}
++
+ static int rtl821x_ack_interrupt(struct phy_device *phydev)
+ {
+ 	int err;
+@@ -76,11 +88,17 @@
+ 		.driver         = { .owner = THIS_MODULE,},
+ 	}, {
+ 		.phy_id		= 0x001cc912,
+-		.name		= "RTL8211B Gigabit Ethernet",
+-		.phy_id_mask	= 0x001fffff,
++	.name		= "RTL821x Gigabit Ethernet",
++	.phy_id_mask	= 0x001ffff0,
+ 		.features	= PHY_GBIT_FEATURES,
+ 		.flags		= PHY_HAS_INTERRUPT,
++	.config_init	= &rtl821x_config_init,
+ 		.config_aneg	= &genphy_config_aneg,
++	.config_eth_test_mode	        = genphy_config_eth_test_mode,  // [Po-Yao]: add a cmd for ethernet test mode.
++	.config_eth_mdix_mode	        = genphy_config_eth_mdix_mode,  // [Po-Yao]: add a cmd for ethernet mdix mode.
++	.config_phy_eee_enable	        = genphy_config_phy_eee_enable, // [Po-Yao]: add a cmd for phy eee enable.
++	.config_phy_ssc_enable	        = genphy_config_phy_ssc_enable, // [Po-Yao]: add a cmd for phy ssc enable.
++	.config_phy_clkout_enable	= genphy_config_phy_clkout_enable, // [Po-Yao]: add a cmd for phy clkout enable.
+ 		.read_status	= &genphy_read_status,
+ 		.ack_interrupt	= &rtl821x_ack_interrupt,
+ 		.config_intr	= &rtl8211b_config_intr,
+@@ -104,7 +122,7 @@
+ module_phy_driver(realtek_drvs);
+ 
+ static struct mdio_device_id __maybe_unused realtek_tbl[] = {
+-	{ 0x001cc912, 0x001fffff },
++	{ 0x001cc912, 0x001ffff0 },
+ 	{ 0x001cc915, 0x001fffff },
+ 	{ }
+ };

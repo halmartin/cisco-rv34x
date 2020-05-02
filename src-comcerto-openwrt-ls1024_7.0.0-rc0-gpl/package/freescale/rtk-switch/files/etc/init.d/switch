@@ -1,0 +1,479 @@
+#!/bin/sh /etc/rc.common
+START=46
+STOP=46
+
+is_start=-1
+IPTABLES="iptables -w"
+IP6TABLES="ip6tables -w"
+
+start() {
+	board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+	if [ "$board" != "RV340" -a "$board" != "RV340W" ]; then
+		return 0;
+	fi
+
+         [ -x "/usr/sbin/rtkssdk" ] && {
+                        /usr/sbin/rtkssdk init -t 1 -r 4
+			}
+	is_start=1
+
+	`$IPTABLES -F inter_vlan_routing`
+	`$IP6TABLES -F inter_vlan_routing`
+	`$IPTABLES -F device_management`
+	`$IP6TABLES -F device_management`
+
+	reload
+	}
+
+reload() {
+	
+	config_load switch
+	args=""
+	rtkssdk vlan -i 1
+	config_foreach switch_vlan switch_vlan
+
+	board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+	if [ "$board" = "RV340W" ]; then
+		config_foreach switch_br_vlan switch_vlan
+	fi
+
+	config_foreach port port
+	config_foreach mirror mirror
+	config_foreach lag lag
+	
+	a=$(uci get switch.ip_source_guard_0.status)
+	b=$(uci get switch.block_unknown_mac_0.status)
+	acl_index=3
+	ip_source_guard
+	qos_switch
+	rm /tmp/switch-bkp
+	rtkssdk led -i 1
+	
+	lldpd_status=$(uci get lldpd.config.enable)
+	[ $lldpd_status -eq 1 ] && rtkssdk feature lldp enable
+	
+	dmz_status=$(uci get dmz.hardwaredmz.enabled)
+	[ $dmz_status -eq 1 ] && rtkssdk vlan -v 4094 -u 1
+
+	return 0;
+}
+
+stop() {
+	board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+	if [ "$board" != "RV340" -a "$board" != "RV340W" ]; then
+		return 0;
+	fi
+
+         [ -x "/usr/sbin/rtkssdk" ] && {
+                        /usr/sbin/rtkssdk init -t 1 -r 4
+			}
+	return 0;
+}
+
+ip_source_guard() {
+	
+	if [ "$a" = "enable" -o "$b" = "enable" ]
+	then
+		rtkssdk acl -d 1
+		rtkssdk acl -s 1
+		config_foreach ip_mac_bind ip_mac_bind 
+	elif [ "$a" = "disable" -a "$b" = "disable" ]
+	then
+		rtkssdk acl -d 1
+		rtkssdk acl -s 0
+	fi
+	
+
+}
+
+
+ip_mac_bind() {
+
+	local cfg=$1
+
+	config_get ip "$cfg" ip
+	config_get mac "$cfg" mac
+	config_get status "$cfg" status
+	
+	[ -n "$status" -a "$status" = "enable" ] || return 0
+	[ $acl_index -lt 96 ] || return 0	
+	
+	local oIFS="$IFS"; IFS="."
+	set $ip
+	IFS="$oIFS"
+	t1=$1;t2=$2;t3=$3;t4=$4;
+	i1=$(echo $(printf %.2x $t1))		
+	i2=$(echo $(printf %.2x $t2))		
+	i3=$(echo $(printf %.2x $t3))		
+	i4=$(echo $(printf %.2x $t4))		
+
+	IP=$i1$i2$i3$i4
+	
+	if [ "$a" = "enable" ]
+	then
+	rtkssdk acl -i $IP -m $mac -r $acl_index -t 1
+	acl_index=$((acl_index+2))
+	
+	elif [ "$a" = "disable" -a "$b" = "enable" ]
+	then
+	rtkssdk acl -m $mac -r $acl_index -o 1
+	acl_index=$((acl_index+1))
+	
+	fi
+	
+}
+
+switch_br_vlan() {
+	
+	local cfg=$1
+	
+	config_get routing "$cfg" routing
+	config_get dev_mgmt "$cfg" dev_mgmt
+	
+	old_routing=$(uci get /tmp/switch-bkp.$cfg.routing)
+	logger -t switch "=== old_routing=$old_routing : $routing new ==="
+	if [ "$old_routing" != "$routing" ]
+	then
+		if [ "$routing" = "disable" ]
+		then
+			`$IPTABLES -A inter_vlan_routing --out-interface br-$cfg -j DROP`
+			`$IP6TABLES -A inter_vlan_routing --out-interface br-$cfg -j DROP`
+		elif [ "$routing" = "enable" ]
+		then
+			`$IPTABLES -D inter_vlan_routing --out-interface br-$cfg -j DROP`
+			`$IP6TABLES -D inter_vlan_routing --out-interface br-$cfg -j DROP`
+		fi
+	fi
+
+	old_dev_mgmt=$(uci get /tmp/switch-bkp.$cfg.dev_mgmt)
+        if [ "$old_dev_mgmt" != "$dev_mgmt" ]
+        then
+		if [ "$dev_mgmt" = "disable" ]
+		then
+			$IPTABLES -A device_management --in-interface br-$cfg -p tcp -m multiport --destination-port 80,443 -j DROP
+			$IP6TABLES -A device_management --in-interface br-$cfg -p tcp -m multiport --destination-port 80,443 -j DROP
+		elif [ "$dev_mgmt" = "enable" ]
+		then
+			$IPTABLES -D device_management --in-interface br-$cfg -p tcp -m multiport --destination-port 80,443 -j DROP
+			$IP6TABLES -D device_management --in-interface br-$cfg -p tcp -m multiport --destination-port 80,443 -j DROP
+		fi
+	fi
+}
+
+switch_vlan() {
+	
+	local cfg=$1
+	
+	config_get vlan "$cfg" vlan
+	config_get ports "$cfg" ports
+	config_get routing "$cfg" routing
+	config_get dev_mgmt "$cfg" dev_mgmt
+	
+	iface=$(uci get network.$cfg.ifname)
+	old_dev_mgmt=$(uci get /tmp/switch-bkp.$cfg.dev_mgmt)
+	logger -t switch "=== old_dev_mgmt=$old_dev_mgmt : $dev_mgmt new ==="
+	if [ "$old_dev_mgmt" != "$dev_mgmt" ]
+	then
+		if [ "$dev_mgmt" = "disable" ]
+		then
+			$IPTABLES -A device_management --in-interface $iface -p tcp -m multiport --destination-port 80,443 -j DROP
+			$IP6TABLES -A device_management --in-interface $iface -p tcp -m multiport --destination-port 80,443 -j DROP
+		elif [ "$dev_mgmt" = "enable" ]
+		then
+			$IPTABLES -D device_management --in-interface $iface -p tcp -m multiport --destination-port 80,443 -j DROP
+			$IP6TABLES -D device_management --in-interface $iface -p tcp -m multiport --destination-port 80,443 -j DROP
+		fi
+	fi
+
+	old_routing=$(uci get /tmp/switch-bkp.$cfg.routing)
+	logger -t switch "=== old_routing=$old_routing : $routing new ==="
+	if [ "$old_routing" != "$routing" ]
+	then
+		if [ "$routing" = "disable" ]
+		then
+			`$IPTABLES -A inter_vlan_routing --out-interface $iface -j DROP`
+			`$IP6TABLES -A inter_vlan_routing --out-interface $iface -j DROP`
+		elif [ "$routing" = "enable" ]
+		then
+			`$IPTABLES -D inter_vlan_routing --out-interface $iface -j DROP`
+			`$IP6TABLES -D inter_vlan_routing --out-interface $iface -j DROP`
+		fi
+	fi
+
+	string=""
+	
+	for o in $ports; do
+
+	i=${o/t/-t}
+		
+	local oIFS="$IFS"; IFS="-"
+	set $i
+	IFS="$oIFS"
+	
+	if [ $1 = "lag1" ]
+	then
+		l=$(uci get switch.lag1.ports)
+		str1=""	
+		for p in $l; do	
+		if [ -n "$2" ];
+		then
+			str1="$str1 -t $p"                                 	
+		else
+	
+			str1="$str1 -u $p"                                 	
+		fi
+		done
+		string="$string $str1"
+
+	
+	else
+	
+		if [ -n "$2" ];
+		then
+		string="$string -t $1"                                 	
+		else
+		string="$string -u $1"                                 	
+		fi
+
+	fi
+
+	done	
+	
+	rtkssdk vlan -v $vlan $string
+
+}
+
+
+port() {
+
+	local cfg=$1
+	is_port_config=$(grep "switch.$cfg" /tmp/switch_config)
+	[ -n "$is_port_config" -o "$is_start" -eq 1 ] || return 0 
+	
+	port=$(echo ${cfg:3:1})
+	config_get name "$cfg" name
+	config_get status "$cfg" status
+	config_get eee "$cfg" eee
+	config_get mode "$cfg" mode
+	config_get flow_control "$cfg" flow_control
+	
+	if [ $status = enable ];
+	then
+	s=1
+	else
+	s=0
+        fi                         	
+	
+	rtkssdk linkset -p $port -s $s -f $flow_control -e $eee -m $mode
+
+}
+
+
+mirror() {
+
+	local cfg=$1
+	config_get status "$cfg" status
+	config_get m "$cfg" mirror_dest
+	config_get p "$cfg" mirror_ports
+	[ -n "$status" -a "$status" = "enable" ] || {
+	rtkssdk mirror
+	return 0
+	}
+	str=""
+	for x in $p; do
+	str="$str -p $x"
+	done
+	
+	rtkssdk mirror -m $m $str
+	
+}
+
+
+lag() {
+
+	local cfg=$1
+	[ "$cfg" = "lag1" ] || return 0	
+	config_get state "$cfg" state
+	config_get ports "$cfg" ports
+	[ -n "$state" -a "$state" = "up" ] || {
+	rtkssdk lag -g 1
+	return 0
+	}
+	str1=""	
+	for x in $ports; do
+        str1="$str1 -p $x"
+	done
+		
+	rtkssdk lag -g 1 $str1	
+
+}
+
+portauth() {
+
+	dot1x_state=$(uci get switch.dot1x_status.state)
+	[ "$dot1x_state" = "enable" ] || return 0	
+	
+	local cfg=$1
+	config_get name "$cfg" name
+	config_get state "$cfg" state
+	[ "$state" = "ForceAuth" ] || return 0
+	
+	tmp=$(echo ${name:0:3})
+	if [ $tmp = "lan" ]
+	then
+	port=$(echo ${name:3:1})
+	rtkssdk dot1x -p $port -a 1	
+	elif [ $name = "lag1" ]
+	then
+	port=$(uci get switch.lag1.ports)
+	for p in $port;do
+	rtkssdk dot1x -p $p -a 1	
+	done
+	fi	
+
+}
+
+
+qos_switch() {
+
+	rtkssdk qos -i 1
+	qos_mode=$(uci get qos_switch.mode.type)
+	
+	if [ $qos_mode = "port" ]
+	then
+	mode_no=1
+	elif [ $qos_mode = "dscp" ]
+	then
+	mode_no=2
+	elif [ $qos_mode = "cos" ]
+	then
+	mode_no=3
+	fi
+	
+	switch_queueing	
+	
+	if [ $qos_mode = "port" ]
+	then
+	switch_classification_port_based
+	else	
+	config_load qos_switch
+	config_foreach switch_classification_others qos
+	fi
+	
+	rtkssdk qos -s $mode_no -t 1
+
+}
+
+switch_classification_port_based() {
+
+	ports="1 2 3 4"
+	lag_state=$(uci get switch.lag1.state)
+	
+	if [ $lag_state = "up" ]
+	then
+	lag_ports=$(uci get switch.lag1.ports)		
+	queue=$(uci get qos_switch.lag1.queue)
+	
+	## switch classification for ports in lag1 ##
+	for p in $lag_ports;do
+	rtkssdk qos -s 1 -p $p -q $queue
+	done	
+	
+	x=$ports	
+	for p in $lag_ports;do
+	x=$(echo "$x" | sed "s@$p@@")
+	done	
+	rem_ports=$x
+	
+	for p in $rem_ports;do
+	queue=$(uci get qos_switch.port$p.queue)
+
+	## switch queueing for ports out of lag1 ##
+	rtkssdk qos -s 1 -p $p -q $queue
+	done	
+	
+	elif [ $lag_state = "down" ]
+	then	
+	## switch queueing for all ports ( when lag1 is down) ##
+	for p in $ports;do
+	queue=$(uci get qos_switch.port$p.queue)
+	rtkssdk qos -s 1 -p $p -q $queue
+	done
+	fi	
+
+}
+
+switch_classification_others() {
+
+	local cfg=$1
+	config_get queue "$cfg" queue
+	
+	tmp=$(echo ${cfg:0:3})
+	
+	if [ $tmp = "dsc" -a $qos_mode = "dscp" ]
+	then
+	dscp=$(echo ${cfg:4})
+	rtkssdk qos -s 2 -d $dscp -q $queue 
+	
+	elif [ $tmp = "cos" -a $qos_mode = "cos" ]
+	then
+	cos=$(echo ${cfg:3})
+	rtkssdk qos -s 3 -c $cos -q $queue 
+	fi
+
+}
+
+
+switch_queueing() {
+	
+	ports="1 2 3 4"
+	
+	lag_state=$(uci get switch.lag1.state)
+	
+	if [ $lag_state = "up" ]
+	then
+	lag_ports=$(uci get switch.lag1.ports)		
+	
+	q1_wt=$(uci get qos_switch.lag1.q1_weight)
+	q2_wt=$(uci get qos_switch.lag1.q2_weight)
+	q3_wt=$(uci get qos_switch.lag1.q3_weight)
+	q4_wt=$(uci get qos_switch.lag1.q4_weight)
+	
+	## switch queueing for ports in lag1 ##
+	for p in $lag_ports;do
+	rtkssdk qos -p $p -1 $q1_wt -2 $q2_wt -3 $q3_wt -4 $q4_wt -o 1	
+	done	
+	
+	x=$ports	
+	for p in $lag_ports;do
+	x=$(echo "$x" | sed "s@$p@@")
+	done	
+	rem_ports=$x
+	
+	for p in $rem_ports;do
+	q1_wt=$(uci get qos_switch.port$p.q1_weight)
+	q2_wt=$(uci get qos_switch.port$p.q2_weight)
+	q3_wt=$(uci get qos_switch.port$p.q3_weight)
+	q4_wt=$(uci get qos_switch.port$p.q4_weight)
+
+	## switch queueing for ports out of lag1 ##
+	rtkssdk qos -p $p -1 $q1_wt -2 $q2_wt -3 $q3_wt -4 $q4_wt -o 1	
+	done	
+	
+	else
+	
+	## switch queueing for all ports ( when lag1 is down) ##
+	for p in $ports;do
+	q1_wt=$(uci get qos_switch.port$p.q1_weight)
+	q2_wt=$(uci get qos_switch.port$p.q2_weight)
+	q3_wt=$(uci get qos_switch.port$p.q3_weight)
+	q4_wt=$(uci get qos_switch.port$p.q4_weight)
+
+	rtkssdk qos -p $p -1 $q1_wt -2 $q2_wt -3 $q3_wt -4 $q4_wt -o 1	
+	done
+		
+	fi	
+
+
+}
+

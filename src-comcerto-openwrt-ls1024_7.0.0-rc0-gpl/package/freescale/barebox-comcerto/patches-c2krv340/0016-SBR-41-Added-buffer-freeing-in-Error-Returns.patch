@@ -1,0 +1,33 @@
+From 967780ae5814ab8745b02e802e1f5ad3edfa103e Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Mon, 24 Aug 2015 17:30:48 +0530
+Subject: [PATCH 16/60] SBR-41 Added buffer freeing in Error Returns
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ commands/boardinfo.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+index 4373863..58fb31b 100644
+--- a/commands/boardinfo.c
++++ b/commands/boardinfo.c
+@@ -84,6 +84,7 @@ static int command_boardinfo_mac(int argc, char *argv[])
+   if ( (n_read = read(fd, (char *)board_data, sizeof(c2krv340))) < 0 )
+   {
+     printf("Read Error %d! : %s\n", errno, errno_str());
++    free(board_data);
+     close(fd);
+     return COMMAND_ERROR;
+   }
+@@ -284,6 +285,7 @@ static int command_boardinfo_show(int argc, char *argv[])
+   if ( (n_read = read(fd, (char *)board_data, sizeof(c2krv340))) < 0 )
+   {
+     printf("Read Error %d! : %s\n", errno, errno_str());
++    free(board_data);
+     close(fd);
+     return COMMAND_ERROR;
+   }
+-- 
+2.7.4
+

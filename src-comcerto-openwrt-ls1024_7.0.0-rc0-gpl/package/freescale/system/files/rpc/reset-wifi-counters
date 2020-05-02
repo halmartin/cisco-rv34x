@@ -1,0 +1,76 @@
+#!/bin/sh
+
+`/usr/bin/sendOpsdbSignal.sh SIGHUP`
+
+board="$(/usr/bin/board_check.sh)"
+
+if [ "$board" = "RV340W" ];then
+	WLAN1="wl0"
+	WLAN2="wl1"
+
+	BSS_MAX=4
+
+	vap_idx=0
+
+	cd /sys/class/net
+
+	while [ $vap_idx -lt $BSS_MAX ]; do
+		[ $vap_idx -eq 0 ] && {
+			VAP1_IFNAME="${WLAN1}"
+			VAP2_IFNAME="${WLAN2}"
+		} || {
+			VAP1_IFNAME="${WLAN1}.${vap_idx}"
+			VAP2_IFNAME="${WLAN2}.${vap_idx}"
+		}
+
+		vap_idx=$(( $vap_idx + 1 ))
+
+		[ -e ${VAP1_IFNAME} ] && {
+			wl -i "$VAP1_IFNAME" reset_cnts
+			drop_stats=`cat /proc/net/dev | awk '{if ($1 == "'${VAP1_IFNAME}:'") {print $5,$13}}'`
+			echo "$drop_stats" > /tmp/VAP1_${vap_idx}.drop
+		}
+		[ -e ${VAP2_IFNAME} ] && {
+			wl -i "$VAP2_IFNAME" reset_cnts
+			drop_stats=`cat /proc/net/dev | awk '{if ($1 == "'${VAP2_IFNAME}:'") {print $5,$13}}'`
+			echo "$drop_stats" > /tmp/VAP2_${vap_idx}.drop
+		}
+	done
+else 
+	if [ "$board" = "RV160W" ];then
+		WLAN0="wl1"
+		WLAN1="wl0"
+	else
+		WLAN0="wl0"
+		WLAN1="wl1"
+	fi
+
+	BSS_MAX=4
+
+	vap_idx=0
+
+	cd /sys/class/net
+
+	while [ $vap_idx -lt $BSS_MAX ]; do
+		[ $vap_idx -eq 0 ] && {
+			VAP0_IFNAME="${WLAN0}"
+			VAP1_IFNAME="${WLAN1}"
+		} || {
+			VAP0_IFNAME="${WLAN0}.${vap_idx}"
+			VAP1_IFNAME="${WLAN1}.${vap_idx}"
+		}
+
+		vap_idx=$(( $vap_idx + 1 ))
+
+		[ -e ${VAP0_IFNAME} ] && {
+			wl -i "$VAP0_IFNAME" reset_cnts
+			drop_stats=`cat /proc/net/dev | awk '{if ($1 == "'${VAP0_IFNAME}:'") {print $5,$13}}'`
+			echo "$drop_stats" > /tmp/VAP0_${vap_idx}.drop
+		}
+		[ -e ${VAP1_IFNAME} ] && {
+			wl -i "$VAP1_IFNAME" reset_cnts
+			drop_stats=`cat /proc/net/dev | awk '{if ($1 == "'${VAP1_IFNAME}:'") {print $5,$13}}'`
+			echo "$drop_stats" > /tmp/VAP1_${vap_idx}.drop
+		}
+	done
+fi

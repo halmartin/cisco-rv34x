@@ -1,0 +1,4082 @@
+config groups "groups"
+	list group "1"
+	list group "2"
+	list group "3"
+	list group "4"
+	list group "5"
+	list group "6"
+	list group "7"
+	list group "8"
+
+config group
+	option id "1"
+	option name "Adult/Mature Content"
+	list category "11"
+	list category "18"
+	list category "19"
+	list category "27"
+	list category "43"
+	list category "62"
+
+config group
+	option id "2"
+	option name "Business/Investment"
+	list category "1"
+	list category "2"
+	list category "3"
+	list category "4"
+	list category "5"
+	list category "6"
+	list category "7"
+	list category "16"
+	list category "17"
+	list category "23"
+	list category "29"
+	list category "52"
+	list category "63"
+
+config group
+	option id "3"
+	option name "Entertainment"
+	list category "9"
+	list category "12"
+	list category "21"
+	list category "34"
+	list category "38"
+	list category "42"
+	list category "60"
+	list category "79"
+	list category "80"
+
+config group
+	option id "4"
+	option name "Illegal/Questionable"
+	list category "8"
+	list category "10"
+	list category "31"
+	list category "32"
+	list category "36"
+	list category "37"
+	list category "44"
+	list category "46"
+	list category "48"
+	list category "53"
+	list category "54"
+	list category "64"
+	list category "68"
+	list category "76"
+
+config group
+	option id "5"
+	option name "IT Resources"
+	list category "25"
+	list category "30"
+	list category "47"
+	list category "55"
+	list category "66"
+	list category "82"
+
+config group
+	option id "6"
+	option name "Lifestyle/Culture"
+	list category "13"
+	list category "14"
+	list category "20"
+	list category "22"
+	list category "24"
+	list category "26"
+	list category "35"
+	list category "39"
+	list category "40"
+	list category "41"
+	list category "45"
+	list category "61"
+	list category "69"
+	list category "81"
+	list category "83"
+
+config group
+	option id "7"
+	option name "Other"
+	list category "50"
+	list category "51"
+	list category "65"
+	list category "74"
+	list category "75"
+	list category "78"
+
+config group
+	option id "8"
+	option name "Security"
+	list category "15"
+	list category "28"
+	list category "33"
+	list category "49"
+	list category "56"
+	list category "57"
+	list category "58"
+	list category "59"
+	list category "67"
+	list category "71"
+	list category "73"
+
+config category
+	option parent "2"
+	option id "1"
+	option name "Real Estate"
+	option description "Information on renting, buying, or selling real estate or properties."
+	list application "-1"
+	list application "3319"
+
+config category
+	option parent "2"
+	option id "2"
+	option name "Computer and Internet Security"
+	option description "Computer/Internet security, security discussion groups."
+	list application "-1"
+	list application "1594"
+	list application "209"
+	list application "2895"
+	list application "3182"
+	list application "3184"
+	list application "3187"
+	list application "3188"
+	list application "3190"
+	list application "3318"
+	list application "3343"
+	list application "3350"
+	list application "3352"
+	list application "3356"
+	list application "3357"
+	list application "3369"
+	list application "3376"
+	list application "3464"
+
+config category
+	option parent "2"
+	option id "3"
+	option name "Financial Services"
+	option description "Banking services and other types of financial information, such as loans, accountancy, actuaries, banks, mortgages, and general insurance companies."
+
+config category
+	option parent "2"
+	option id "4"
+	option name "Business and Economy"
+	option description "Business firms, corporate websites, business information, economics, marketing, management, and entrepreneurship."
+	list application "-1"
+	list application "3303"
+
+config category
+	option parent "2"
+	option id "5"
+	option name "Computer and Internet Info"
+	option description "General computer and Internet sites, technical information. SaaS sites and other URLs that deliver internet services."
+	list application "-1"
+	list application "1066"
+	list application "1276"
+	list application "130"
+	list application "1421"
+	list application "1605"
+	list application "166"
+	list application "170"
+	list application "1842"
+	list application "2018"
+	list application "2224"
+	list application "2381"
+	list application "2462"
+	list application "2940"
+	list application "3208"
+	list application "3217"
+	list application "3220"
+	list application "3238"
+	list application "660"
+	list application "72"
+	list application "903"
+	list application "953"
+
+config category
+	option parent "2"
+	option id "6"
+	option name "Auctions"
+	option description "Sites that support the offering and purchasing of goods between individuals as their main purpose. Does not include classified advertisements."
+	list application "-1"
+	list application "711"
+
+config category
+	option parent "2"
+	option id "7"
+	option name "Shopping"
+	option description "Department stores, retail stores, company catalogs and other sites that allow online consumer or business shopping and the purchase of goods and services."
+	list application "-1"
+	list application "131"
+	list application "2535"
+	list application "3195"
+	list application "3215"
+	list application "3246"
+	list application "3258"
+	list application "3265"
+	list application "3267"
+	list application "3269"
+	list application "3274"
+	list application "3276"
+	list application "3282"
+	list application "3304"
+	list application "3324"
+	list application "3327"
+	list application "3329"
+	list application "3330"
+	list application "3331"
+	list application "3334"
+	list application "3335"
+	list application "3346"
+	list application "3347"
+	list application "3348"
+	list application "3351"
+	list application "3353"
+	list application "3355"
+	list application "3375"
+	list application "3430"
+	list application "3432"
+	list application "3443"
+	list application "3444"
+	list application "3468"
+	list application "3522"
+	list application "3524"
+	list application "4118"
+
+config category
+	option parent "4"
+	option id "8"
+	option name "Cult and Occult"
+	option description "Methods, means of instruction, or other resources to interpret, affect or influence real events through the use of astrology, spells, curses, magic powers, satanic or supernatural beings. Includes horoscope sites."
+	list application "-1"
+	list application "3363"
+
+config category
+	option parent "3"
+	option id "9"
+	option name "Travel"
+	option description "Airlines and flight-booking agencies. Travel planning, reservations, vehicle rentals, descriptions of travel destinations, or promotions for hotels or casinos."
+	list application "-1"
+	list application "3245"
+	list application "3247"
+	list application "3300"
+	list application "3309"
+	list application "3325"
+	list application "3461"
+	list application "3463"
+	list application "4173"
+
+config category
+	option parent "4"
+	option id "10"
+	option name "Abused Drugs"
+	option description "Discussion or remedies for illegal, illicit, or abused drugs."
+
+config category
+	option parent "1"
+	option id "11"
+	option name "Adult and Pornography"
+	option description "Sexually explicit material and service for the purpose of arousing a sexual or prurient interest. Online groups, including newsgroups and forums, that are sexually explicit in nature."
+
+config category
+	option parent "3"
+	option id "12"
+	option name "Home and Garden"
+	option description "Home issues and products, including maintenance, home safety, decor, cooking, gardening, home electronics, design, etc."
+
+config category
+	option parent "6"
+	option id "13"
+	option name "Military"
+	option description "Information on military branches, armed services, and military history."
+
+config category
+	option parent "6"
+	option id "14"
+	option name "Social Network"
+	option description "These are social networking sites that have user communities where users interact, post messages, pictures, and otherwise communicate."
+	list application "-1"
+	list application "1073"
+	list application "1275"
+	list application "1765"
+	list application "1848"
+	list application "1972"
+	list application "2124"
+	list application "228"
+	list application "2343"
+	list application "2519"
+	list application "2560"
+	list application "2697"
+	list application "2735"
+	list application "2877"
+	list application "2923"
+	list application "3171"
+	list application "3228"
+	list application "3232"
+	list application "3273"
+	list application "3287"
+	list application "3288"
+	list application "3290"
+	list application "3294"
+	list application "3295"
+	list application "3305"
+	list application "3307"
+	list application "3328"
+	list application "3361"
+	list application "3371"
+	list application "3388"
+	list application "3424"
+	list application "3451"
+	list application "3466"
+	list application "574"
+	list application "789"
+	list application "875"
+
+config category
+	option parent "8"
+	option id "15"
+	option name "Dead Sites (db Ops only)"
+	option description "Dead sites that do not respond to http queries."
+
+config category
+	option parent "2"
+	option id "16"
+	option name "Stock Advice and Tools"
+	option description "Promotion and facilitation of securities trading and management of investment assets. Also includes information on financial investment strategies, quotes, and news."
+
+config category
+	option parent "2"
+	option id "17"
+	option name "Training and Tools"
+	option description "Distance education and trade schools, online courses, vocational training, software training, skills training."
+
+config category
+	option parent "1"
+	option id "18"
+	option name "Dating"
+	option description "Dating websites focused on establishing personal relationships."
+	list application "-1"
+	list application "1855"
+	list application "3229"
+	list application "3286"
+	list application "3292"
+	list application "3293"
+	list application "3312"
+	list application "3314"
+	list application "3366"
+	list application "3446"
+
+config category
+	option parent "1"
+	option id "19"
+	option name "Sex Education"
+	option description "Information on reproduction, sexual development, safe sex practices, sexually transmitted diseases, sexuality, birth control and sexual development."
+
+config category
+	option parent "6"
+	option id "20"
+	option name "Religion"
+	option description "Conventional or unconventional religious or quasi-religious subjects."
+
+config category
+	option parent "3"
+	option id "21"
+	option name "Entertainment and Arts"
+	option description "Motion pictures, videos, television, music, performing arts, books, comics, movie theatres, galleries, artists or reviews on entertainment, museums, artist sites."
+	list application "-1"
+	list application "3198"
+	list application "3257"
+	list application "3299"
+	list application "3360"
+	list application "3391"
+	list application "3429"
+
+config category
+	option parent "6"
+	option id "22"
+	option name "Personal sites and Blogs"
+	option description "Personal websites posted by individuals or groups, as well as blogs."
+
+config category
+	option parent "2"
+	option id "23"
+	option name "Legal"
+	option description "Legal websites, law firms, discussions and analysis of legal issues."
+
+config category
+	option parent "6"
+	option id "24"
+	option name "Local Information"
+	option description "City guides and tourist information, including restaurants, area/regional information, and local points of interest."
+	list application "-1"
+	list application "3254"
+	list application "3272"
+	list application "3338"
+	list application "3385"
+	list application "3459"
+
+config category
+	option parent "5"
+	option id "25"
+	option name "Streaming Media"
+	option description "Sales, delivery, or streaming of audio or video content, including sites that provide downloads for such viewers."
+	list application "-1"
+	list application "1078"
+	list application "1132"
+	list application "1184"
+	list application "1216"
+	list application "128"
+	list application "1293"
+	list application "1400"
+	list application "1420"
+	list application "1436"
+	list application "1458"
+	list application "1520"
+	list application "167"
+	list application "168"
+	list application "1680"
+	list application "1681"
+	list application "1796"
+	list application "1913"
+	list application "2198"
+	list application "2320"
+	list application "2342"
+	list application "2380"
+	list application "239"
+	list application "2409"
+	list application "2426"
+	list application "2445"
+	list application "248"
+	list application "2548"
+	list application "2897"
+	list application "2898"
+	list application "293"
+	list application "3109"
+	list application "3122"
+	list application "3178"
+	list application "3196"
+	list application "3199"
+	list application "3200"
+	list application "3201"
+	list application "3206"
+	list application "3214"
+	list application "3222"
+	list application "3275"
+	list application "3278"
+	list application "3285"
+	list application "3291"
+	list application "3301"
+	list application "3308"
+	list application "3313"
+	list application "3315"
+	list application "3317"
+	list application "3390"
+	list application "3392"
+	list application "3395"
+	list application "3396"
+	list application "3408"
+	list application "3411"
+	list application "3413"
+	list application "3426"
+	list application "3456"
+	list application "43"
+	list application "472"
+	list application "582"
+	list application "673"
+	list application "871"
+	list application "975"
+
+config category
+	option parent "6"
+	option id "26"
+	option name "Job Search"
+	option description "Assistance in finding employment, and tools for locating prospective employers, or employers looking for employees."
+
+config category
+	option parent "1"
+	option id "27"
+	option name "Gambling"
+	option description "Gambling or lottery web sites that invite the use of real or virtual money."
+	list application "-1"
+	list application "3259"
+	list application "3377"
+
+config category
+	option parent "8"
+	option id "28"
+	option name "Translation"
+	option description "Language translation sites that allow users to see URL pages in other languages. Some of these sites can allow users to circumvent filtering as the target page's content is presented within the context of the translator's URL."
+
+config category
+	option parent "2"
+	option id "29"
+	option name "Reference and Research"
+	option description "Personal, professional, or educational reference material, including online dictionaries, maps, census, almanacs, library catalogs, genealogy, and scientific information."
+	list application "-1"
+	list application "1071"
+	list application "129"
+	list application "171"
+	list application "2246"
+	list application "232"
+	list application "3235"
+	list application "3249"
+	list application "3289"
+	list application "3741"
+
+config category
+	option parent "5"
+	option id "30"
+	option name "Shareware and Freeware"
+	option description "Software, screensavers, icons, wallpapers, utilities, ringtones. Includes downloads that request a donation, and open source projects."
+	list application "-1"
+	list application "1072"
+	list application "1476"
+	list application "165"
+	list application "2906"
+	list application "2911"
+	list application "3336"
+	list application "3337"
+
+config category
+	option parent "4"
+	option id "31"
+	option name "Peer to Peer"
+	option description "Peer to peer clients and access. Includes torrents, music download programs."
+	list application "-1"
+	list application "2598"
+	list application "315"
+	list application "741"
+
+config category
+	option parent "4"
+	option id "32"
+	option name "Marijuana"
+	option description "Marijuana use, cultivation, history, culture, legal issues."
+
+config category
+	option parent "8"
+	option id "33"
+	option name "Hacking"
+	option description "Illegal or questionable access to or the use of communications equipment/software. Development and distribution of programs that may allow compromise of networks and systems."
+	list application "-1"
+	list application "1499"
+	list application "2147"
+	list application "2546"
+	list application "2753"
+
+config category
+	option parent "3"
+	option id "34"
+	option name "Games"
+	option description "Video games, computer games, electronic games, online sweepstakes, board games and fantasy sports."
+	list application "-1"
+	list application "1442"
+	list application "1451"
+	list application "1470"
+	list application "1617"
+	list application "1888"
+	list application "2075"
+	list application "2109"
+	list application "2249"
+	list application "241"
+	list application "2456"
+	list application "2459"
+	list application "2464"
+	list application "254"
+	list application "2544"
+	list application "255"
+	list application "263"
+	list application "2636"
+	list application "2714"
+	list application "2915"
+	list application "2927"
+	list application "294"
+	list application "3011"
+	list application "3012"
+	list application "3013"
+	list application "3034"
+	list application "3057"
+	list application "307"
+	list application "3197"
+	list application "3203"
+	list application "3211"
+	list application "3213"
+	list application "3224"
+	list application "3225"
+	list application "3226"
+	list application "3227"
+	list application "3236"
+	list application "3237"
+	list application "3239"
+	list application "3240"
+	list application "3242"
+	list application "3243"
+	list application "3244"
+	list application "3248"
+	list application "3250"
+	list application "3251"
+	list application "3253"
+	list application "3255"
+	list application "3262"
+	list application "3263"
+	list application "3297"
+	list application "3310"
+	list application "3316"
+	list application "3349"
+	list application "3358"
+	list application "3365"
+	list application "3374"
+	list application "3378"
+	list application "3380"
+	list application "3381"
+	list application "3387"
+	list application "3397"
+	list application "3398"
+	list application "3403"
+	list application "3412"
+	list application "3415"
+	list application "3419"
+	list application "3427"
+	list application "3428"
+	list application "3431"
+	list application "3433"
+	list application "3434"
+	list application "3435"
+	list application "3436"
+	list application "3440"
+	list application "3441"
+	list application "3445"
+	list application "3447"
+	list application "3449"
+	list application "3450"
+	list application "3452"
+	list application "3453"
+	list application "3454"
+	list application "3457"
+	list application "3458"
+	list application "3460"
+	list application "3474"
+	list application "3550"
+	list application "3815"
+	list application "3817"
+	list application "3820"
+	list application "3821"
+	list application "3822"
+	list application "3834"
+	list application "3853"
+	list application "3863"
+	list application "3864"
+	list application "3868"
+	list application "3869"
+	list application "3872"
+	list application "3874"
+	list application "3875"
+	list application "3879"
+	list application "3880"
+	list application "3881"
+	list application "3893"
+	list application "3978"
+	list application "3984"
+	list application "3985"
+	list application "4011"
+	list application "410"
+	list application "417"
+	list application "4177"
+	list application "541"
+	list application "634"
+	list application "671"
+	list application "703"
+
+config category
+	option parent "6"
+	option id "35"
+	option name "Philosophy and Political Advocacy"
+	option description "Politics, philosophy, discussions, promotion of a particular viewpoint or stance in order to further a cause."
+
+config category
+	option parent "4"
+	option id "36"
+	option name "Weapons"
+	option description "Sales, reviews, or descriptions of weapons such as guns, knives or martial arts devices, or provide information on their use, accessories, or other modifications."
+
+config category
+	option parent "4"
+	option id "37"
+	option name "Pay to Surf"
+	option description "Sites that pay users in the form of cash or prizes, for clicking on or reading specific links, email, or web pages."
+
+config category
+	option parent "3"
+	option id "38"
+	option name "Hunting and Fishing"
+	option description "Sport hunting, gun clubs, and fishing."
+
+config category
+	option parent "6"
+	option id "39"
+	option name "Society"
+	option description "A variety of topics, groups, and associations relevant to the general populace, broad issues that impact a variety of people, including safety, children, societies, and philanthropic groups."
+	list application "-1"
+	list application "3302"
+
+config category
+	option parent "6"
+	option id "40"
+	option name "Educational Institutions"
+	option description "Pre-school, elementary, secondary, high school, college, university, and vocational school and other educational content and information,including enrollment, tuition, and syllabus."
+
+config category
+	option parent "6"
+	option id "41"
+	option name "Online Greeting cards"
+	option description "Online Greeting card websites."
+
+config category
+	option parent "3"
+	option id "42"
+	option name "Sports"
+	option description "Team or conference web sites, scores and schedules; sports-related online magazines or newsletters, fantasy sports and virtual sports leagues."
+	list application "-1"
+	list application "1630"
+	list application "1782"
+	list application "3296"
+	list application "3344"
+	list application "3367"
+	list application "3383"
+	list application "3467"
+
+config category
+	option parent "1"
+	option id "43"
+	option name "Swimsuits and Intimate Apparel"
+	option description "Swimsuits, intimate apparel or other types of suggestive clothing."
+
+config category
+	option parent "4"
+	option id "44"
+	option name "Questionable"
+	option description "Tasteless humor,  sites, and sites that manipulate the browser user experience or client in some unusual, unexpected, or suspicious manner."
+
+config category
+	option parent "6"
+	option id "45"
+	option name "Kids"
+	option description "Sites designed specifically for children and teenagers."
+
+config category
+	option parent "4"
+	option id "46"
+	option name "Hate and Racism"
+	option description "Sites that support content and languages or hate crime and racism such as Nazi, neo-Nazi, Ku Klux Klan, etc."
+
+config category
+	option parent "5"
+	option id "47"
+	option name "File Hosting / Storage"
+	option description "Online storage and posting of files, music, pictures, and other data. (This is also known as .)"
+	list application "-1"
+	list application "1064"
+	list application "1067"
+	list application "1562"
+	list application "1573"
+	list application "1601"
+	list application "1603"
+	list application "1798"
+	list application "236"
+	list application "3079"
+	list application "3204"
+	list application "3218"
+	list application "3241"
+	list application "3256"
+	list application "3266"
+	list application "3439"
+	list application "3448"
+	list application "371"
+	list application "49"
+	list application "572"
+	list application "684"
+	list application "74"
+	list application "786"
+
+config category
+	option parent "4"
+	option id "48"
+	option name "Violence"
+	option description "Sites that advocate violence, depictions, and methods, including game/comic violence and suicide."
+
+config category
+	option parent "8"
+	option id "49"
+	option name "Keyloggers and Monitoring"
+	option description "Downloads and discussion of software agents that track a user's keystrokes or monitor their web surfing habits."
+
+config category
+	option parent "7"
+	option id "50"
+	option name "Search Engines"
+	option description "Search interfaces using key words or phrases. Returned results may include text, websites, images, videos, and files."
+	list application "-1"
+	list application "1062"
+	list application "242"
+	list application "297"
+	list application "3078"
+
+config category
+	option parent "7"
+	option id "51"
+	option name "Internet Portals"
+	option description "Web sites that aggregate a broader set of Internet content and topics, and which typically serve as the starting point for an end user."
+	list application "-1"
+	list application "1075"
+	list application "2345"
+	list application "2410"
+	list application "2557"
+	list application "3181"
+	list application "3191"
+	list application "3372"
+
+config category
+	option parent "2"
+	option id "52"
+	option name "Web Advertisements"
+	option description "Advertisements, media, content, and banners."
+	list application "-1"
+	list application "81"
+
+config category
+	option parent "4"
+	option id "53"
+	option name "Cheating"
+	option description "Sites that support cheating and contain such materials, including free essays, exam copies, plagiarism, etc."
+
+config category
+	option parent "4"
+	option id "54"
+	option name "Gross"
+	option description "Vomit and other bodily functions, bloody clothing, etc."
+
+config category
+	option parent "5"
+	option id "55"
+	option name "Web based email"
+	option description "Sites offering web-based email and email clients."
+	list application "-1"
+	list application "1070"
+	list application "1074"
+	list application "1602"
+	list application "2408"
+	list application "3189"
+
+config category
+	option parent "8"
+	option id "56"
+	option name "Malware Sites"
+	option description "Malicious content including executables, drive-by infection sites, malicious scripts, viruses, trojans, and code."
+
+config category
+	option parent "8"
+	option id "57"
+	option name "Phishing and Other Frauds"
+	option description "Phishing, pharming, and other sites that pose as a reputable site, usually to harvest personal information from a user."
+
+config category
+	option parent "8"
+	option id "58"
+	option name "Proxy Avoid and Anonymizers"
+	option description "Proxy servers and other methods to gain access to URLs in any way that bypasses URL filtering or monitoring. Web-based translation sites that circumvent filtering."
+	list application "-1"
+	list application "1143"
+	list application "1151"
+	list application "1173"
+	list application "1427"
+	list application "1500"
+	list application "2076"
+	list application "2631"
+	list application "3221"
+
+config category
+	option parent "8"
+	option id "59"
+	option name "Spyware and Adware"
+	option description "Spyware or Adware sites that provide or promote information gathering or tracking that is unknown to, or without the explicit consent of, the end user."
+
+config category
+	option parent "3"
+	option id "60"
+	option name "Music"
+	option description "Music sales, distribution, streaming, information on musical groups and performances, lyrics, and the music business."
+
+config category
+	option parent "6"
+	option id "61"
+	option name "Government"
+	option description "Information on government, government agencies and government services. Also includes sites that discuss or explain laws of various governmental entities."
+
+config category
+	option parent "1"
+	option id "62"
+	option name "Nudity"
+	option description "Nude or seminude depictions of the human body (These depictions are not necessarily sexual in intent or effect, but may include sites containing nude materials.)"
+
+config category
+	option parent "2"
+	option id "63"
+	option name "News and Media"
+	option description "Current events or contemporary issues of the day provided in the mass media."
+	list application "-1"
+	list application "3219"
+	list application "3233"
+	list application "3252"
+	list application "3260"
+	list application "3264"
+	list application "3268"
+	list application "3270"
+	list application "3271"
+	list application "3280"
+	list application "3283"
+	list application "3298"
+	list application "3306"
+	list application "3320"
+	list application "3321"
+	list application "3322"
+	list application "3326"
+	list application "3332"
+	list application "3333"
+	list application "3339"
+	list application "3340"
+	list application "3354"
+	list application "3359"
+	list application "3362"
+	list application "3368"
+	list application "3373"
+	list application "3393"
+	list application "3399"
+	list application "3400"
+	list application "3401"
+	list application "3402"
+	list application "3404"
+	list application "3405"
+	list application "3406"
+	list application "3442"
+	list application "3465"
+	list application "4166"
+	list application "4170"
+	list application "4175"
+	list application "4178"
+	list application "4179"
+	list application "4181"
+	list application "512"
+
+config category
+	option parent "4"
+	option id "64"
+	option name "Illegal"
+	option description "Criminal activity, how not to get caught, copyright and intellectual property violations, etc."
+
+config category
+	option parent "7"
+	option id "65"
+	option name "Content Delivery Networks"
+	option description "Delivery of content and data for third parties, including ads, media, files, images, and video."
+	list application "-1"
+	list application "103"
+	list application "303"
+	list application "94"
+
+config category
+	option parent "5"
+	option id "66"
+	option name "Internet Communications"
+	option description "Internet telephony, messaging, VoIP services and related businesses."
+	list application "-1"
+	list application "1069"
+	list application "1208"
+	list application "1363"
+	list application "1386"
+	list application "1467"
+	list application "2114"
+	list application "219"
+	list application "2357"
+	list application "2359"
+	list application "2532"
+	list application "2802"
+	list application "2959"
+	list application "2972"
+	list application "3071"
+	list application "3179"
+	list application "3180"
+	list application "3193"
+	list application "3207"
+	list application "3216"
+	list application "3234"
+	list application "3277"
+	list application "3311"
+	list application "3382"
+	list application "3389"
+	list application "3407"
+	list application "3410"
+	list application "3414"
+	list application "3416"
+	list application "3417"
+	list application "3420"
+	list application "3422"
+	list application "3423"
+	list application "3972"
+	list application "794"
+	list application "88"
+	list application "934"
+
+config category
+	option parent "8"
+	option id "67"
+	option name "Bot Nets"
+	option description "URLs, typically IP addresses, which are determined to be part of a Bot network, from which network attacks are launched."
+
+config category
+	option parent "4"
+	option id "68"
+	option name "Abortion"
+	option description "Abortion topics, either pro-life or pro-choice."
+
+config category
+	option parent "6"
+	option id "69"
+	option name "Health and Medicine"
+	option description "General health, fitness, and well-being topics. Medical information, hospitals and doctor offices. Medical insurance. Cosmetic surgery."
+
+config category
+	option parent "8"
+	option id "71"
+	option name "SPAM URLs"
+	option description "Sites that are repsonsible for generating SPAM."
+
+config category
+	option parent "8"
+	option id "73"
+	option name "Open HTTP Proxies"
+	option description "Proxies accessible by anyone on Internet."
+
+config category
+	option parent "7"
+	option id "74"
+	option name "Dynamically Generated Content"
+	option description "Domains that generate content dynamically based on arguments to their URL or other information (like geo-location) on the incoming web request."
+
+config category
+	option parent "7"
+	option id "75"
+	option name "Parked Domains"
+	option description "URL's which host limited content or click-through ads which may generate revenue for hosting entities, but generally do not contain content useful to the end-user."
+
+config category
+	option parent "4"
+	option id "76"
+	option name "Alcohol and Tobacco"
+	option description "Sites that provide information on, promote, or support the sale of alcoholic beverages or tobacco products and associated paraphernalia."
+
+config category
+	option parent "7"
+	option id "78"
+	option name "Image and Video Search"
+	option description "Photo and image searches, online photo albums/digital photo exchange, image hosting."
+
+config category
+	option parent "3"
+	option id "79"
+	option name "Fashion and Beauty"
+	option description "Fashion or glamour magazines, beauty, clothes, cosmetics, style."
+
+config category
+	option parent "3"
+	option id "80"
+	option name "Recreation and Hobbies"
+	option description "Information on recreational pastimes such as collecting, models, outdoor activities, specific arts, craft, or techniques; animal and pet-related information."
+
+config category
+	option parent "6"
+	option id "81"
+	option name "Motor Vehicles"
+	option description "Vehical reviews, purchasing or sales tips, parts and catalogs. Auto trading, photos, discussion of motorcycles, boats, cars, trucks and RVs. Journals and magazines on vehicle modifications."
+	list application "-1"
+	list application "3284"
+	list application "3323"
+	list application "3379"
+
+config category
+	option parent "5"
+	option id "82"
+	option name "Web Hosting Sites"
+	option description "Free or paid hosting services for web pages and information concerning their development, publication and promotion."
+
+config category
+	option parent "6"
+	option id "83"
+	option name "Food and Dining"
+	option description "Information on food, restaurants and cooking."
+
+config application
+	option id "-1"
+	option name "ANY"
+	list behaviour "-1"
+
+config application
+	option id "43"
+	option name "56.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "49"
+	option name "iCloud"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "72"
+	option name "Adobe Flash Player Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "74"
+	option name "Adrive"
+	list behaviour "-1"
+	list behaviour "1"
+
+config application
+	option id "81"
+	option name "Advertisement"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "88"
+	option name "AIM"
+	list behaviour "-1"
+	list behaviour "1"
+
+config application
+	option id "94"
+	option name "Akamai CDN"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "103"
+	option name "Ali CDN"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "128"
+	option name "Amazon Instant Video"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "129"
+	option name "Amazon Kindle Reader"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "130"
+	option name "Amazon Web Services"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "131"
+	option name "Amazon Shopping"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "165"
+	option name "Apple App/iTunes Store"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "166"
+	option name "Apple iOS Software Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "167"
+	option name "Apple iTunes Movies/TV Shows"
+	list behaviour "-1"
+	list behaviour "5"
+
+config application
+	option id "168"
+	option name "Apple iTunes Music"
+	list behaviour "-1"
+	list behaviour "4"
+
+config application
+	option id "170"
+	option name "Apple Macbook Software Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "171"
+	option name "Apple Maps"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "209"
+	option name "Avira Antivirus Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "219"
+	option name "Gadu-Gadu"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "228"
+	option name "Badoo"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "232"
+	option name "Baidu Map"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "236"
+	option name "Baidu Pan"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "239"
+	option name "Baidu Video"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "241"
+	option name "Baidu Youxi"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "242"
+	option name "Baidu.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "248"
+	option name "Baofeng Video"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "254"
+	option name "Battle.net"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "255"
+	option name "BattleField"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "263"
+	option name "Beanfun"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "293"
+	option name "Bild"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "294"
+	option name "Heros of the Storm"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "297"
+	option name "Bing"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "303"
+	option name "google apis"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "307"
+	option name "Clash Royale"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "315"
+	option name "BitTorrent Protocol"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "371"
+	option name "Box.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "410"
+	option name "Call of Duty"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "417"
+	option name "Candy Crush"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "472"
+	option name "CinemaNow"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "512"
+	option name "CNN"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "541"
+	option name "Counter Strike Online"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "572"
+	option name "Tencent MyApp"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "574"
+	option name "Machi"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "582"
+	option name "DailyMotion"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "634"
+	option name "Diablo 3"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "660"
+	option name "DNS"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "671"
+	option name "Dota2"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "673"
+	option name "Douban"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "684"
+	option name "DropBox"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "703"
+	option name "EA Games"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "711"
+	option name "eBay"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "741"
+	option name "eMule"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "786"
+	option name "Synology Cloud Station"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "789"
+	option name "Facebook"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "794"
+	option name "Facetime"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "871"
+	option name "Flash Video"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "875"
+	option name "Flickr"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "903"
+	option name "Fortiguard Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "934"
+	option name "FreePP"
+	list behaviour "-1"
+	list behaviour "2"
+	list behaviour "22"
+
+config application
+	option id "953"
+	option name "FTP"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "975"
+	option name "Funshion"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1062"
+	option name "Google.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1064"
+	option name "ASUS WebStorage"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1066"
+	option name "Google Chrome Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1067"
+	option name "Google Drive"
+	list behaviour "-1"
+	list behaviour "3"
+
+config application
+	option id "1069"
+	option name "Google Hangouts"
+	list behaviour "-1"
+	list behaviour "4"
+
+config application
+	option id "1070"
+	option name "Google Mail"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1071"
+	option name "Google Maps"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1072"
+	option name "Google Play"
+	list behaviour "-1"
+	list behaviour "3"
+
+config application
+	option id "1073"
+	option name "Google Plus"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1074"
+	option name "Rediff Mail"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1075"
+	option name "Rediff.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1078"
+	option name "Microsoft Media Server"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1132"
+	option name "HBO"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1143"
+	option name "Hide My Ass"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1151"
+	option name "Hola"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1173"
+	option name "HotSpot"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1184"
+	option name "Hulu"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1208"
+	option name "ICQ"
+	list behaviour "-1"
+	list behaviour "25"
+	list behaviour "4"
+
+config application
+	option id "1216"
+	option name "Ifeng Video"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1275"
+	option name "Instagram"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1276"
+	option name "Apple Location Services"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1293"
+	option name "iQIYI"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1363"
+	option name "KakaoTalk"
+	list behaviour "-1"
+	list behaviour "2"
+	list behaviour "22"
+
+config application
+	option id "1386"
+	option name "Kik Messenger"
+	list behaviour "-1"
+	list behaviour "1"
+	list behaviour "3"
+
+config application
+	option id "1400"
+	option name "KKBOX"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1420"
+	option name "Ku6"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1421"
+	option name "Apple Push Services"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1427"
+	option name "L2TP"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1436"
+	option name "Last FM"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1442"
+	option name "League of Legends"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1451"
+	option name "Lequ.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1458"
+	option name "Letv"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1467"
+	option name "LINE"
+	list behaviour "-1"
+	list behaviour "1"
+	list behaviour "3"
+	list behaviour "4"
+	list behaviour "9"
+
+config application
+	option id "1470"
+	option name "Lineage"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1476"
+	option name "Linux Yum"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1499"
+	option name "LogMeIn"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1500"
+	option name "LogMeIn Hamachi"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1520"
+	option name "1905.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1562"
+	option name "MediaFire"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1573"
+	option name "MEGA"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1594"
+	option name "Metasploit Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1601"
+	option name "Microsoft Office Apps"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1602"
+	option name "Outlook.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1603"
+	option name "Microsoft OneDrive"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1605"
+	option name "Microsoft Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1617"
+	option name "Minecraft"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1630"
+	option name "MLB.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1680"
+	option name "MP4"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1681"
+	option name "MPEG-TS"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1765"
+	option name "MeetMe"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1782"
+	option name "NBA"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1796"
+	option name "Netflix"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1798"
+	option name "Netload"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1842"
+	option name "NTP"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1848"
+	option name "Odnoklassniki.ru"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1855"
+	option name "OkCupid"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1888"
+	option name "Origin"
+	list behaviour "-1"
+	list behaviour "1"
+
+config application
+	option id "1913"
+	option name "Pandora"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "1972"
+	option name "Pinterest"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2018"
+	option name "POP3"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2075"
+	option name "DoubleDown Casino"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2076"
+	option name "PPTP"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2109"
+	option name "QQ Game"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2114"
+	option name "QQ"
+	list behaviour "-1"
+	list behaviour "1"
+	list behaviour "22"
+	list behaviour "3"
+
+config application
+	option id "2124"
+	option name "Quora"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2147"
+	option name "RDP"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2198"
+	option name "RTMP"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2224"
+	option name "SAMBA"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2246"
+	option name "Scribd"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2249"
+	option name "sdo.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2320"
+	option name "SHOUTcast"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2342"
+	option name "Sina Video"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2343"
+	option name "Sina Weibo"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2345"
+	option name "Sina.com.cn"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2357"
+	option name "Skout"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2359"
+	option name "Skype"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2380"
+	option name "Smotri.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2381"
+	option name "SMTP"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2408"
+	option name "Sohu Mail"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2409"
+	option name "Sohu Video"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2410"
+	option name "Sohu.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2426"
+	option name "SoundCloud"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2445"
+	option name "Spotify"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2456"
+	option name "StarCraft II"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2459"
+	option name "StarWars"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2462"
+	option name "Statistics and Analytics"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2464"
+	option name "Steam"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2519"
+	option name "Tagged"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2532"
+	option name "Tango"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2535"
+	option name "Taobao/Tmall"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2544"
+	option name "Team Fortress2"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2546"
+	option name "TeamViewer"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2548"
+	option name "TED"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2557"
+	option name "Tencent"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2560"
+	option name "Tencent Weibo"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2598"
+	option name "Thunder Protocol"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2631"
+	option name "Tor"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2636"
+	option name "Tower of Saviors"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2697"
+	option name "Tumblr"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2714"
+	option name "Boom Beach"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2735"
+	option name "Twitter"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2753"
+	option name "UltraVNC"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2802"
+	option name "Viber"
+	list behaviour "-1"
+	list behaviour "1"
+	list behaviour "3"
+	list behaviour "4"
+
+config application
+	option id "2877"
+	option name "VK"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2895"
+	option name "vSphere Client"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2897"
+	option name "Vube"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2898"
+	option name "Vudu"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2906"
+	option name "Flashget"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2911"
+	option name "Wandoujia"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2915"
+	option name "Wargaming.net"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2923"
+	option name "Wattpad"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2927"
+	option name "Hay Day"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2940"
+	option name "WebEx Meetings"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "2959"
+	option name "WeChat"
+	list behaviour "-1"
+	list behaviour "22"
+	list behaviour "3"
+
+config application
+	option id "2972"
+	option name "WhatsApp"
+	list behaviour "-1"
+	list behaviour "1"
+	list behaviour "4"
+
+config application
+	option id "3011"
+	option name "World of Tanks"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3012"
+	option name "World of Warcraft"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3013"
+	option name "World of Warplanes"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3034"
+	option name "XBOX Live Connect"
+	list behaviour "-1"
+	list behaviour "1"
+
+config application
+	option id "3057"
+	option name "Apple Game Center Service"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3071"
+	option name "Yahoo Messenger"
+	list behaviour "-1"
+	list behaviour "1"
+
+config application
+	option id "3078"
+	option name "Yandex"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3079"
+	option name "Yandex Disk"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3109"
+	option name "Youku/Tudou"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3122"
+	option name "YouTube"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3171"
+	option name "Zoosk"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3178"
+	option name "Tencent Video"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3179"
+	option name "BeeTalk"
+	list behaviour "-1"
+	list behaviour "1"
+
+config application
+	option id "3180"
+	option name "BBM"
+	list behaviour "-1"
+	list behaviour "1"
+
+config application
+	option id "3181"
+	option name "Yahoo.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3182"
+	option name "Avast AntiVirus Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3184"
+	option name "Sophos AntiVirus Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3187"
+	option name "Bitdefender AntiVirus Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3188"
+	option name "TrendMicro AntiVirus Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3189"
+	option name "Yahoo Mail"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3190"
+	option name "CRL Maintaining Access"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3191"
+	option name "microsoft.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3193"
+	option name "Snapchat"
+	list behaviour "-1"
+	list behaviour "1"
+
+config application
+	option id "3195"
+	option name "JD.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3196"
+	option name "Real Time Media Flow Protocol"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3197"
+	option name "EA Games Downloader"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3198"
+	option name "Samsung Smart TV"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3199"
+	option name "Vevo"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3200"
+	option name "TuneIn"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3201"
+	option name "Telly"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3203"
+	option name "PlayStation Network"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3204"
+	option name "Firedrive"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3206"
+	option name "Streaming Video Advertisement"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3207"
+	option name "Juiker"
+	list behaviour "-1"
+	list behaviour "1"
+
+config application
+	option id "3208"
+	option name "HTTP-Download"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3211"
+	option name "Dark Avenger 2"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3213"
+	option name "Hit it Rich! Free Casino Slots"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3214"
+	option name "TV Drama"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3215"
+	option name "Rakuten.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3216"
+	option name "Ooma Voice"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3217"
+	option name "STUN"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3218"
+	option name "Zip Cloud"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3219"
+	option name "Apple Daily"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3220"
+	option name "SpeedTest"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3221"
+	option name "OpenVPN"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3222"
+	option name "Baidu Music"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3224"
+	option name "Clash of Clans"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3225"
+	option name "Game of War - Fire Age"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3226"
+	option name "Big Fish Casino"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3227"
+	option name "MARVEL Future Fight"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3228"
+	option name "Vine"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3229"
+	option name "Tinder"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3232"
+	option name "Dubsmash"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3233"
+	option name "Tapatalk"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3234"
+	option name "Taptalk"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3235"
+	option name "Wikipedia"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3236"
+	option name "MU Online"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3237"
+	option name "Kimi"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3238"
+	option name "Google Cloud Message"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3239"
+	option name "Quizduell"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3240"
+	option name "Slot Machines by IGG"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3241"
+	option name "4Shared"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3242"
+	option name "8 Ball Pool"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3243"
+	option name "Slots Forever"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3244"
+	option name "Summoners War"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3245"
+	option name "Urlaubspiraten"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3246"
+	option name "vente-privee Le Voyage"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3247"
+	option name "TripAdvisor"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3248"
+	option name "Invasion"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3249"
+	option name "Waze"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3250"
+	option name "LINE COOKIE RUN"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3251"
+	option name "Dark Of The Demons"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3252"
+	option name "Wetter.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3253"
+	option name "DoubleU Casino"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3254"
+	option name "Grab Taxi"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3255"
+	option name "LINE I Love Coffee"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3256"
+	option name "G Cloud Backup"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3257"
+	option name "VSCO Cam"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3258"
+	option name "Carousell"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3259"
+	option name "Live 4D Singapore"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3260"
+	option name "eBay Kleinanzeigen"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3262"
+	option name "iWin Online"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3263"
+	option name "Clash of Kings"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3264"
+	option name "Wetter Online"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3265"
+	option name "Shpock"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3266"
+	option name "Baidu ShouJiZhuShou"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3267"
+	option name "The gioi di dong"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3268"
+	option name "WarnWetter"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3269"
+	option name "Tokopedia Online Shopping Mall"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3270"
+	option name "The Economist"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3271"
+	option name "The Wall Street Journal"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3272"
+	option name "Yelp"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3273"
+	option name "Kiwi"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3274"
+	option name "Wish"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3275"
+	option name "TubeMate! HD"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3276"
+	option name "ZALORA"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3277"
+	option name "LINK"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3278"
+	option name "Tubidy"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3280"
+	option name "The Weather Channel"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3282"
+	option name "Gumtree"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3283"
+	option name "Detik"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3284"
+	option name "mobile.de"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3285"
+	option name "Deezer"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3286"
+	option name "LOVOO"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3287"
+	option name "Meez"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3288"
+	option name "Moco"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3289"
+	option name "QQ Map"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3290"
+	option name "Passfeed Lite"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3291"
+	option name "Tivi K+"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3292"
+	option name "Smax"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3293"
+	option name "NoonDate"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3294"
+	option name "Flipagram"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3295"
+	option name "Path"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3296"
+	option name "NASCAR"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3297"
+	option name "Star Wars Card Trader"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3298"
+	option name "NYTimes"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3299"
+	option name "Sing! Karaoke by Smule"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3300"
+	option name "Plane Finder"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3301"
+	option name "Shazam"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3302"
+	option name "Pocketmags"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3303"
+	option name "Invoice2go"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3304"
+	option name "ASOS"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3305"
+	option name "Twoo"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3306"
+	option name "The Weather Network"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3307"
+	option name "Viadeo"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3308"
+	option name "YouNow"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3309"
+	option name "Traveloka"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3310"
+	option name "LINE Rangers"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3311"
+	option name "ooVoo"
+	list behaviour "-1"
+	list behaviour "22"
+	list behaviour "6"
+
+config application
+	option id "3312"
+	option name "Anastasia Date"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3313"
+	option name "FIT Radio Workout Music"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3314"
+	option name "AsianDate"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3315"
+	option name "iKara"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3316"
+	option name "MonsterBusters"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3317"
+	option name "iHeartRadio"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3318"
+	option name "Norton Security"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3319"
+	option name "SpareRoom"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3320"
+	option name "RTL"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3321"
+	option name "Sanook"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3322"
+	option name "Kapook"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3323"
+	option name "AutoScout24"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3324"
+	option name "Geek"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3325"
+	option name "Airbnb"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3326"
+	option name "Webtretho"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3327"
+	option name "Lazada"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3328"
+	option name "ask.fm"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3329"
+	option name "Leboncoin"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3330"
+	option name "Mudah"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3331"
+	option name "OLX"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3332"
+	option name "The Washington Post"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3333"
+	option name "Vnexpress"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3334"
+	option name "Ibotta"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3335"
+	option name "Qoo10SG"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3336"
+	option name "Appvn"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3337"
+	option name "Assistant"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3338"
+	option name "DB Navigator"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3339"
+	option name "Liputan6"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3340"
+	option name "Kompas"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3343"
+	option name "ESET Security"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3344"
+	option name "Topps KICK 15"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3346"
+	option name "Walmart"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3347"
+	option name "Etsy"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3348"
+	option name "Bestbuy"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3349"
+	option name "Pirate Kings"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3350"
+	option name "McAfee Security Scan Plus"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3351"
+	option name "HomeDepot"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3352"
+	option name "Kaspersky Internet Security"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3353"
+	option name "Target"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3354"
+	option name "Daily Mail"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3355"
+	option name "Newegg"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3356"
+	option name "AVG AntiVirus"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3357"
+	option name "Malwarebytes Anti-Malware"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3358"
+	option name "Kongregate"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3359"
+	option name "The Guardian"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3360"
+	option name "DC Comics"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3361"
+	option name "Justlo"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3362"
+	option name "Le Monde"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3363"
+	option name "Daily Horoscope"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3365"
+	option name "myVEGAS Slots"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3366"
+	option name "happn"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3367"
+	option name "Eurosport.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3368"
+	option name "The Globe and Mail"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3369"
+	option name "Java Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3371"
+	option name "Hot or Not"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3372"
+	option name "Web.de"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3373"
+	option name "Inquirer"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3374"
+	option name "Rise of Darkness"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3375"
+	option name "LesPAC"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3376"
+	option name "Opera Update"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3377"
+	option name "Live Toto Singapore"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3378"
+	option name "Farm Village"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3379"
+	option name "AutoTrader"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3380"
+	option name "LINE Let is Get Rich"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3381"
+	option name "FIFA 15 Ultimate Team by EA SPORTS"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3382"
+	option name "Libon"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3383"
+	option name "24 Heures du MansR"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3385"
+	option name "GO-JEK"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3387"
+	option name "Woozworld"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3388"
+	option name "JAUMO"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3389"
+	option name "Mocha Messenger"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3390"
+	option name "Saavn Music"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3391"
+	option name "Golden Screen Cinemas"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3392"
+	option name "Twitch"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3393"
+	option name "USA Today"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3395"
+	option name "NhacCuaTui"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3396"
+	option name "rad.io"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3397"
+	option name "Monster Strike"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3398"
+	option name "Puzzle & Dragons"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3399"
+	option name "The Star Online"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3400"
+	option name "Flipboard"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3401"
+	option name "The Straits Times"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3402"
+	option name "Teepr"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3403"
+	option name "Waldo & Friends"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3404"
+	option name "BBC"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3405"
+	option name "Fox News"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3406"
+	option name "BuzzFeed"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3407"
+	option name "Nextplus"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3408"
+	option name "TIDAL"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3410"
+	option name "Telegram Messenger"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3411"
+	option name "LINE TV"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3412"
+	option name "BigKool 2015"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3413"
+	option name "Zing"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3414"
+	option name "Text Me"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3415"
+	option name "Hearthstone Heroes of Warcraft"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3416"
+	option name "Azar"
+	list behaviour "-1"
+	list behaviour "22"
+	list behaviour "6"
+
+config application
+	option id "3417"
+	option name "textPlus"
+	list behaviour "-1"
+	list behaviour "2"
+
+config application
+	option id "3419"
+	option name "Superhoops"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3420"
+	option name "Voxer Walkie"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3422"
+	option name "imo"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3423"
+	option name "Zalo"
+	list behaviour "-1"
+	list behaviour "2"
+	list behaviour "22"
+
+config application
+	option id "3424"
+	option name "IMVU"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3426"
+	option name "Vessel"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3427"
+	option name "Dragon Bane Elite"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3428"
+	option name "Underworld Empire"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3429"
+	option name "Toggle"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3430"
+	option name "Yahoo SuperMall"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3431"
+	option name "League of Angels"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3432"
+	option name "ZARA"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3433"
+	option name "The White Cat Project"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3434"
+	option name "Taichi Panda"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3435"
+	option name "TRANSFORMERS Battle Tactics"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3436"
+	option name "Injustice Gods Among Us"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3439"
+	option name "pCloud"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3440"
+	option name "Final Fable"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3441"
+	option name "Trivia Crack"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3442"
+	option name "Scoop"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3443"
+	option name "Kijiji Free Classifieds"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3444"
+	option name "H&M"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3445"
+	option name "Kingdoms at War"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3446"
+	option name "Coffee Meets Bagel"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3447"
+	option name "Immortal King"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3448"
+	option name "Linux Apt-Get"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3449"
+	option name "Hero Buster"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3450"
+	option name "Jurassic World"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3451"
+	option name "PlentyOfFish"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3452"
+	option name "Brave Frontier"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3453"
+	option name "Agar.io"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3454"
+	option name "Deck Heroes"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3456"
+	option name "Gaana"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3457"
+	option name "Empires & Allies"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3458"
+	option name "Battle Camp"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3459"
+	option name "Uber"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3460"
+	option name "Simsimi"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3461"
+	option name "Booking.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3463"
+	option name "Smith Hotels"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3464"
+	option name "ithome.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3465"
+	option name "MSN Weather"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3466"
+	option name "TextNow"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3467"
+	option name "WWE"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3468"
+	option name "Groupon"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3474"
+	option name "Gameloft"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3522"
+	option name "Forever 21"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3524"
+	option name "Zulily"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3550"
+	option name "Six-Guns"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3741"
+	option name "Sogou Map"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3815"
+	option name "Drecom.drif"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3817"
+	option name "NET MJMobile"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3820"
+	option name "Yume100prince"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3821"
+	option name "Bokudora"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3822"
+	option name "MOBIUS FINAL FANTASY"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3834"
+	option name "LINE Games"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3853"
+	option name "GameHive"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3863"
+	option name "Colopl.bgirl"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3864"
+	option name "Toram"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3868"
+	option name "BeatGather"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3869"
+	option name "BEAT MP3"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3872"
+	option name "Magic Piano"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3874"
+	option name "Dragon Quest Monster Super Light"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3875"
+	option name "Paradisebay"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3879"
+	option name "Hortensia Saga"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3880"
+	option name "PuyoQuest"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3881"
+	option name "Doraken"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3893"
+	option name "Wuxia"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3972"
+	option name "Skype for Business"
+	list behaviour "-1"
+	list behaviour "25"
+
+config application
+	option id "3978"
+	option name "Mobile Strike"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3984"
+	option name "Top Eleven"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "3985"
+	option name "slither.io"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "4011"
+	option name "Fanatee.stop"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "4118"
+	option name "Apple Store"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "4166"
+	option name "TIME.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "4170"
+	option name "Snopes.com"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "4173"
+	option name "Marriott"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "4175"
+	option name "Rolling Stone"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "4177"
+	option name "Pogo Games"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "4178"
+	option name "lifehacker"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "4179"
+	option name "Digitaltrends"
+	list behaviour "-1"
+	list behaviour "6"
+
+config application
+	option id "4181"
+	option name "NBC News"
+	list behaviour "-1"
+	list behaviour "6"
+
+config behaviour
+	option id "-1"
+	option name "ANY"
+
+config behaviour
+	option id "1"
+	option name "Login"
+
+config behaviour
+	option id "2"
+	option name "Message"
+
+config behaviour
+	option id "3"
+	option name "File Transfer"
+
+config behaviour
+	option id "4"
+	option name "Audio"
+
+config behaviour
+	option id "5"
+	option name "Video"
+
+config behaviour
+	option id "6"
+	option name "DataFlow"
+
+config behaviour
+	option id "9"
+	option name "Apps"
+
+config behaviour
+	option id "22"
+	option name "Audio/Video"
+
+config behaviour
+	option id "25"
+	option name "Login/Message"
+

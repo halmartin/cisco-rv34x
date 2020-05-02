@@ -1,0 +1,353 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/network/config.sh
+. /lib/functions/network.sh
+. /lib/functions.sh
+
+#OPSDB_FILE="/tmp/stats/multiwanstatus"
+NSD_DISABLED=0
+OFFLINE=1
+ONLINE=2
+NA=3
+
+IPTABLES="/usr/sbin/iptables -w"
+
+extra_help() {
+	cat <<EOF
+
+	ifup <iface>	Start service on interface
+	ifdown <iface>	Stop service on interface
+	interfaces	Show interfaces status
+	policies	Show policies status
+	rules		Show rules status
+	status		Show all status
+	opsdbstatus	Write interface status to /tmp/stats/multiwanstatus
+	custom_start	custom_start command
+	mwan3_set_policy_rules configure/reload only mwan3 rules
+EOF
+}
+
+EXTRA_COMMANDS="ifdown ifup interfaces policies rules status opsdbstatus custom_start mwan3_set_policy_rules"
+EXTRA_HELP="$(extra_help)"
+
+ifdown()
+{
+	if [ -z "$1" ]; then
+		echo "Error: Expecting interface. Usage: mwan3 ifdown <interface>" && exit 0
+	fi
+
+	if [ -n "$2" ]; then
+		echo "Error: Too many arguments. Usage: mwan3 ifdown <interface>" && exit 0
+	fi
+
+	local device
+	
+	network_get_mwaniface device $1
+#	device=$(uci get -p /var/state network.$1.ifname) &> /dev/null
+
+	
+	if [ -e /var/run/mwan3track-$1.pid ] ; then
+		kill $(cat /var/run/mwan3track-$1.pid)
+		rm /var/run/mwan3track-$1.pid
+	fi
+
+	if [ -n "$device" ] ; then
+		ACTION=ifdown INTERFACE=$1 DEVICE=$device /sbin/hotplug-call iface
+	fi
+}
+
+ifup()
+{
+	config_load mwan3
+
+	if [ -z "$1" ]; then
+		echo "Expecting interface. Usage: mwan3 ifup <interface>" && exit 0
+	fi
+
+	if [ -n "$2" ]; then
+		echo "Too many arguments. Usage: mwan3 ifup <interface>" && exit 0
+	fi
+
+	local device enabled
+	
+	config_get enabled "$1" enabled 0
+
+	network_get_mwaniface device $1
+#	device=$(uci get -p /var/state network.$1.ifname) &> /dev/null
+	#Check if the device is really ready and not a dummy device.
+	grep -qs "^ *$device:" /proc/net/dev || return 0
+	
+	if [ -n "$device" ] ; then
+		[ "$enabled" -eq 1 ] && ACTION=ifup INTERFACE=$1 DEVICE=$device /sbin/hotplug-call iface
+	fi
+}
+
+custom_ifup()
+{
+	local device enabled
+	config_get enabled "$1" enabled 0
+
+	network_get_mwaniface device $1
+	grep -qs "^ *$device:" /proc/net/dev || return 0
+	if [ -n "$device" ] ; then
+		[ "$enabled" -eq 1 ] && {
+			ACTION=ifup INTERFACE=$1 DEVICE=$device /etc/hotplug.d/iface/15-mwan3
+			# sleep 2 #if needed
+			ACTION=ifup INTERFACE=$1 DEVICE=$device /etc/hotplug.d/iface/52-interface_logs
+			ACTION=ifup INTERFACE=$1 DEVICE=$device /etc/hotplug.d/iface/75-mwan3-primary-failover
+		}
+	fi
+}
+
+interfaces()
+{
+	config_load mwan3
+
+	local device enabled iface_id tracking
+
+	echo "Interface status:"
+	
+	check_iface_status()
+	{
+		let iface_id++
+		device=""
+		network_get_mwaniface device $1
+#		device=$(uci get -p /var/state network.$1.ifname) &> /dev/null
+		if [ -z "$device" ]; then
+			echo "Interface $1 is unknown/offline"
+			return 0
+		fi
+
+		config_get enabled "$1" enabled 0
+
+		if [ -n "$(ps -w | grep mwan3track | grep -v grep | sed '/.*\/usr\/sbin\/mwan3track \([^ ]*\) .*$/!d;s//\1/' | awk '$1 == ("'$1'")')" ]; then
+			tracking="active"
+		else
+			tracking="down"
+		fi
+
+		if [ -n "$(ip rule | awk '$5 == ("'$device'")')" -a -n "$(iptables -w -S mwan3_iface_$1 -t mangle 2> /dev/null)" -a -n "$(ip -4 route list table $iface_id default dev $device 2> /dev/null)" ]; then
+			demand_mode=$(ip -4 route show default dev $device | cut -f 3 -d ' ' | grep "10.112.112.")
+			if [[ -z "$demand_mode" && -n "$(uci get -p /var/state mwan3.$1.track_ip 2> /dev/null)" ]]; then
+				echo "Interface $1 is online (tracking $tracking)"
+			else
+				echo "Interface $1 is online"
+			fi
+		else
+			if [ "$enabled" -eq 1 ]; then
+				if [ -n "$(uci get -p /var/state mwan3.$1.track_ip 2> /dev/null)" ]; then
+					echo "Interface $1 is offline (tracking $tracking)"
+				else
+					echo "Interface $1 is offline"
+				fi
+			else
+				echo "Interface $1 is disabled"
+			fi
+		fi
+	}
+	config_foreach check_iface_status interface
+	echo -e
+}
+
+policies()
+{
+	local percent policy share total_weight weight iface
+
+	for policy in $(iptables -w -S -t mangle | awk '{print $2}' | grep mwan3_policy_ | sort -u); do
+		echo "Policy $policy:" | sed 's/mwan3_policy_//g'
+
+		for iface in $(iptables -w -S $policy -t mangle | cut -s -d'"' -f2 | awk '{print $1}'); do
+			[ -n "$total_weight" ] || total_weight=$(iptables -w -S $policy -t mangle | grep "$iface " | cut -s -d'"' -f2 | awk '{print $3}')
+		done
+
+		if [ ! -z "${total_weight##*[!0-9]*}" ]; then
+			for iface in $(iptables -w -S $policy -t mangle | cut -s -d'"' -f2 | awk '{print $1}'); do
+				weight=$(iptables -w -S $policy -t mangle | grep "$iface " | cut -s -d'"' -f2 | awk '{print $2}')
+				percent=$(($weight*100/$total_weight))
+				echo " $iface ($percent%)"
+			done
+		else
+			echo " $(iptables -w -S $policy -t mangle | sed '/.*--comment \([^ ]*\) .*$/!d;s//\1/;q')"
+		fi
+
+		echo -e
+
+		unset iface
+		unset total_weight
+	done
+}
+rules()
+{
+	if [ -n "$(iptables -w -S mwan3_connected -t mangle 2> /dev/null)" ]; then
+		echo "Known networks:"
+		echo "destination policy hits" | awk '{ printf "%-19s%-19s%-9s%s\n",$1,$2,$3}'
+		echo "------------------------------------------------"
+		iptables -w -L mwan3_connected -t mangle -n -v 2> /dev/null | tail -n+3 | sed 's/mark.*//' | sed 's/mwan3_policy_//g' | awk '{printf "%-19s%-19s%-9s%s\n",$9,"default",$1}'
+		echo -e
+	fi
+
+	if [ -n "$(iptables -w -S mwan3_rules -t mangle 2> /dev/null)" ]; then
+		echo "Active rules:"
+		echo "source destination proto src-port dest-port policy hits" | awk '{ printf "%-19s%-19s%-7s%-14s%-14s%-16s%-9s%s\n",$1,$2,$3,$4,$5,$6,$7}'
+		echo "---------------------------------------------------------------------------------------------------"
+		iptables -w -L mwan3_rules -t mangle -n -v 2> /dev/null | tail -n+3 | sed 's/mark.*//' | sed 's/mwan3_policy_//g' | awk '{ printf "%-19s%-19s%-7s%-14s%-14s%-16s%-9s%s\n",$8,$9,$4,$12,$15,$3,$1}'
+		echo -e
+	fi
+}
+
+status()
+{
+	interfaces
+	policies
+	rules
+}
+
+custom_start()
+{
+	config_load mwan3
+	config_foreach custom_ifup interface
+	#Below few statements are required that, if a new configuration for LBFO is added, all session must be
+	#       cleared such that new sessions are established according to new LBFO configuraiton will get applied.
+	logger -t mwan3 -p local0.notice "interface mwan3 reload finished"
+	local isboot=$(uci_get_state system.core.booted &> /dev/null)
+	[ "$isboot" == "1" ] && {
+		sleep 5
+		/usr/bin/clearconnection_v4.sh 2>&- >&-
+		logger -t mwan3 -p local0.notice "interface mwan3 reload finished and cleared connections"
+	}
+}
+
+
+start()
+{
+	config_load mwan3
+	config_foreach ifup interface
+	#Below two statements are required, that if a new configuration for LBFO is added, all session must be
+	#	cleared so that new sessions according to new LBFO configuraiton will get applied.
+	local isboot=$(uci_get_state system.core.booted &> /dev/null)
+	[ "$isboot" == "1" ] && {
+		sleep 5
+		conntrack -D 2>&- >&-
+	}
+}
+
+opsdbstatus()
+{
+	config_load mwan3
+
+	local device enabled iface_id
+
+	#rm -f $OPSDB_FILE
+	#touch $OPSDB_FILE
+
+	check_iface_status()
+	{
+		let iface_id++
+		device=""
+		network_get_mwaniface device $1
+#		device=$(uci get -p /var/state network.$1.ifname) &> /dev/null
+		if [ -z "$device" ]; then
+			echo "$1:$OFFLINE" #>> $OPSDB_FILE
+			return 0
+		fi
+
+		config_get enabled "$1" enabled 0
+
+		if [ "$enabled" -eq 0 ]
+		then
+			echo "$1:$DISABLED" #>> $OPSDB_FILE
+		else
+			if [ -n "$(ip rule | awk '$5 == ("'$device'")')" -a -n "$(iptables -S mwan3_iface_$1 -t mangle 2> /dev/null)" -a -n "$(ip -4 route list table $iface_id default dev $device 2> /dev/null)" ]; then
+				demand_mode=$(ip -4 route show default dev $device | cut -f 3 -d ' ' | grep "10.112.112.")
+				if [[ -z "$demand_mode" && -n "$(uci get -p /var/state mwan3.$1.track_ip 2> /dev/null)" ]]; then
+					echo "$1:$ONLINE"
+				else
+					echo "$1:$NSD_DISABLED" #This is Online only but just host detection is disabled.
+				fi
+			else
+				echo "$1:$OFFLINE" #>> $OPSDB_FILE
+			fi
+		fi
+	}
+	config_foreach check_iface_status interface
+}
+
+stop()
+{
+	local route rule table
+
+	killall mwan3track &> /dev/null
+	rm /var/run/mwan3track-* &> /dev/null
+
+	for route in $(ip route list table all | sed 's/.*table \([^ ]*\) .*/\1/' |  awk '{print $1}' | awk '{for(i=1;i<=NF;i++) if($i+0>0) if($i+0<255) {print;break}}' | grep -v 220); do
+		ip -4 route flush table $route &> /dev/null
+	done
+
+	for rule in $(ip -4 rule list | egrep '^[1-2][0-9]{3}\:' | cut -d ':' -f 1); do
+		ip -4 rule del pref $rule &> /dev/null
+	done
+
+	#iptables -w -D PREROUTING -t mangle -j mwan3_hook &> /dev/null
+	#iptables -w -D OUTPUT -t mangle -j mwan3_hook &> /dev/null
+	#iptables -w -D OUTPUT -t mangle -j mwan3_output_hook &> /dev/null
+
+	for table in $(iptables -w -S -t mangle | awk '{print $2}' | grep mwan3 | sort -u | grep -vw "mwan3_hook"); do
+		iptables -w -F $table -t mangle &> /dev/null
+	done
+
+	for table in $(iptables -w -S -t mangle | awk '{print $2}' | grep mwan3 | sort -u | grep -vw "mwan3_hook"); do
+		iptables -w -X $table -t mangle &> /dev/null
+	done
+}
+
+restart() {
+	stop
+	start
+}
+
+mwan3_set_user_rules_iptables ()
+{
+	local enable proto src_ip src_port dest_ip dest_port use_policy
+
+	config_get enable $1 enable 1
+     if [ "$enable" != "0" ]; then
+	config_get proto $1 proto all
+	config_get src_ip $1 src_ip 0.0.0.0/0
+	config_get src_port $1 src_port 0:65535
+	config_get dest_ip $1 dest_ip 0.0.0.0/0
+	config_get dest_port $1 dest_port 0:65535
+	config_get use_policy $1 use_policy
+
+	if [ -n "$use_policy" ]; then
+		if [ "$use_policy" == "default" ]; then
+			use_policy="MARK --set-xmark 0xff00/0xff00"
+		elif [ "$use_policy" == "unreachable" ]; then
+			use_policy="MARK --set-xmark 0xfe00/0xff00"
+		else
+			use_policy="mwan3_policy_$use_policy"
+		fi
+
+		case $proto in
+			tcp|udp)
+			$IPTABLES -A mwan3_rules -t mangle -p $proto -s $src_ip -d $dest_ip -m multiport --sports $src_port -m multiport --dports $dest_port -m mark --mark 0/0xff00 -m comment --comment "$1" -j $use_policy &> /dev/null
+			;;
+			*)
+			if [[ "$src_port" != "0:65535" || "$dest_port" != "0:65535" ]]; then
+				$IPTABLES -A mwan3_rules -t mangle -p tcp -s $src_ip -d $dest_ip -m multiport --sports $src_port -m multiport --dports $dest_port -m mark --mark 0/0xff00 -m comment --comment "$1" -j $use_policy &> /dev/null
+				$IPTABLES -A mwan3_rules -t mangle -p udp -s $src_ip -d $dest_ip -m multiport --sports $src_port -m multiport --dports $dest_port -m mark --mark 0/0xff00 -m comment --comment "$1" -j $use_policy &> /dev/null
+			else
+				$IPTABLES -A mwan3_rules -t mangle -p $proto -s $src_ip -d $dest_ip -m mark --mark 0/0xff00 -m comment --comment "$1" -j $use_policy &> /dev/null
+			fi
+			;;
+		esac
+	fi
+     fi
+}
+
+mwan3_set_policy_rules ()
+{
+	$IPTABLES -F mwan3_rules -t mangle
+	config_load mwan3
+	config_foreach mwan3_set_user_rules_iptables rule
+	/usr/bin/clearconnection_v4.sh 2>&- >&-
+}

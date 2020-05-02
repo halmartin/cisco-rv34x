@@ -1,0 +1,165 @@
+From 7096e423657b4a35e8352b00e233c993f7216f16 Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Date: Tue, 25 Oct 2016 23:17:42 +0530
+Subject: [PATCH] Removing confd dependancy for PPP
+
+This is done by running another binary in shell and authorization is based on the output of binary.
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+---
+ pppd/plugins/authorize/Makefile    |   2 +-
+ pppd/plugins/authorize/authorize.c | 113 +++++++++++++++----------------------
+ 2 files changed, 48 insertions(+), 67 deletions(-)
+
+diff --git a/pppd/plugins/authorize/Makefile b/pppd/plugins/authorize/Makefile
+index 6824ef3..368fdf6 100644
+--- a/pppd/plugins/authorize/Makefile
++++ b/pppd/plugins/authorize/Makefile
+@@ -3,7 +3,7 @@ COPTS	= -O2 -g
+ #CFLAGS	= $(COPTS) -I.. -I../../include -fPIC
+ COPTS = -O2
+ CFLAGS=-I. -I../.. -I../../../include $(COPTS) -fPIC -DRC_LOG_FACILITY=LOG_DAEMON
+-LDFLAGS += -L$(STAGING_DIR)/lib -lconfd -lpthread 
++LDFLAGS += -L$(STAGING_DIR)/lib -lpthread
+ INSTALL	= install
+ 
+ DESTDIR = $(INSTROOT)/usr
+diff --git a/pppd/plugins/authorize/authorize.c b/pppd/plugins/authorize/authorize.c
+index 4705ac6..268c09b 100644
+--- a/pppd/plugins/authorize/authorize.c
++++ b/pppd/plugins/authorize/authorize.c
+@@ -18,12 +18,6 @@
+ #include "pppd.h"
+ #include "chap-new.h"
+ 
+-#include <confd.h>
+-#include <confd_maapi.h>
+-#include <confd_lib.h>
+-#include <confd_cdb.h>
+-
+-
+ char pppd_version[] = VERSION;
+ 
+ static int pwfd_check (void)
+@@ -33,71 +27,58 @@ static int pwfd_check (void)
+ 
+ static int authorize (char *user,char *service, char *group[])
+ {
+-  int retval, index=0;
+-  struct sockaddr_in addr;
+-  int rsock;
+-  int action;
+-  char confd_service[256] = {'\0'};
+-
+-    if (strcmp(service,"pptpd") == 0)
+-        strcpy(confd_service,"pptp");
+-    else if (strcmp(service,"l2tpsrvgw") == 0)
+-        strcpy(confd_service,"l2tp");
++	int index=0;
++	char confd_service[256] = {'\0'};
++	char cmd[256] = {'\0'};
++	char buffer[64] = {'\0'};
++	FILE *fp = NULL;
+ 
+-  
+-       confd_init_vsn(NULL,NULL,4,0x06000000);
+-       addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+-       addr.sin_family = AF_INET;
+-       addr.sin_port = htons(4565);
++	if (strcmp(service,"pptpd") == 0)
++		strcpy(confd_service,"pptp");
++	else if (strcmp(service,"l2tpsrvgw") == 0)
++		strcpy(confd_service,"l2tp");
+ 
+-       if ((rsock = socket(PF_INET, SOCK_STREAM, 0)) < 0 )
+-          {
+-            return 0;
+-          }
+-       if (cdb_connect(rsock, CDB_READ_SOCKET, (struct sockaddr *)&addr,
+-                         sizeof (struct sockaddr_in)) < 0)
+-          {
+-            return 0;
+-          }
+-       if (cdb_start_session(rsock, CDB_RUNNING) != CONFD_OK)
+-          {
+-            return 0;
+-          }
++	do
++	{
++		sprintf(cmd,"/usr/bin/userauth authorize %s %s",confd_service,group[index]);
+ 
+-       do 
+-       {
+-          if (cdb_get_enum_value(rsock, &action,
+-                "/nacm:nacm/nacm:rule-list{%s}/feature-rule{%s}/action",
+-                 group[index], confd_service) == CONFD_OK)
+-          {
+-             if(action == 0)
+-              {
+-                syslog(LOG_INFO, "Authentication success for group=%s",group[index]);
+-                cdb_close(rsock);
+-        	while(group[index] != NULL && strlen(group[index])!=0)
+-                {
+-                  free(group[index]);
+-                  index++;
+-                }
+-                return 1;
+-              }
+-             else
+-              {
+-                syslog(LOG_INFO, "Authentication failed for group=%s",group[index]);
+-              }
+-          }
+-          else
+-          {
+-             syslog(LOG_WARNING, "Service not enabled on Group %s.",group[index]);
+-          }
+-          free(group[index]);
+-          index++;
+-        } while(group[index] != NULL && strlen(group[index])!=0);
++		fp = popen(cmd,"r");
++		if (fp == NULL)
++		{
++			syslog(LOG_ERR, "/usr/bin/userauth:popen Failed.");
++			while(group[index] != NULL && strlen(group[index])!=0)
++			{
++				free(group[index]);
++				index++;
++			}
++			return 0;
++		}
+ 
+-     syslog(LOG_ERR, "Authentication failed.");
+-     cdb_close(rsock);
+-     return 0;
++		while(fgets(buffer, sizeof(buffer), fp) != NULL)
++		{
++			if (strcmp(buffer, "PAM_AUTH_ERR") ==0 )
++			{
++				free(group[index]);
++				index++;
++				syslog(LOG_INFO, "Authorization failed for group=%s",group[index]);
++			}
++			else if(strcmp(buffer, "PAM_SUCCESS") ==0 )
++			{
++				pclose(fp);
++				while(group[index] != NULL && strlen(group[index])!=0)
++				{
++					free(group[index]);
++					index++;
++				}
++				syslog(LOG_INFO, "Authorization success for group=%s",group[index]);
++				 return 1;
++			}
++		}
++	} while(group[index] != NULL && strlen(group[index])!=0);
+ 
++	pclose(fp);
++	syslog(LOG_ERR, "Authentication failed.");
++	return 0;
+ }
+ 
+ void plugin_init (void)
+-- 
+2.1.4
+

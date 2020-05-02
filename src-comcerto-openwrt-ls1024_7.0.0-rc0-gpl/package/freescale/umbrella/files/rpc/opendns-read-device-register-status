@@ -1,0 +1,123 @@
+#!/bin/sh
+#RPC which gets device register status from cloud. If the register status is know to be "resource not found" then this RPC de-registers the device also.
+#This RPC doesn't emit anything.
+
+##GET /v1/organizations/{organizationId}/networkdevices/{originId}
+#This API gets a registered device information identified by originId.
+##Command:
+#curl -X GET https://management.api.umbrella.com/v1/organizations/2251171/networkdevices/124578606 --user 'e2ca354f65c24068afac72758669e061:a7eb4ef43e2a48229ce87add8b8e98e0'
+##Output:
+#{"deviceId":"ab0081c63e28732a","deviceKey":"1234-01aabbccddef","name":"testDev1","serialNumber":"12345a","createdAt":"2018-01-11T08:31:31.000Z","originId":124578606,"}
+
+#This RPC doesn't take any inputs. Everything will be available in UCI.
+
+. /usr/share/libubox/jshn.sh
+
+DEVICE_ID_FILE=/mnt/configcert/umbrella/device-id
+RPC_OUTPUT=/tmp/odns_device_output
+RPC_DEBUG=/tmp/odns_debug_output
+CURL="/usr/bin/curl"
+
+#logger -t rpc-testing "Called $0 with args: $@ "
+is_enable=$(uci get umbrella.global_config_0.enable)
+mode=$(uci get umbrella.global_config_0.router_id)
+key=$(uci get umbrella.netdev_config_0.key)
+secret=$(uci get umbrella.netdev_config_0.secret)
+#ca=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "ca") {print $(I+1)};}'`
+
+org_id=$(uci get umbrella.netdev_config_0.organization_id)
+origin_id=$(uci get umbrella.netdev_config_0.origin_id)
+
+#Error Codes
+ODNS_SUCCESS=0
+ODNS_FAILURE=1
+errcode=$ODNS_SUCCESS
+
+#clear the old contents of the debug file
+echo -n "" > $RPC_DEBUG
+echo "key=$key secret=$secret ca=$ca orgid=$org_id polid=$policy_id originid=$origin_id" > $RPC_DEBUG
+echo "no. of argument:" $# >> $RPC_DEBUG
+
+#Athentication Credentials
+KEY="$key:$secret"
+URL="https://management.api.umbrella.com/v1/organizations/$org_id"
+
+read_devinfo() 
+{
+	isAuthFailure=$(cat $RPC_OUTPUT | grep message)
+	isFailure=$(cat $RPC_OUTPUT | grep error)
+
+	if [ -n "$isAuthFailure" ]
+	then
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_get_var message message
+		#echo "not-ok __BEGIN error-code 403 error-message \"$message\" not-ok __END"
+		#NOTE: Do nothing if we see an authentication Failure with the passed credentials.
+		logger -t umbrella "Check device register status: Authentication Failure!"
+	elif [ -n "$isFailure" ]
+	then
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_get_var statusCode statusCode
+		json_get_var error error
+		json_get_var txId txId
+
+		#echo "not-ok __BEGIN error-code $statusCode error-message \"$error\" tx-id \"$txId\" not-ok __END"
+		#NOTE: This is the case where our device is de-registered from cloud.
+		rm $DEVICE_ID_FILE 
+		#echo "Device de-registered already"
+		logger -t umbrella "Check device register status: Device de-registered over Umbrella Cloud dashboard!"
+	else
+		#echo "success-code 201"
+
+		local __tmp=$(cat $RPC_OUTPUT)
+
+		json_init
+		json_load "${__tmp:-{}}"
+
+		json_get_var deviceId deviceId
+		json_get_var deviceKey deviceKey
+		json_get_var name name
+		json_get_var serialNumber serialNumber
+		json_get_var createdAt createdAt
+		json_get_var originId originId
+		json_get_var organizationId organizationId
+
+		#echo "device __BEGIN orgin-id $originId device-id \"$deviceId\" device-key \"$deviceKey\" name \"$name\" serial-number \"$serialNumber\" created-at \"$createdAt\" organization-id \"$organizationId\" device __END"
+		#NOTE: This is a success case where we get complete info of the device.
+		uci_device_id=$(uci get umbrella.netdev_config_0.device_id)
+		if [ "$uci_device_id" == "$deviceId" ]
+		then
+			#echo "Success case: Device is still registered. Do nothing"
+			logger -t umbrella "Check device register status: Device still registered!"
+		else
+			#echo "Device status is registered but the device-id is not same. Something is fishy"
+			logger -t umbrella "Check device register status: Device still registered! (Device ID is different)"
+		fi
+	fi
+}
+
+#Refrain to check the status if it is not connected to internet.
+if [ "$is_enable" == "0" ] || [ "$mode" == "1" ]
+then
+	logger -t umbrella "Check device register status: Umbrella is Disabled (OR) configured in Network mode."
+	exit 0
+fi
+
+#Gets the device information of a device identified by $origin_id.
+$CURL $URL/networkdevices/$origin_id -X GET --user $KEY --connect-timeout 25 -k 2>/dev/null > $RPC_OUTPUT
+[ "$?" != "0" ] && {
+  #echo "not-ok __BEGIN error-code 1 error-message \"Network Error\" not-ok __END"
+  logger -t umbrella "Check device register status: Network Error!"
+  exit 0
+}
+
+read_devinfo
+exit 0

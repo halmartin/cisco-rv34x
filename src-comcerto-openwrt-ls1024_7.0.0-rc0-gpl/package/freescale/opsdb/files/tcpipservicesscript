@@ -1,0 +1,95 @@
+#!/bin/sh
+
+TCPIP_STATS="/tmp/stats/tcpipservices"
+SERVICES_FILES="/etc/services_list"
+
+LISTEN_DATA=1
+CONNECTION_DATA=2
+
+
+rm -rf $TCPIP_STATS
+
+netstat -tunpl | sed '1,2d' | grep -v "zebra\|ripngd\|ripd\|dropbear" | while read proto rec send local remote state program
+do
+   local_ip_addr=${local%:*}
+   case $local_ip_addr in
+   	*:*)
+   		if [ $local_ip_addr != "::1" ]; then
+			[ "$proto" = "udp" ] && {
+				program="$state"
+			}
+			listen_port=${local##*:}
+			program_name=${program##*/}
+   			proto=${proto}"6"
+			alias=`grep -w $listen_port $SERVICES_FILES`; alias=${alias%%[[:blank:]]*};	
+			if [ -z "$alias" ];then
+				alias="$program_name"
+			fi
+   			echo "$LISTEN_DATA?$proto?$local_ip_addr?$listen_port?$alias?"
+   		fi
+   	;;
+
+   	*)
+   		if [ $local_ip_addr != "127.0.0.1" ]; then
+			[ "$proto" = "udp" ] && {
+				program="$state"
+			}
+			listen_port=${local##*:}
+			program_name=${program##*/}
+			alias=`grep -w $listen_port $SERVICES_FILES`; alias=${alias%%[[:blank:]]*};	
+			if [ -z "$alias" ];then
+				alias="$program_name"
+			fi
+   			echo "$LISTEN_DATA?$proto?$local_ip_addr?$listen_port?$alias?"
+   		fi
+   	;;
+   esac
+done >> $TCPIP_STATS
+
+netstat -tunp | sed '1,2d' | while read proto rec send local remote state process_id
+do
+	local_ip_addr=${local%:*}
+	remote_ip_addr=${remote%:*}
+	local ipv4_mapped_ipv6=`echo $local_ip_addr |grep "::ffff:" |grep "\."`	
+	if [ "$ipv4_mapped_ipv6" != "" ]; then                                                                       
+             local_ip_addr=`echo $local_ip_addr | cut -d : -f 4`                                                  
+    fi
+	local ipv4_mapped_ipv6=`echo $remote_ip_addr |grep "::ffff:" |grep "\."`
+	if [ "$ipv4_mapped_ipv6" != "" ]; then        
+             remote_ip_addr=`echo $remote_ip_addr | cut -d : -f 4`
+    fi   
+	  
+    case $local_ip_addr in
+    	*:*)
+    		if [ $local_ip_addr != "::1" -a $remote_ip_addr != "::1" ]; then
+    			proto=$proto"6"
+			local_port=${local##*:}
+			remote_port=${remote##*:}
+			alias_local=`grep -w $local_port $SERVICES_FILES`; alias_local=${alias_local%%[[:blank:]]*};
+			alias_remote=`grep -w $remote_port $SERVICES_FILES`; alias_remote=${alias_remote%%[[:blank:]]*};
+			if [ -z "$alias_remote" ];then
+				alias_remote="-"
+			fi
+			if [ -z "$alias_local" ];then
+				alias_local="-"
+			fi
+    			echo "$CONNECTION_DATA?$proto?$local_ip_addr?$local_port?$alias_local?$remote_ip_addr?$remote_port?$alias_remote?$state?"
+    		fi
+    	;;
+    	*)
+    		if [ $local_ip_addr != "127.0.0.1" -a $remote_ip_addr != "127.0.0.1" ]; then
+    			proto=$proto
+			local_port=${local##*:}
+			remote_port=${remote##*:}
+			alias_local=`grep -w $local_port $SERVICES_FILES`; alias_local=${alias_local%%[[:blank:]]*};
+			alias_remote=`grep -w $remote_port $SERVICES_FILES`; alias_remote=${alias_remote%%[[:blank:]]*};
+			if [ -z "$alias_remote" ];then
+				alias_remote="-"
+			fi
+			if [ -z "$alias_local" ];then
+				alias_local="-"
+			fi
+    			echo "$CONNECTION_DATA?$proto?$local_ip_addr?$local_port?$alias_local?$remote_ip_addr?$remote_port?$alias_remote?$state?"
+    		fi
+    esac
+done >> $TCPIP_STATS

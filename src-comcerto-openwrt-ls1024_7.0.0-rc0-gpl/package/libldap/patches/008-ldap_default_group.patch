@@ -1,0 +1,65 @@
+--- a/pam_ldap.c	2017-11-09 14:59:57.322632484 +0530
++++ b/pam_ldap.c	2017-11-09 15:19:58.403847032 +0530
+@@ -3549,9 +3549,29 @@ pam_sm_authenticate (pam_handle_t * pamh
+           }
+        else if(rc == PAM_SUCCESS && session->info->group == NULL)
+        {
++            char cmd[48]={'\0'};
++            char default_group[32]={'\0'};
++            FILE *fp=NULL;
++            char *group=NULL;
++
++            sprintf(cmd,"uci get aaa.aaa_0.default_group");
++            fp=popen(cmd,"r");
++            if(fgets(default_group, sizeof(default_group), fp) == NULL)
++            {
++                printf("fgets failed\n");
++                pclose(fp);
++            }
++            else
++            {
++            default_group[strlen(default_group)-1]='\0';
++            pclose(fp);
++
++            group=strdup(default_group);
++
+             (void) pam_set_data (pamh, "groupattr0",
+-                                    (void *) strdup ("default"),
++                                    group,
+                                      _cleanup_data);
++            }
+        
+        }
+        if(rc == PAM_SUCCESS)
+@@ -3605,9 +3625,30 @@ pam_sm_authenticate (pam_handle_t * pamh
+    }
+    else if (rc == PAM_SUCCESS && session->info->group == NULL)
+    {
++
++        char cmd[48]={'\0'};
++        char default_group[32]={'\0'};
++        FILE *fp=NULL;
++        char *group=NULL;
++
++        sprintf(cmd,"uci get aaa.aaa_0.default_group");
++        fp=popen(cmd,"r");
++        if(fgets(default_group, sizeof(default_group), fp) == NULL)
++        {
++            printf("fgets failed\n");
++            pclose(fp);
++        }
++        else
++        {
++        default_group[strlen(default_group)-1]='\0';
++        pclose(fp);
++
++        group=strdup(default_group);
++
+         (void) pam_set_data (pamh, "groupattr0",
+-                            (void *) strdup ("default"),
++                            group,
+                             _cleanup_data);
++        }
+    }
+ 
+    if(rc == PAM_SUCCESS)

@@ -1,0 +1,404 @@
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-11-08 09:22:29.158369356 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-11-08 09:49:07.488369914 +0800
+@@ -451,6 +451,16 @@
+ 
+ #define	CLK_NAME	10
+ struct spi_controller_pdata {
++/* 
++NXP : Following variables defined to define FIFO depth for Low speed
++and high speed SPI. dbgflag1 & dbgflag2 are defined for initial debugging
++to ensure that initialization is happening fine. These debug flags are to be removed 
++once everything works fine. 
++*/
++	u8 tx_fifo_depth;
++	u8 rx_fifo_depth;
++        u8 dbgflag1;
++        u8 dbgflag2;
+ 	int use_dma;
+ 	int num_chipselects;
+ 	int bus_num;
+@@ -495,7 +505,7 @@
+ 		/* FIXME: for chipselect-0 */
+ 		.modalias = "bcm53134_switch",
+ 		.chip_select = 0,
+-		.max_speed_hz = 1*1000*1000,
++		.max_speed_hz = 15*1000*1000,
+ 		.bus_num = 0,
+ 		.irq = -1,
+ 		.mode = SPI_MODE_3,
+@@ -555,6 +565,16 @@
+ 
+ #if defined(CONFIG_SPI_MSPD_HIGH_SPEED)
+ struct spi_controller_pdata fast_spi_pdata = {
++/*
++NXP : Initializing RX & TX FIFO depth as 16 for High Speed SPI. 
++dbgflag1 is initialized with 0xab to verify in the SPI controller (i.e. designware_spi.c) 
++dbgflag2 is set to 0.
++These debug flags are to be removed once everything works fine. 
++*/
++	.tx_fifo_depth = 16,
++	.rx_fifo_depth = 16,
++	.dbgflag1 = 0xab,
++	.dbgflag2 = 0x0,
+ 	.use_dma = 0,
+ 	.num_chipselects = 4,
+ 	.bus_num = 0,
+@@ -591,6 +611,15 @@
+ 
+ #if defined(CONFIG_SPI_MSPD_LOW_SPEED)
+ struct spi_controller_pdata ls_spi_pdata = {
++/* 
++NXP : Initializing RX & TX FIFO depth as 8 for Low Speed SPI. 
++dbgflag1 is set to 0.
++dbgflag2 initialized with 0xcd to verify in the SPI controller (i.e. designware_spi.c) 
++*/
++	.tx_fifo_depth = 8,
++	.rx_fifo_depth = 8,
++	.dbgflag1 = 0x00,
++	.dbgflag2 = 0xcd,
+ 	.use_dma = 0,
+ 	.num_chipselects = 2,
+ 	.bus_num = 1,
+--- linux-4.1.8/include/linux/spi/designware.h.org	2017-11-08 09:22:35.418369842 +0800
++++ linux-4.1.8/include/linux/spi/designware.h	2017-11-08 09:49:07.488369914 +0800
+@@ -6,6 +6,10 @@
+ #include <linux/scatterlist.h>
+ 
+ #define        CLK_NAME       10
++/* 
++NXP : Falling back to original values for FIFO depth i.e. 8
++*/
++
+ #define        TX_FIFO_DEPTH  8
+ #define        RX_FIFO_DEPTH  8
+ 
+@@ -54,6 +58,16 @@
+ #define DWSPI_IMR_RXFIM_MASK	0x10
+ 
+ struct spi_controller_pdata {
++/* 
++NXP : Following variables defined to define FIFO depth for Low speed
++and high speed SPI. dbgflag1 & dbgflag2 are defined for initial debugging
++to ensure that initialization and is happening fine. These debug flags are to be removed 
++once everything works fine. 
++*/
++	u8 tx_fifo_depth;
++	u8 rx_fifo_depth;
++	u8 dbgflag1;
++	u8 dbgflag2;
+ 	int use_dma;
+ 	int num_chipselects;
+ 	int bus_num;
+@@ -122,6 +136,15 @@
+ 	void			*dma_priv; /* platform relate info */
+ 	//RAJIV
+ 	struct spi_message	*cur_msg;
++/* 
++NXP : Following variables are added for debugging to distinguish and verify 
++the Low Speed and High Speed SPI. 
++For HS SPI dbgflag1 will have 0xab and dbgflag2 will be 0.
++For LS SPI dbgflag1 is 0 and dbgflag2 will be 0xcd.
++These debug flags are to be removed once everything works fine. 
++*/
++	u8 dbgflag1;
++	u8 dbgflag2;
+ 
+ };
+ 
+--- linux-4.1.8/drivers/spi/designware_spi.c.org	2017-11-08 09:22:59.678369767 +0800
++++ linux-4.1.8/drivers/spi/designware_spi.c	2017-11-08 09:49:07.488369914 +0800
+@@ -213,6 +213,7 @@
+ 	int bytes_to_tx = dwspi->remaining_tx_bytes;
+ 	u8 valid_tx_fifo_bytes = readb(dwspi->regs + DWSPI_TXFLR);
+ 	u8 valid_rx_fifo_bytes = readb(dwspi->regs + DWSPI_RXFLR);
++//	printk("%s(%d) : dwspi Tx Fifo Depth : %d, dbgflag1:0x%x, dbgflag2:0x%x\n", __func__, __LINE__, dwspi->tx_fifo_depth, dwspi->dbgflag1, dwspi->dbgflag2);
+ 	int tx_limit = min(dwspi->tx_fifo_depth - valid_tx_fifo_bytes,\
+ 			dwspi->rx_fifo_depth - valid_rx_fifo_bytes);
+ 
+@@ -305,6 +306,7 @@
+ 	#endif
+ 	}
+ 
++//	printk("%s(%d) : dwspi Rx Fifo Depth : %d, dbgflag1:0x%x, dbgflag2:0x%x\n", __func__, __LINE__, dwspi->tx_fifo_depth, dwspi->dbgflag1, dwspi->dbgflag2);
+ 	/* Read as long as RX FIFO is not empty */
+ 	while ((sr & DWSPI_SR_RFNE_MASK) != 0
+ 			&& dwspi->remaining_rx_bytes > 0) {
+@@ -723,9 +725,9 @@
+ 	}
+ 
+ 	clk_enable(clk_spi);
+-
+-	printk ("%s:Initializing SPI Controller : Using dma=%d CLK(%s)=%ld Hz\n", __func__, \
+-			pdata->use_dma, pdata->clk_name, clk_get_rate(clk_spi));
++/* NXP : Modifying the print to diaplay info for SPI controller to distinguish between LS & HS SPI */
++	printk ("%s:Initializing SPI Controller : Using dma=%d CLK(%s)=%ld Hz tx_fifo_depth=%d rx_fifo_depth=%d dbgflag1:0x%x, dbgflag2:0x%x\n", __func__, \
++			pdata->use_dma, pdata->clk_name, clk_get_rate(clk_spi), pdata->tx_fifo_depth, pdata->rx_fifo_depth, pdata->dbgflag1, pdata->dbgflag2);
+ 
+ 	/* Get resources(memory, IRQ) associated with the device */
+ 	master = spi_alloc_master(&dev->dev, sizeof(struct designware_spi));
+@@ -752,8 +754,23 @@
+ 	dwspi = spi_master_get_devdata(master);
+ 	dwspi->clk_spi = clk_spi;
+ 	dwspi->ssi_clk = clk_get_rate(dwspi->clk_spi);
+-	dwspi->tx_fifo_depth = TX_FIFO_DEPTH;
+-	dwspi->rx_fifo_depth = RX_FIFO_DEPTH;
++	if (pdata->tx_fifo_depth) {
++		printk ("%s(%d): TX FIFO defined as :%d \n", __func__, __LINE__, pdata->tx_fifo_depth);
++		dwspi->tx_fifo_depth = pdata->tx_fifo_depth;
++	} else {
++		printk ("%s(%d): TX FIFO NOT defined. Set Default val :%d \n", __func__, __LINE__, TX_FIFO_DEPTH);
++		dwspi->tx_fifo_depth = TX_FIFO_DEPTH;
++	}
++	if (pdata->rx_fifo_depth) {
++		printk ("%s(%d): RX FIFO defined as :%d \n", __func__, __LINE__, pdata->rx_fifo_depth);
++		dwspi->rx_fifo_depth = pdata->rx_fifo_depth;
++	} else {
++		printk ("%s(%d): RX FIFO NOT defined. Set Default val :%d \n", __func__, __LINE__, RX_FIFO_DEPTH);
++		dwspi->rx_fifo_depth = RX_FIFO_DEPTH;
++	}
++/* NXP : Setting debug values for the SPI controller. Need to be removed */
++	dwspi->dbgflag1 = pdata->dbgflag1;
++	dwspi->dbgflag2 = pdata->dbgflag2;
+ 	dwspi->dma_inited = 0;
+ 	dwspi->dev = &dev->dev;
+ 
+--- linux-4.1.8/drivers/net/ethernet/broadcom/bcm53134.c.org	2017-11-08 09:22:43.908369327 +0800
++++ linux-4.1.8/drivers/net/ethernet/broadcom/bcm53134.c	2017-11-08 09:51:46.408369837 +0800
+@@ -45,48 +45,29 @@
+ #define SPI_READ_OP                 0x60
+ #define SPI_WRITE_OP                0x61
+ 
+-#define DMA_ALIGN	64
+-
+ /****************************************************************************/
+ 
+-struct bcm53134 {
+-	struct spi_device	*spi;
+-	struct mutex		lock;
+-	struct mtd_info		mtd;
+-	u16			page_size;
+-	u16			addr_width;
+-	u8			erase_opcode;
+-	u8			*command __attribute__((aligned(64)));
+-	u8			*value __attribute__((aligned(64)));
+-	u8			*data __attribute__((aligned(64)));
+-};
+-
+-struct bcm53134 *bcm_info;
++struct spi_device *bcm_spi; 
++struct mutex      bcm_lock;
+ static int spi_mode = 3;
+ 
+-static void _robo_spi_read(struct spi_device *spi, struct bcm53134 *bcm_info, u8 command, u16 address,
++static void _robo_spi_read(struct spi_device *spi, u8 command, u16 address,
+                              const void *buf, size_t len)
+ {
+ 	struct spi_transfer t[3];
+ 	struct spi_message m;
+-	u8 value_buf[8];
+-	u16 *read;
++	u8 value_buf[8] = {0};
+ 	int ret;
+-	u_char  *cmd_local_buf __attribute__((aligned(64)));
+-	u_char  *rw_local_buf __attribute__((aligned(64)));
+-	u_char  *rd_local_buf __attribute__((aligned(64)));
++	u8 cmd_local_buf[1] = {0};
++	u8 rw_local_buf[1] = {0};
++	u8 rd_local_buf[8] = {0};
+ 
+ 	spi_message_init(&m);
+ 	m.is_dma_mapped = 1;
+ 	memset(t, 0, sizeof(t));
+ 
+-	cmd_local_buf = bcm_info->command;
+-	rw_local_buf = bcm_info->data;
+-	rd_local_buf = bcm_info->value;
+-
+ 	t[0].tx_buf = cmd_local_buf;
+ 	t[0].len = 1;
+-
+ 	memcpy(cmd_local_buf, &command, 1);
+ 	spi_message_add_tail(&t[0], &m);
+ 
+@@ -108,26 +89,21 @@
+ 	memcpy(buf, value_buf, len);
+ }
+ 
+-static void _robo_spi_write(struct spi_device *spi, struct bcm53134 *bcm_info, u8 command, u16 address,
++static void _robo_spi_write(struct spi_device *spi, u8 command, u16 address,
+                              const void *buf, size_t len)
+ {
+ 	struct spi_transfer t[3];
+ 	struct spi_message m;
+-	u8 address_tmp;
+-	u8 value_buf[8];
+-	u_char  *cmd_local_buf __attribute__((aligned(64)));
+-	u_char  *rw1_local_buf __attribute__((aligned(64)));
+-	u_char  *rw2_local_buf __attribute__((aligned(64)));
++	u8 value_buf[8] = {0};
++	u8 cmd_local_buf[1] = {0};
++	u8 rw1_local_buf[1] = {0};
++	u8 rw2_local_buf[8] = {0};
+ 	int ret;
+ 
+ 	spi_message_init(&m);
+ 	m.is_dma_mapped = 1;
+ 	memset(t, 0, sizeof(t));
+ 
+-	cmd_local_buf = bcm_info->command;
+-	rw1_local_buf = bcm_info->data;
+-	rw2_local_buf = bcm_info->value;
+-
+ 	t[0].tx_buf = cmd_local_buf;
+ 	t[0].len = 1;
+ 	memcpy(cmd_local_buf, &command, 1);
+@@ -152,14 +128,17 @@
+ 
+ int robo_spi_read(void *cookie, uint16_t reg, uint64_t *buf, int len)
+ {
+-	uint i, timeout;
++	uint timeout;
+ 	u8 tmp_buf[1];
+ 
++	mutex_lock(&bcm_lock);
++
+ 	*buf = 0x0;
+-	for (i = 0, timeout = 50; timeout;)
++	tmp_buf[0] = 0xFF;
++	for (timeout = 50; timeout;)
+ 	{
+-		_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xFE, buf, 1);
+-		if ((buf[0] & (1 << 7)) == 0)
++		_robo_spi_read(bcm_spi, SPI_READ_OP, 0xFE, tmp_buf, 1);
++		if ((tmp_buf[0] & (1 << 7)) == 0)
+ 			break;
+ 		else
+ 			timeout--;
+@@ -168,47 +147,57 @@
+ 	if (timeout == 0)
+ 		goto timeout;
+ 
+-	if ((buf[0] & (1 << 7)) == 0)
++	if ((tmp_buf[0] & (1 << 7)) == 0)
+ 	{
+ 		tmp_buf[0] = reg >> 8;
+-		_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
++		_robo_spi_write(bcm_spi, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
+ 
+-		_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, reg, buf, 1);
++		tmp_buf[0] = 0x0;
++		_robo_spi_read(bcm_spi, SPI_READ_OP, reg, tmp_buf, 1);
+ 
+-		for (i = 0, timeout = 50; timeout;)
++		for (timeout = 50; timeout;)
+ 		{
+-			_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xFE, buf, 1);
+-			if ((buf[0] & (1 << 5)) == (1 << 5))
++			tmp_buf[0] = 0x0;
++			_robo_spi_read(bcm_spi, SPI_READ_OP, 0xFE, tmp_buf, 1);
++			if ((tmp_buf[0] & (1 << 5)) == (1 << 5))
+ 			{
+-				_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xF0, buf, len);
+ 				break;
+ 			}
+ 			else
+ 				timeout--;
+ 		}
++
++		if (timeout == 0)
++			goto timeout;
++
++		_robo_spi_read(bcm_spi, SPI_READ_OP, 0xF0, buf, len);
++		//printk("robo_spi_read 1 buf=0x%x\n", *buf);
+ 	}
+ 
+-	if (timeout == 0)
+-		goto timeout;
++	mutex_unlock(&bcm_lock);
+ 
+ 	return 0;
+ 
+ timeout:
+ 	tmp_buf[0] = reg >> 8;
+-	_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
++	_robo_spi_write(bcm_spi, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
++
++	mutex_unlock(&bcm_lock);
+ 
+ 	return 0;
+ }
+ 
+ int robo_spi_write(void *cookie, uint16_t reg, uint64_t *buf, int len)
+ {
+-	uint i, timeout;
++	uint timeout;
+ 	u8 tmp_buf[1];
+ 
++	mutex_lock(&bcm_lock);
++
+ 	tmp_buf[0] = 0xFF;
+-	for (i = 0, timeout = 50; timeout;)
++	for (timeout = 50; timeout;)
+ 	{
+-		_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xFE, tmp_buf, 1);
++		_robo_spi_read(bcm_spi, SPI_READ_OP, 0xFE, tmp_buf, 1);
+ 		if ((tmp_buf[0] & (1 << 7)) == 0)
+ 			break;
+ 		else
+@@ -221,17 +210,20 @@
+ 	if ((tmp_buf[0] & (1 << 7)) == 0)
+ 	{
+ 		tmp_buf[0] = reg >> 8;
+-		_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
++		_robo_spi_write(bcm_spi, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
+ 
+-		_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, reg, buf, len);
++		_robo_spi_write(bcm_spi, SPI_WRITE_OP, reg, buf, len);
++		//printk("robo_spi_write, reg: 0x%x, value: 0x%x \n", reg, *buf);
+ 	}
+ 
++	mutex_unlock(&bcm_lock);
+ 	return 0;
+ 
+ timeout:
+ 	tmp_buf[0] = reg >> 8;
+-	_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
++	_robo_spi_write(bcm_spi, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
+ 
++	mutex_unlock(&bcm_lock);
+ 	return 0;
+ }
+ 
+@@ -340,17 +332,6 @@
+ 
+ 	printk("DNI bcm53134_switch probe...\n");
+ 
+-	bcm_info = kzalloc(sizeof *bcm_info, GFP_KERNEL);
+-	if (!bcm_info)
+-	{
+-		err = -ENOMEM;
+-		return err;
+-	}
+-
+-	bcm_info->command = COMCERTO_FASTSPI_IRAM_VADDR;
+-	bcm_info->value = bcm_info->command + DMA_ALIGN;
+-	bcm_info->data = bcm_info->command + 2*DMA_ALIGN;
+-
+ 	if (register_chrdev_region(devno, 1, "bcm53134_switch"))
+ 		goto error;
+ 
+@@ -360,12 +341,11 @@
+ 		goto error;
+  	}
+ 
+-	bcm_info->spi = spi;
+-	mutex_init(&bcm_info->lock);
++	bcm_spi = spi;
++	mutex_init(&bcm_lock);
+ 
+ 	return err;
+ error:
+-	kfree(bcm_info);
+ 	printk("Error register bcm53134_switch device\n");
+ 	return 1;
+ }

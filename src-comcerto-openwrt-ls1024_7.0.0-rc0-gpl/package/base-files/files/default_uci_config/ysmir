@@ -1,0 +1,8 @@
+config 'section' 'ysmir_settings'
+	option 'ysmir_enable' 'on'
+	option 'syslog_enable' 'on'
+
+config 'section' 'ysmir_module'
+	option 'session_max_entry_num' '40000'
+	option 'packet_max_incoming_num' '80000'
+

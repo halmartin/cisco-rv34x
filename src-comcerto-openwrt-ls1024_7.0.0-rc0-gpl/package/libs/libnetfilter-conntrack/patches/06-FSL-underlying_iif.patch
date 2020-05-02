@@ -1,0 +1,100 @@
+diff -rupN libnetfilter_conntrack-1.0.4/include/internal/object.h libnetfilter_conntrack-1.0.4-Modified/include/internal/object.h
+--- libnetfilter_conntrack-1.0.4/include/internal/object.h	2016-07-29 14:35:09.215862000 +0530
++++ libnetfilter_conntrack-1.0.4-Modified/include/internal/object.h	2016-07-22 14:02:01.950505000 +0530
+@@ -149,6 +149,7 @@ struct __nfct_nat {
+ struct __nfct_comcerto_fp_info {
+ 	int   ifindex;
+ 	int   iif;
++	int   underlying_iif;
+ 	u_int32_t mark;
+ };
+ 
+diff -rupN libnetfilter_conntrack-1.0.4/include/libnetfilter_conntrack/libnetfilter_conntrack.h libnetfilter_conntrack-1.0.4-Modified/include/libnetfilter_conntrack/libnetfilter_conntrack.h
+--- libnetfilter_conntrack-1.0.4/include/libnetfilter_conntrack/libnetfilter_conntrack.h	2016-07-29 14:35:09.268841000 +0530
++++ libnetfilter_conntrack-1.0.4-Modified/include/libnetfilter_conntrack/libnetfilter_conntrack.h	2016-07-22 12:45:12.372639000 +0530
+@@ -133,9 +133,11 @@ enum nf_conntrack_attr {
+ 	ATTR_TIMESTAMP_START,			/* u64 bits, linux >= 2.6.38 */
+ 	ATTR_TIMESTAMP_STOP = 64,		/* u64 bits, linux >= 2.6.38 */
+ 	ATTR_ORIG_COMCERTO_FP_IIF,
++	ATTR_ORIG_COMCERTO_FP_UNDERLYING_IIF,
+ 	ATTR_ORIG_COMCERTO_FP_IFINDEX,
+ 	ATTR_ORIG_COMCERTO_FP_MARK,
+ 	ATTR_REPL_COMCERTO_FP_IIF,
++	ATTR_REPL_COMCERTO_FP_UNDERLYING_IIF,
+ 	ATTR_REPL_COMCERTO_FP_IFINDEX,
+ 	ATTR_REPL_COMCERTO_FP_MARK,
+ 	ATTR_HELPER_INFO,			/* variable length */
+diff -rupN libnetfilter_conntrack-1.0.4/include/libnetfilter_conntrack/linux_nfnetlink_conntrack.h libnetfilter_conntrack-1.0.4-Modified/include/libnetfilter_conntrack/linux_nfnetlink_conntrack.h
+--- libnetfilter_conntrack-1.0.4/include/libnetfilter_conntrack/linux_nfnetlink_conntrack.h	2016-07-29 14:35:09.220840000 +0530
++++ libnetfilter_conntrack-1.0.4-Modified/include/libnetfilter_conntrack/linux_nfnetlink_conntrack.h	2016-07-22 12:43:42.150298000 +0530
+@@ -214,6 +214,7 @@ enum ctattr_comcerto_fp {
+ 	CTA_COMCERTO_FP_MARK,
+ 	CTA_COMCERTO_FP_IFINDEX,
+ 	CTA_COMCERTO_FP_IIF,
++	CTA_COMCERTO_FP_UNDERLYING_IIF,
+ 	__CTA_COMCERTO_FP_MAX
+ };
+ #define CTA_COMCERTO_FP_MAX (__CTA_COMCERTO_FP_MAX - 1)
+diff -rupN libnetfilter_conntrack-1.0.4/src/conntrack/getter.c libnetfilter_conntrack-1.0.4-Modified/src/conntrack/getter.c
+--- libnetfilter_conntrack-1.0.4/src/conntrack/getter.c	2016-07-29 14:35:09.223846000 +0530
++++ libnetfilter_conntrack-1.0.4-Modified/src/conntrack/getter.c	2016-07-27 15:23:34.973720000 +0530
+@@ -339,6 +339,11 @@ static const void *get_attr_orig_comcert
+ 	return &ct->fp_info[__DIR_ORIG].iif;
+ }
+ 
++static const void *get_attr_orig_comcerto_fp_underlying_iif(const struct nf_conntrack *ct)
++{
++        return &ct->fp_info[__DIR_ORIG].underlying_iif;
++}
++
+ static const void *get_attr_orig_comcerto_fp_ifindex(const struct nf_conntrack *ct)
+ {
+ 	return &ct->fp_info[__DIR_ORIG].ifindex;
+@@ -354,6 +359,11 @@ static const void *get_attr_repl_comcert
+ 	return &ct->fp_info[__DIR_REPL].iif;
+ }
+ 
++static const void *get_attr_repl_comcerto_fp_underlying_iif(const struct nf_conntrack *ct)
++{
++        return &ct->fp_info[__DIR_REPL].underlying_iif;
++}
++
+ static const void *get_attr_repl_comcerto_fp_ifindex(const struct nf_conntrack *ct)
+ {
+ 	return &ct->fp_info[__DIR_REPL].ifindex;
+@@ -446,9 +456,11 @@ const get_attr get_attr_array[ATTR_MAX] 
+ 	[ATTR_TIMESTAMP_START]		= get_attr_timestamp_start,
+ 	[ATTR_TIMESTAMP_STOP]		= get_attr_timestamp_stop,
+ 	[ATTR_ORIG_COMCERTO_FP_IIF]   	= get_attr_orig_comcerto_fp_iif,
++	[ATTR_ORIG_COMCERTO_FP_UNDERLYING_IIF]  = get_attr_orig_comcerto_fp_underlying_iif,
+ 	[ATTR_ORIG_COMCERTO_FP_IFINDEX]	= get_attr_orig_comcerto_fp_ifindex,
+ 	[ATTR_ORIG_COMCERTO_FP_MARK]	= get_attr_orig_comcerto_fp_mark,
+-	[ATTR_REPL_COMCERTO_FP_IIF]   	= get_attr_repl_comcerto_fp_iif,
++	[ATTR_REPL_COMCERTO_FP_IIF]  	= get_attr_repl_comcerto_fp_iif,
++	[ATTR_REPL_COMCERTO_FP_UNDERLYING_IIF]  = get_attr_repl_comcerto_fp_underlying_iif,
+ 	[ATTR_REPL_COMCERTO_FP_IFINDEX]	= get_attr_repl_comcerto_fp_ifindex,
+ 	[ATTR_REPL_COMCERTO_FP_MARK]	= get_attr_repl_comcerto_fp_mark,
+ 	[ATTR_HELPER_INFO]		= get_attr_helper_info,
+diff -rupN libnetfilter_conntrack-1.0.4/src/conntrack/parse.c libnetfilter_conntrack-1.0.4-Modified/src/conntrack/parse.c
+--- libnetfilter_conntrack-1.0.4/src/conntrack/parse.c	2016-07-29 14:35:09.226839000 +0530
++++ libnetfilter_conntrack-1.0.4-Modified/src/conntrack/parse.c	2016-07-22 12:47:47.877115000 +0530
+@@ -495,6 +495,19 @@ __parse_comcerto_fp(const struct nfattr 
+ 		}
+ 	}	
+ 
++	if (tb[CTA_COMCERTO_FP_UNDERLYING_IIF-1]) {
++                ct->fp_info[dir].underlying_iif = *(u_int32_t *)NFA_DATA(tb[CTA_COMCERTO_FP_UNDERLYING_IIF-1]);
++                switch(dir) {
++                case __DIR_ORIG:
++                        set_bit(ATTR_ORIG_COMCERTO_FP_UNDERLYING_IIF, ct->head.set);
++                        break;
++                case __DIR_REPL:
++                        set_bit(ATTR_REPL_COMCERTO_FP_UNDERLYING_IIF, ct->head.set);
++                        break;
++                }
++        }
++
++
+ 	if (tb[CTA_COMCERTO_FP_IFINDEX-1]) {
+ 		ct->fp_info[dir].ifindex = *(u_int32_t *)NFA_DATA(tb[CTA_COMCERTO_FP_IFINDEX-1]);
+ 		switch(dir) {

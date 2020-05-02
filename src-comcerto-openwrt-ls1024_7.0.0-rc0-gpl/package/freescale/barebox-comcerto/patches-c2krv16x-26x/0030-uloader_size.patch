@@ -1,0 +1,65 @@
+diff -Naur ./arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig
+--- ./arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig	2017-07-27 23:05:12.166053356 +0530
++++ ../../b/barebox-2011.06.0/arch/arm/configs/comcerto-2k_rv16x-26x_nand_uloader_defconfig	2017-07-28 18:08:39.656370384 +0530
+@@ -104,7 +104,7 @@
+ # General Settings
+ #
+ # CONFIG_LOCALVERSION_AUTO is not set
+-CONFIG_ENVIRONMENT_VARIABLES=y
++# CONFIG_ENVIRONMENT_VARIABLES is not set
+ 
+ #
+ # memory layout
+@@ -272,10 +272,10 @@
+ # CONFIG_NAND_ECC_HW is not set
+ # CONFIG_NAND_ECC_HW_SYNDROME is not set
+ # CONFIG_NAND_ECC_HW_NONE is not set
+-CONFIG_NAND_COMCERTO_ECC_8_HW_BCH=y
++# CONFIG_NAND_COMCERTO_ECC_8_HW_BCH is not set
+ # CONFIG_NAND_COMCERTO_ECC_24_HW_BCH is not set
+ # CONFIG_COMCERTO_NAND_ERASE_FBB is not set
+-CONFIG_NAND_INFO=y
++# CONFIG_NAND_INFO is not set
+ # CONFIG_NAND_BBT is not set
+ # CONFIG_NAND_READ_OOB is not set
+ CONFIG_NAND_COMCERTO=y
+diff -Naur ./drivers/mtd/nand/comcerto_nand.c ../../b/barebox-2011.06.0/drivers/mtd/nand/comcerto_nand.c
+--- ./drivers/mtd/nand/comcerto_nand.c	2017-07-27 22:27:18.349976564 +0530
++++ ../../b/barebox-2011.06.0/drivers/mtd/nand/comcerto_nand.c	2017-07-28 18:08:39.656370384 +0530
+@@ -487,10 +487,11 @@
+ static int comcerto_correct_ecc(struct mtd_info *mtd, uint8_t *dat,
+ 		uint8_t *read_ecc, uint8_t *calc_ecc)
+ {
++	uint8_t err_count = 0;
+ #if !defined (CONFIG_NAND_COMCERTO_ECC_8_HW_BCH) && !defined (CONFIG_NAND_COMCERTO_ECC_24_HW_BCH)
+ 	struct nand_chip *nand_device = mtd->priv;
+ #else
+-	uint8_t err_count = 0;
++	//uint8_t err_count = 0;
+ 	uint32_t err_corr_data_prev;
+ #endif
+ 	uint32_t err_corr_data;
+diff -Naur ./drivers/mtd/nand/Kconfig ../../b/barebox-2011.06.0/drivers/mtd/nand/Kconfig
+--- ./drivers/mtd/nand/Kconfig	2017-07-27 22:27:18.349976564 +0530
++++ ../../b/barebox-2011.06.0/drivers/mtd/nand/Kconfig	2017-07-28 18:08:19.568369705 +0530
+@@ -1,6 +1,5 @@
+ menuconfig NAND
+ 	bool "NAND support              "
+-	select MTD_NAND_IDS
+ 	help
+ 	  This enables support for accessing all type of NAND flash
+ 	  devices. For further information see
+diff -Naur ./drivers/mtd/nand/nand_base.c ../../b/barebox-2011.06.0/drivers/mtd/nand/nand_base.c
+--- ./drivers/mtd/nand/nand_base.c	2017-07-27 22:27:18.349976564 +0530
++++ ../../b/barebox-2011.06.0/drivers/mtd/nand/nand_base.c	2017-07-28 18:07:51.968368773 +0530
+@@ -46,6 +46,10 @@
+ 
+ #include "nand.h"
+ 
++struct nand_flash_dev nand_flash_ids[] = { NULL};
++struct nand_manufacturers nand_manuf_ids[] = {NULL};
++
++
+ #ifndef DOXYGEN_SHOULD_SKIP_THIS
+ 
+ #if defined (CONFIG_NAND_COMCERTO_ECC_24_HW_BCH)

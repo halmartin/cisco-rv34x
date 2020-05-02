@@ -1,0 +1,35 @@
+From 153748d85bc42836e3eaf9fdf82c4d14bff9db40 Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Fri, 6 Apr 2018 13:07:25 +0530
+Subject: [PATCH] PPSBR-2230 BB2 change is brought in to PP
+
+It has been identified that when interesting traffic is been hit,
+ we need to lookup for a matching SA and the corresponding route for it.
+ As of now, route lookup is been going for fib_lookup which is not correct.
+ We have to pick the SA's dst. The current change ensures this.
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ net/xfrm/xfrm_policy.c | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/net/xfrm/xfrm_policy.c b/net/xfrm/xfrm_policy.c
+index fc47d39..3ae3253 100644
+--- a/net/xfrm/xfrm_policy.c
++++ b/net/xfrm/xfrm_policy.c
+@@ -1717,7 +1717,12 @@ static struct dst_entry *xfrm_bundle_create(struct xfrm_policy *policy,
+ 		xdst->route = dst;
+ 		dst_copy_metrics(dst1, dst);
+ 
++#if defined(CONFIG_INET_IPSEC_OFFLOAD) || defined(CONFIG_INET6_IPSEC_OFFLOAD)
++		if ((xfrm[i]->props.mode != XFRM_MODE_TRANSPORT) &&
++			(!xfrm[i]->offloaded)) {
++#else
+ 		if (xfrm[i]->props.mode != XFRM_MODE_TRANSPORT) {
++#endif
+ 			family = xfrm[i]->props.family;
+ 			dst = xfrm_dst_lookup(xfrm[i], tos, &saddr, &daddr,
+ 					      family);
+-- 
+1.9.1
+

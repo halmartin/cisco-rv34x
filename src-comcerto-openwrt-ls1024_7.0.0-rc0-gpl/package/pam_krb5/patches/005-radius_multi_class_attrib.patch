@@ -1,0 +1,27 @@
+diff -rauN e/public.c f/public.c
+--- e/public.c	2016-05-23 10:27:01.440224195 +0530
++++ f/public.c	2016-05-23 10:29:42.685532053 +0530
+@@ -179,11 +179,12 @@
+                  for (i = 0; values[i] != NULL; i++) {
+                       /* print each value of a attribute here */
+                      group = strtok(values[i],",");
+-                     group = strtok(group,"=");                                                                                                                                               group = strtok(NULL,"\0");
++                     group = strtok(group,"=");
++                     group = strtok(NULL,"\0");
+ 
+                  }
+                  if (group != NULL)
+-                     (void) pam_set_data (pamh, "groupattr",(void *) strdup (group),
++                     (void) pam_set_data (pamh, "groupattr0",(void *) strdup (group),
+                                                                      free_data);
+                  ldap_value_free(values);
+              }
+@@ -192,7 +193,7 @@
+      }
+ 
+      if (group == NULL)
+-         (void) pam_set_data (pamh, "groupattr",(void *) strdup ("default"),
++         (void) pam_set_data (pamh, "groupattr0",(void *) strdup ("default"),
+                                                          free_data);
+ 
+      ldap_msgfree(res);

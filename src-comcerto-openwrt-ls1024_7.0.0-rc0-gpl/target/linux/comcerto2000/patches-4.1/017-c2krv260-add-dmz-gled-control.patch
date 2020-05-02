@@ -1,0 +1,16 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add dmz gled control.
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-01-18 11:03:05.148378066 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-01-18 11:03:50.188378196 +0800
+@@ -185,6 +185,11 @@
+ 		.gpio           = DIAG_RLED_GPIO_NUM,
+ 		.active_low     = 0,
+ 	},{
++		.name           = "rv160w::dmz-gled",
++		.default_trigger    = "none",
++		.gpio           = DMZ_GLED_GPIO_NUM,
++		.active_low     = 0,
++	},{
+ 		.name           = "rv160w::pse_led1",
+ 		.default_trigger    = "none",
+ 		.gpio           = PSE_LED1_GPIO_NUM,

@@ -1,0 +1,11 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2006 OpenWrt.org
+
+STOP=99
+stop() {
+	sync
+	sleep 5
+	/bin/umount -a -d -r
+	ubidetach -d 0 > /dev/console
+	sleep 1
+}

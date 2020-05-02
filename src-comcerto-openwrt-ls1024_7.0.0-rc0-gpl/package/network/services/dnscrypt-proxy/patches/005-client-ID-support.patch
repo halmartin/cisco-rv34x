@@ -1,0 +1,376 @@
+From 9d7c5ed2b4ebd3fd54f35e8ab700cfaa8c66ee3b Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Mon, 20 Aug 2018 18:29:04 +0530
+Subject: [PATCH] Addition of support for client IP
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ .../example-ldns-opendns-deviceid.c                | 239 ++++++++++++---------
+ 1 file changed, 143 insertions(+), 96 deletions(-)
+
+diff --git a/src/plugins/vendor-specific/example-ldns-opendns-deviceid/example-ldns-opendns-deviceid.c b/src/plugins/vendor-specific/example-ldns-opendns-deviceid/example-ldns-opendns-deviceid.c
+index 36693f2..aab43ea 100644
+--- a/src/plugins/vendor-specific/example-ldns-opendns-deviceid/example-ldns-opendns-deviceid.c
++++ b/src/plugins/vendor-specific/example-ldns-opendns-deviceid/example-ldns-opendns-deviceid.c
+@@ -10,15 +10,44 @@
+ 
+ #include <dnscrypt/plugin.h>
+ #include <ldns/ldns.h>
++#include <netinet/in.h>
+ 
+ DCPLUGIN_MAIN(__FILE__);
+ 
+ //#define EDNS_HEADER "0004000f4f70656e444e53"
+ /* Umbrella EDNS header consist opt-code(6942)+length(000f)+"opendns"(i.e 4f70656e444e53) */
+-#define OPENDNS_EDNS_HEADER "6942000f4f70656e444e53"
++#define OPENDNS_EDNS_HEADER "6942" "000f" "4f70656e444e53"
+ #define EDNS_DEV_ID "cafebabedeadbeef"
+ #define OPENDNS_DEVICE_ID_FILE	"/mnt/configcert/umbrella/device-id"
+ 
++/* opt-code(4f44)+length(0010)+ { magic(0x4f444e53) + version(00)+ flags(00)+ data (IP, org-name)}*/
++#define OPENDNS_EDNS_CLIENT_IP_HEADER "4f44" "0010" "4f444e53" "00" "00"
++
++#define EDNS_ORG_ID_TYPE "08" //08 , UCI Organization ID.
++#define EDNS_ORG_ID "00256282" //Example from UCI: 2450050 in Dec/ascii
++
++#define EDNS_CLIENT_IP_TYPE "10" //10, Client IP
++#define EDNS_CLIENT_IP "c0a80101" //192.168.1.1
++
++#define DEVICE_ID_OFFSET	11
++#define DEVICE_ID_LEN		8
++#define ORGANIZATION_ID_OFFSET	30
++#define ORGANIZATION_ID_LEN	4
++#define CLIENT_IP_OFFSET	35
++//#define CLIENT_IP_LEN		4
++#define CLIENT_IP_LEN		16
++//#define FINAL_RDATA_SIZE	39
++#define FINAL_RDATA_SIZE	51
++
++struct um_data {
++    uint8_t __organization_id[4 + 1];
++    uint8_t __device_id[8 + 1];
++};
++
++//Below is the final hex data that we need to send where Dev ID, Org ID and IP are zeroed out.
++//uint8_t dummy_data[] = {0x69, 0x42, 0x00, 0x0f, 0x4f, 0x70, 0x65, 0x6e, 0x44, 0x4e, 0x53, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4f, 0x44, 0x00, 0x10, 0x4f, 0x44, 0x4e, 0x53, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00}; //With just IPv4 support
++static uint8_t dummy_data[] = {0x69, 0x42, 0x00, 0x0f, 0x4f, 0x70, 0x65, 0x6e, 0x44, 0x4e, 0x53, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4f, 0x44, 0x00, 0x1c, 0x4f, 0x44, 0x4e, 0x53, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}; //For IPv4 support.
++
+ const char *
+ dcplugin_description(DCPlugin * const dcplugin)
+ {
+@@ -67,6 +96,25 @@ load_device_id_from_file(const char * const file_name)
+     return device_id;
+ }
+ 
++static void
++load_org_id_from_uci(char *final_buff)
++{
++    FILE *fd;
++    char buff[10];
++    if ((fd=popen ("uci get umbrella.netdev_config_0.organization_id","r")) == NULL)
++    {
++        printf("\n %s:%d fail ",__func__,__LINE__);
++        return;
++    }
++    if(fgets(buff,10,fd) == NULL)
++        printf("could not read data for orgID\n");
++    printf("org_id-str:%s org_id:%08x\n", buff, atoi(buff));
++    sprintf(final_buff, "%08x",atoi(buff));
++
++    pclose(fd);
++    //return buff;
++}
++
+ static int devid_ctox(char *cdevid, uint8_t *xdevid)
+ {
+   int len, i;
+@@ -100,77 +148,99 @@ static int devid_ctox(char *cdevid, uint8_t *xdevid)
+     return 0;
+ }
+ 
++static void
++ip4tohex(char hex[4 * 2 + 1], unsigned char ip[4])
++{
++    static const char HEX[16] = "0123456789ABCDEF";
++    size_t            i;
++
++    for (i = 0U; i < 4U; i++) {
++    	hex[i * 2U] = HEX[(ip[i] >> 4) & 0xf];
++	hex[i * 2U + 1U] = HEX[ip[i] & 0xf];
++    }   
++    hex[i * 2U] = 0;
++#ifdef DEVID_DEBUG
++    printf("\nip data is:%x %x %x %x Hex data is:%s\n",ip[0], ip[1], ip[2],ip[3], hex);
++#endif
++}
+ 
+-ldns_rdf *load_edns_hdr_n_data(char *cdev_id)
++ldns_rdf *load_edns_hdr_n_data(struct um_data *umdata, DCPlugin *dcplugin, const struct sockaddr_storage * const client_addr)
+ {
+   ldns_rdf *edns_data;
+   uint8_t  odns_tag[] = {0x4f,0x70,0x65,0x6e,0x44,0x4e,0x53};//opendns tag
+   uint16_t optcode = 0x6942;
+   uint16_t optlen = 0x000f;
+   uint8_t  *opt_rr, *buf, *xdev_id;
+-  uint16_t tag_len, cdevid_len, xdevid_len;
+-  uint16_t optrr_sz, rd_len = 0, i;
++  uint16_t tag_len;
++  uint16_t optrr_sz, rd_len = 0;
++  char ip_hex[8U + 1U];
++  int itr = 0;
++  uint8_t *data_final = NULL;
+ 
+   tag_len = sizeof(odns_tag);
+-  cdevid_len = strlen(cdev_id);
+-  xdevid_len = (cdevid_len/2);
+-  
+-  xdev_id = (uint8_t *)malloc(xdevid_len);
+-  if (!xdev_id) return NULL;
+-
+-  if (devid_ctox(cdev_id, xdev_id) != 0)
+-  {
+-      printf("\n Converting dev_id=%s to hex failed",cdev_id);
+-      free(xdev_id);
+-      return NULL;
+-  }
+-
+-  optrr_sz = 4 + tag_len + xdevid_len;
+-  opt_rr = (uint8_t *)malloc(optrr_sz);
+-  if (!opt_rr) {
+-      free(xdev_id);
+-      return NULL;
+-  }
+ 
+ #ifdef DEVID_DEBUG
+-  printf("\n %s: sizeof ednshdr=%d szoftag=%d devidxlen=%d",__func__,optrr_sz,tag_len,xdevid_len);
+-  printf("\n devid=%s",cdev_id);
++  if (client_addr->ss_family == AF_INET) {
++    //ip4tohex(ip_hex, (unsigned char *) &(((struct sockaddr_in *)client_addr)->sin_addr.s_addr));
++    char ip[128];
++    inet_ntop(client_addr->ss_family, &((struct sockaddr_in *)client_addr)->sin_addr, ip, 128);
++    printf("\nIP data is:%s \r\n", ip);
++  } else {
++    char ip[128];
++    inet_ntop(client_addr->ss_family, &((struct sockaddr_in6 *)client_addr)->sin6_addr , ip, 128);
++    printf("\nIP data is:%s family:%d IPV6:%d\r\n", ip,client_addr->ss_family, AF_INET6);
++  }
+ #endif
+ 
+-  buf = opt_rr;
+-  /* option code */ 
+-  *((uint16_t *)buf) = htons(optcode);
+-  buf += 2;
+-  rd_len += 2;
+-  
+-  /* option length */
+-  *((uint16_t *)buf) = htons(optlen);
+-  buf += 2;
+-  rd_len += 2;
+-  
+-  /* opendns tag */ 
+-  memcpy(buf, odns_tag, tag_len); 
+-  buf += tag_len;
+-  rd_len += tag_len;
++  if (!umdata)
++  {
++    char   org_id[24] = {'\0'}; //Actual Org ID is just 16bytes in char
++    char   *device_id = NULL; //Actual Dev ID is just 8bytes in char
++    int i = 0;
++
++    umdata = malloc(sizeof(struct um_data));
++    memset(umdata, 0, sizeof(struct um_data));
++
++    load_org_id_from_uci(org_id);
++    if (strlen(org_id) != 8) {
++      printf("\n%s: orgid=%s of sz=%d is != 8",__func__,org_id,sizeof(org_id));
++      free(umdata);
++      return DCP_SYNC_FILTER_RESULT_ERROR;
++    }
++    devid_ctox(org_id, umdata->__organization_id); //This function can be reused
++
++    device_id = load_device_id_from_file(OPENDNS_DEVICE_ID_FILE);
++    if (device_id != NULL) {
++      device_id[16] = '\0';
+  
+-  /* device id */ 
+-  memcpy(buf, xdev_id, xdevid_len); 
+-  rd_len += xdevid_len;
+-  /* copied the contents of xdevid, need to free now */
+-  free(xdev_id);
++      if (strlen(device_id) != 16) {
++        printf("\n%s: devid=%s of sz=%d is != 16",__func__,device_id,sizeof(device_id));
++        free(umdata);
++        return DCP_SYNC_FILTER_RESULT_ERROR;
++      }
+ 
+-#ifdef DEVID_DEBUG
+-  printf("\n######## RDF details: %d octes ##################\n",rd_len);
+-  for (i=0; i < optrr_sz; i++)
+-  {
+-       printf("%x",opt_rr[i]);
++      devid_ctox(device_id, umdata->__device_id);
++      free(device_id);
++    } else {
++        printf("\n%s:%d mem alloc to device_id is failed OR device_id could not be fetched from file.\n",__func__,__LINE__);
++        free(umdata);
++        return DCP_SYNC_FILTER_RESULT_ERROR;
++    }
++    memcpy(dummy_data + DEVICE_ID_OFFSET, umdata->__device_id, DEVICE_ID_LEN); //Copied Device_ID
++    memcpy(dummy_data + ORGANIZATION_ID_OFFSET, umdata->__organization_id, ORGANIZATION_ID_LEN); //Copied organization_ID
++    dcplugin_set_user_data(dcplugin, umdata);
+   }
+-#endif
++
++  data_final = (uint8_t *)malloc(FINAL_RDATA_SIZE); //Final SIZE after RDATA0/1
++  memcpy(data_final, dummy_data, FINAL_RDATA_SIZE); //Exact data is copied.
++// memcpy(data_final + DEVICE_ID_OFFSET, umdata->__device_id, DEVICE_ID_LEN); //Copied Device_ID
++// memcpy(data_final + ORGANIZATION_ID_OFFSET, umdata->__organization_id, ORGANIZATION_ID_LEN); //Copied organization_ID
++  memcpy(data_final + CLIENT_IP_OFFSET, (unsigned char *) &(((struct sockaddr_in6 *)client_addr)->sin6_addr.s6_addr), CLIENT_IP_LEN);
+ 
+   edns_data = (ldns_rdf *)malloc(sizeof(ldns_rdf));
+ 
+-  edns_data->_data = opt_rr;
+-  edns_data->_size = rd_len;
++  edns_data->_data = data_final;
++  edns_data->_size = FINAL_RDATA_SIZE;
+   edns_data->_type = LDNS_RDF_TYPE_HEX;
+ 
+   return edns_data;
+@@ -191,7 +261,7 @@ dcplugin_init(DCPlugin * const dcplugin, int argc, char *argv[])
+         printf("\n%s:%d malloc fail...",__func__,__LINE__);
+         return -1;
+     }
+-    dcplugin_set_user_data(dcplugin, edns_hex);
++    //dcplugin_set_user_data(dcplugin, edns_hex);
+     memcpy(edns_hex, OPENDNS_EDNS_HEADER EDNS_DEV_ID, edns_hex_size);
+ 
+     if (argc == 2U)	{
+@@ -214,14 +284,16 @@ dcplugin_init(DCPlugin * const dcplugin, int argc, char *argv[])
+             free(edns_hex);
+             return -1;
+         }
++	//printf("This case should not occur at all:Device ID is null\n");
+     }
+ 
+     if (device_id != NULL) {
+         device_id[16] = '\0';
+-        memcpy(edns_hex + sizeof OPENDNS_EDNS_HEADER - (size_t) 1U,
++	memcpy(edns_hex + sizeof OPENDNS_EDNS_HEADER - (size_t) 1U,\
+                device_id, sizeof EDNS_DEV_ID);
+         free(device_id);
+     }
++
+     if (device_id_env != NULL) {
+         memset(device_id_env, 0, strlen(device_id_env));
+     }
+@@ -267,7 +339,6 @@ int get_router_id()
+ DCPluginSyncFilterResult
+ dcplugin_sync_pre_filter(DCPlugin *dcplugin, DCPluginDNSPacket *dcp_packet)
+ {
+-    char   *device_id = NULL;
+     char   *edns_rdata;
+     uint8_t  *new_packet;
+     ldns_rdf *edns_data;
+@@ -277,19 +348,20 @@ dcplugin_sync_pre_filter(DCPlugin *dcplugin, DCPluginDNSPacket *dcp_packet)
+     uint8_t  *edata;
+     int       esz, ii;
+     unsigned char *pkt = dcplugin_get_wire_data(dcp_packet);
++    struct um_data *umdata = dcplugin_get_user_data(dcplugin);
+ 
+-    /* if umbrella network device option is not opted then no need to embbed device-id just return */
+-    router_id = get_router_id();
+-    if (router_id == 1)	{
+-        #ifdef DEVID_DEBUG
+-         printf("\n %s:%d Router Identity is Network, just bypass this plugin",__func__,__LINE__,router_id);
+-        #endif
+-        return DCP_SYNC_FILTER_RESULT_OK;
+-    }
+-    #ifdef DEVID_DEBUG
+-    printf("\n %s:%d routerid=%d option ",__func__,__LINE__,router_id);
+-    #endif
++#ifdef DEVID_DEBUG
++    if (umdata)
++    {
++        printf("\nSKC: Device ID in Hex:%02x%02x%02x%02x%02x%02x%02x%02x", umdata->__device_id[0],\
++	umdata->__device_id[1], umdata->__device_id[2],umdata->__device_id[3], umdata->__device_id[4],\
++	umdata->__device_id[5], umdata->__device_id[6], umdata->__device_id[7]);
+ 
++	printf("SKC:org_id is:%02x%02x%02x%02x\n", umdata->__organization_id[0], umdata->__organization_id[1],\
++	umdata->__organization_id[2], umdata->__organization_id[3]);
++    }
++#endif
++    
+     if (ldns_wire2pkt(&packet, dcplugin_get_wire_data(dcp_packet),
+                       dcplugin_get_wire_data_len(dcp_packet))
+         != LDNS_STATUS_OK) {
+@@ -297,36 +369,17 @@ dcplugin_sync_pre_filter(DCPlugin *dcplugin, DCPluginDNSPacket *dcp_packet)
+         return DCP_SYNC_FILTER_RESULT_ERROR;
+     }
+ 
+-    #ifdef DEVID_DEBUG
++#ifdef DEVID_DEBUG
+      printf("\n %s:%d incoming pktsz=%d",__func__,__LINE__,ldns_pkt_size(packet));
+-    #endif
+-
+-
+-    /* As device-id can be changed in run time and the same will be upated in file:OPENDNS_DEVICE_ID_FILE */ 
+-    /* It is better to load device-id from the file */
+-    device_id = load_device_id_from_file(OPENDNS_DEVICE_ID_FILE);
+-    if (device_id != NULL) {
+-        device_id[16] = '\0';
+-  
+-        if (strlen(device_id) != 16) {
+-	    printf("\n%s: devid=%s of sz=%d is != 16",__func__,device_id,sizeof(device_id));
+-            return DCP_SYNC_FILTER_RESULT_ERROR;
+-        }
+-    }
+-    else {
+-        printf("\n%s:%d mem alloc to device_id is failed",__func__,__LINE__);
+-        return DCP_SYNC_FILTER_RESULT_ERROR;
+-    }
+-
++#endif
+ 
+     /* convert the edns rdata from ascii hex to network format to update in the packet */
+-    edns_data = load_edns_hdr_n_data(device_id);
++    //edns_data = load_edns_hdr_n_data(device_id);
++    edns_data = load_edns_hdr_n_data(umdata, dcplugin, dcplugin_get_client_address(dcp_packet));
+ 
+     if (!edns_data)
+     {
+         printf("\n edns_data is null...\n");
+-        /*free deviceid once its contents copied to edns_rdata */
+-        free(device_id);
+         ldns_pkt_free(packet);
+         return DCP_SYNC_FILTER_RESULT_ERROR;
+     }
+@@ -353,8 +406,6 @@ dcplugin_sync_pre_filter(DCPlugin *dcplugin, DCPluginDNSPacket *dcp_packet)
+     if (ldns_pkt2wire(&new_packet, packet, &new_packet_size)
+         != LDNS_STATUS_OK) {
+         printf("\n %s:%d pkt2wire failed... ",__func__,__LINE__);
+-        /*free deviceid once its contents copied to edns_rdata */
+-        free(device_id);
+         return DCP_SYNC_FILTER_RESULT_ERROR;
+     }
+     #ifdef DEVID_DEBUG
+@@ -369,8 +420,6 @@ dcplugin_sync_pre_filter(DCPlugin *dcplugin, DCPluginDNSPacket *dcp_packet)
+         printf("\n %s: newpkt_sz=%d > max_size=%d... ",
+                __func__,new_packet_size,dcplugin_get_wire_data_max_len(dcp_packet));
+        #endif
+-        /*free deviceid once its contents copied to edns_rdata */
+-        free(device_id);
+         return DCP_SYNC_FILTER_RESULT_ERROR;
+     }
+ 
+@@ -386,8 +435,6 @@ dcplugin_sync_pre_filter(DCPlugin *dcplugin, DCPluginDNSPacket *dcp_packet)
+     printf("\n ###############################################");
+     #endif
+ 
+-    /*free deviceid once its contents copied to edns_rdata */
+-    free(device_id);
+     free(new_packet);
+     ldns_pkt_free(packet);
+ 
+-- 
+1.9.1
+

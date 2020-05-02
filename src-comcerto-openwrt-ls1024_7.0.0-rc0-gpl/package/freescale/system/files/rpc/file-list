@@ -1,0 +1,194 @@
+#!/bin/sh
+
+errcode=1
+errstring="Invalid Arguments"
+CERT_LIST=/tmp/certlist
+USB_MOUNT="/media/USB"
+USB_FILE1="FILE://USB1"
+USB_FILE2="FILE://USB2"
+USB_PORT=
+
+filetype=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "fileType") {print $(I+1)};}'`
+source_location_url=`echo $@ | awk '{
+       				for (I=1;I<=NF;I=I+2) 
+       				{
+       					if ($I == "source") 
+       					{
+       						if ($(I+1) == "__BEGIN") {
+       							for (J=I+2;J<=NF;J=J+2) {
+       								if ($J == "location-url") {
+       									{print $(J+1)};
+       									break;
+       								}
+       							}
+       						}
+       					}
+       				}
+       			    }'`
+
+list_files()
+{
+        if !(test -d "$1") then
+        	return;
+        fi
+
+	cd "$1"
+        for i in *
+        do
+	        if !(test -d "$i") then
+			echo "file-names __BEGIN file-name \"$i\" directory false file-names __END" #Display File name
+                else
+                	echo "file-names __BEGIN file-name \"$i\" directory true file-names __END" #Display File name
+                fi
+        done
+}
+
+if [ "$filetype" = "firmware" ];then
+	# List all the images
+
+	# Check for USB1 or USB2
+	usbcheck=`echo $source_location_url | grep "$USB_FILE1"`
+	if [ -n "$usbcheck" ];then
+		USB_PORT="USB1"
+	else
+		usbcheck=`echo $source_location_url | grep "$USB_FILE2"`
+		if [ -n "$usbcheck" ];then
+			USB_PORT="USB2"
+		fi
+	fi
+	if [ -n "$USB_PORT" ];then
+		# Check if the USB is mounted or not.
+		if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+			errstring="USB device is not mounted."
+		else
+			FIND_STR=$(find $USB_MOUNT/$USB_PORT -name "*.img" -print | tr ' ' '\\')
+			for i in $FIND_STR
+			do
+				filename=`echo $i | tr '\\' ' '` >/dev/null 2>&1
+				echo "file-names __BEGIN file-name \"$filename\" directory false file-names __END"
+			done
+		fi
+	else
+		errstring="Invalid source url"
+	fi
+fi
+
+if [ "$filetype" = "certificate" ];then
+	# List all the certificates
+
+	# Check for USB1 or USB2
+	usbcheck=`echo $source_location_url | grep "$USB_FILE1"`
+	if [ -n "$usbcheck" ];then
+		USB_PORT="USB1"
+	else
+		usbcheck=`echo $source_location_url | grep "$USB_FILE2"`
+		if [ -n "$usbcheck" ];then
+			USB_PORT="USB2"
+		fi
+	fi
+	if [ -n "$USB_PORT" ];then
+		# Check if the USB is mounted or not.
+		if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+			errstring="USB device is not mounted."
+		else
+			FIND_STR=$(find $USB_MOUNT/$USB_PORT -name "*.crt" -o -name "*.pem" -o -name "*.p12" | tr ' ' '\\')
+			for i in $FIND_STR
+			do
+				filename=`echo $i | tr '\\' ' '` >/dev/null 2>&1
+				echo "file-names __BEGIN file-name \"$filename\" directory false file-names __END"
+			done
+		fi
+	else
+		errstring="Invalid source url"
+	fi
+fi
+
+# Import certificate from USB case
+if [ -z "$filetype" ] && [ -n "$source_location_url" ];then
+	# Check for USB1 or USB2
+	usbcheck=`echo $source_location_url | grep "$USB_FILE1"`
+	if [ -n "$usbcheck" ];then
+		USB_PORT="USB1"
+	else
+		usbcheck=`echo $source_location_url | grep "$USB_FILE2"`
+		if [ -n "$usbcheck" ];then
+			USB_PORT="USB2"
+		fi
+	fi
+	if [ -n "$USB_PORT" ];then
+		# Check if the USB is mounted or not.
+		if [ ! -d "$USB_MOUNT/$USB_PORT" ];then		
+			errstring="USB device is not mounted."	
+		else
+			DIR=`echo $source_location_url | sed -e "s/FILE:\/\/$USB_PORT//"`
+			DIR=$USB_MOUNT"/"$USB_PORT"/"$DIR
+			if [ -d "$DIR" ];then
+					list_files "$DIR"
+			fi
+		fi
+	else
+		errstring="Invalid source url"
+	fi
+fi
+
+# Import configuration from USB
+if [ "$filetype" = "configuration" ];then
+	# List all the images
+
+	# Check for USB1 or USB2
+	usbcheck=`echo $source_location_url | grep "$USB_FILE1"`
+	if [ -n "$usbcheck" ];then
+		USB_PORT="USB1"
+	else
+		usbcheck=`echo $source_location_url | grep "$USB_FILE2"`
+		if [ -n "$usbcheck" ];then
+			USB_PORT="USB2"
+		fi
+	fi
+	if [ -n "$USB_PORT" ];then
+		# Check if the USB is mounted or not.
+		if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+			errstring="USB device is not mounted."
+		else
+			FIND_STR=$(find $USB_MOUNT/$USB_PORT -name "*.xml" -print | tr ' ' '\\')
+			for i in $FIND_STR
+			do
+				filename=`echo $i | tr '\\' ' '` >/dev/null 2>&1
+				echo "file-names __BEGIN file-name \"$filename\" directory false file-names __END"
+			done
+		fi
+	else
+		errstring="Invalid source url"
+	fi
+fi
+
+# Import language file or 3g-4g dongle drivers from USB
+if [ "$filetype" = "language-pack" ] || [ "$filetype" = "3g-4g-driver" ];then
+	# List all the images
+
+	# Check for USB1 or USB2
+	usbcheck=`echo $source_location_url | grep "$USB_FILE1"`
+	if [ -n "$usbcheck" ];then
+		USB_PORT="USB1"
+	else
+		usbcheck=`echo $source_location_url | grep "$USB_FILE2"`
+		if [ -n "$usbcheck" ];then
+			USB_PORT="USB2"
+		fi
+	fi
+	if [ -n "$USB_PORT" ];then
+		# Check if the USB is mounted or not.
+		if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+			errstring="USB device is not mounted."
+		else
+			FIND_STR=$(find $USB_MOUNT/$USB_PORT -name "*.tar.gz" -print | tr ' ' '\\')
+			for i in $FIND_STR
+			do
+				filename=`echo $i | tr '\\' ' '` >/dev/null 2>&1
+				echo "file-names __BEGIN file-name \"$filename\" directory false file-names __END"
+			done
+		fi
+	else
+		errstring="Invalid source url"
+	fi
+fi

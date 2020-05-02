@@ -1,0 +1,76 @@
+#!/bin/sh
+. /etc/boardInfo
+
+mode=0 #DST_MODE
+src_time_zone= #START_TIMEZONE
+dst_time_zone= #DST_TIMEZONE
+dst_start_month= #START_MONTH
+dst_start_day= #START_DAY
+dst_start_time_hour= #START_HOUR
+dst_start_time_min= #START_MIN
+dst_end_month= #END_MONTH
+dst_end_day= #END_DAY
+dst_end_time_hour= #END_HOUR
+dst_end_time_min= #END_MIN
+offset= #DST_OFFSET
+tmp=0
+YEAR= #CONFIG_YEAR
+
+ENABLED=0 #DST_ENABLED
+
+if [ "$ENABLED" -eq 1 ];then
+	current_tz=`cat $TZFile`
+	systemYear=`date -u "+%Y"`
+	if [ "$mode" -eq 1 ] && [ "$YEAR" -ne "$systemYear" ];then
+		dst_start_time=`uci get system.day_light.start_time`
+                dst_end_time=`uci get system.day_light.end_time`
+		/etc/init.d/system update_dst_param "1" "$dst_start_time" "$dst_end_time" "$offset" "$src_time_zone" "$dst_time_zone"
+		systemYear=`date -u "+%Y"`
+	fi
+
+	if [ "$offset" -lt 0 ] && [ "$current_tz" = "$dst_time_zone" ];then
+		StartDstepoc=$(date -D '%s' -d "$(( `date +%s -d "$systemYear.$dst_start_month.$dst_start_day-$dst_start_time_hour:$dst_start_time_min"`+$offset*60 ))" +%s)
+	else
+		StartDstepoc=`date -d "$systemYear.$dst_start_month.$dst_start_day-$dst_start_time_hour:$dst_start_time_min" +%s`
+	fi
+
+
+	StartDst=`date "+%m.%d.%H.%M" -u --date=@$StartDstepoc`
+	local oIFS="$IFS"; IFS="."
+	set $StartDst
+	IFS="$oIFS"
+	Start_DstMonth=$1;Start_DstDay=$2;Start_DstHour=$3;Start_DstMin=$4
+	
+	if [ "$offset" -gt 0 ] && [ "$current_tz" = "$src_time_zone" ];then
+		EndDstepoc=$(date -D '%s' -d "$(( `date +%s -d "$systemYear.$dst_end_month.$dst_end_day-$dst_end_time_hour:$dst_end_time_min"`-$offset*60 ))" +%s)
+	else
+		EndDstepoc=`date -d "$systemYear.$dst_end_month.$dst_end_day-$dst_end_time_hour:$dst_end_time_min" +%s`
+	fi
+
+	EndDst=`date "+%m.%d.%H.%M" -u --date=@$EndDstepoc`
+	local oIFS="$IFS"; IFS="."
+	set $EndDst
+	IFS="$oIFS"
+	End_DstMonth=$1;End_DstDay=$2;End_DstHour=$3;End_DstMin=$4
+	
+	localDst=`date -u "+%m.%d.%H.%M"` 
+	local oIFS="$IFS"; IFS="."
+	set $localDst
+	IFS="$oIFS"
+	Curr_DstMonth=$1;Curr_DstDay=$2;Curr_DstHour=$3;Curr_DstMin=$4
+	
+	/usr/bin/checkDst "$Curr_DstMonth" "$Curr_DstDay" "$Curr_DstHour" "$Curr_DstMin" "$Start_DstMonth" "$Start_DstDay" "$Start_DstHour" "$Start_DstMin" "$End_DstMonth" "$End_DstDay" "$End_DstHour" "$End_DstMin" "$systemYear"
+	changeDst="$?"
+
+	if [ "$changeDst" -eq 1 ];then
+		[ "$current_tz" != "$dst_time_zone" ] && {
+			echo "$dst_time_zone" > $TZFile
+			date -k
+		}
+	else
+		[ "$current_tz" != "$src_time_zone" ] && {
+			echo "$src_time_zone" > $TZFile
+			date -k
+		}
+	fi
+fi

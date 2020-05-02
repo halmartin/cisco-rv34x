@@ -1,0 +1,2208 @@
+From 8066b0fbaf1302bef5ef8bea8e125e900bace9d3 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy K <ganeshreddy@freescale.com>
+Date: Fri, 3 Jul 2015 18:27:48 +0530
+Subject: [PATCH 01/60] openwrt_c2krv340_final20150630.patch commits to barebox
+
+RV340 patch changes commit to barebox repo
+
+Signed-off-by: Ganesh Reddy K <ganeshreddy@freescale.com>
+---
+ arch/arm/Makefile                                  |   1 +
+ arch/arm/boards/comcerto-rv340/Makefile            |   1 +
+ arch/arm/boards/comcerto-rv340/c2k_rv340.c         | 362 +++++++++++++++++
+ arch/arm/boards/comcerto-rv340/config.h            |  51 +++
+ arch/arm/boards/comcerto-rv340/env/config          |  44 ++
+ arch/arm/configs/comcerto-2k_rv340_defconfig       | 399 +++++++++++++++++++
+ arch/arm/configs/comcerto-2k_rv340_diags_defconfig | 441 +++++++++++++++++++++
+ .../comcerto-2k_rv340_nand_uloader_defconfig       | 315 +++++++++++++++
+ .../configs/comcerto-2k_rv340_uloader_defconfig    | 310 +++++++++++++++
+ arch/arm/mach-comcerto/Kconfig                     |   4 +
+ arch/arm/mach-comcerto/include/mach/comcerto_spi.h |   1 +
+ defaultenv/bin/boot                                |   6 +-
+ drivers/mtd/nand/comcerto_nand.c                   |   3 +-
+ drivers/net/comcerto/c2000_eth.c                   |  16 +
+ drivers/net/miidev.c                               |   3 +-
+ drivers/spi/c2k_spi_flash.c                        |   2 +
+ drivers/spi/c2k_spi_flash.h                        |   7 +
+ uldr_sku_gen.sh                                    |   2 +-
+ 18 files changed, 1959 insertions(+), 9 deletions(-)
+ create mode 100644 arch/arm/boards/comcerto-rv340/Makefile
+ create mode 100644 arch/arm/boards/comcerto-rv340/c2k_rv340.c
+ create mode 100644 arch/arm/boards/comcerto-rv340/config.h
+ create mode 100644 arch/arm/boards/comcerto-rv340/env/config
+ create mode 100644 arch/arm/configs/comcerto-2k_rv340_defconfig
+ create mode 100644 arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+ create mode 100644 arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig
+ create mode 100644 arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+
+diff --git a/arch/arm/Makefile b/arch/arm/Makefile
+index 2737415..9e98208 100644
+--- a/arch/arm/Makefile
++++ b/arch/arm/Makefile
+@@ -59,6 +59,7 @@ machine-$(CONFIG_ARCH_VERSATILE)	:= versatile
+ # by CONFIG_* macro name.
+ board-$(CONFIG_MACH_COMCERTO_C2K_EVM)           := comcerto-evm
+ board-$(CONFIG_MACH_COMCERTO_C2K_MFCNEVM)       := comcerto-mfcnevm
++board-$(CONFIG_MACH_COMCERTO_C2K_RV340)         := comcerto-rv340
+ board-$(CONFIG_MACH_COMCERTO_C2K_ASIC)          := comcerto-asic
+ board-$(CONFIG_MACH_COMCERTO_C2K_RTSM)          := comcerto-rtsm
+ board-$(CONFIG_MACH_A9M2410)			:= a9m2410
+diff --git a/arch/arm/boards/comcerto-rv340/Makefile b/arch/arm/boards/comcerto-rv340/Makefile
+new file mode 100644
+index 0000000..44dd6da
+--- /dev/null
++++ b/arch/arm/boards/comcerto-rv340/Makefile
+@@ -0,0 +1 @@
++obj-y += c2k_rv340.o
+diff --git a/arch/arm/boards/comcerto-rv340/c2k_rv340.c b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+new file mode 100644
+index 0000000..aecd291
+--- /dev/null
++++ b/arch/arm/boards/comcerto-rv340/c2k_rv340.c
+@@ -0,0 +1,362 @@
++
++/*
++ * Copyright (C) 2011 Mindspeed Technologies Pvt Ltd.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of
++ * the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
++ * MA 02111-1307 USA
++ *
++ */
++
++/**
++ * @file
++ * @brief Comcerto 2000 Specific Board Initialization routines
++ *
++ */
++
++
++#include <common.h>
++#include <init.h>
++#include <driver.h>
++#include <partition.h>
++#include <fs.h>
++#include <asm/io.h>
++#include <asm/types.h>
++#include <mach/comcerto-2000.h>
++#include <mach/exp-bus.h>
++#include <generated/mach-types.h>
++#include <sizes.h>
++#include <c2000_eth_pdata.h>
++#include <config.h>
++#include <spi/spi.h>
++#include <mach/comcerto_spi.h>
++#include <mach/gpio.h>
++#include <miidev.h>
++#include <asm/armlinux.h>
++#include <fast_uart.h>
++#include <i2c/i2c.h>
++#include <mach/i2c.h>
++#include <mach/otp.h>
++#include <mach/ddr.h>
++#include <mach/reset.h>
++#include <usb/ehci.h>
++
++#ifdef CONFIG_SPI
++static struct spi_board_info c2k_spi_dev_1[] = {
++	{
++        .name = SPI_FLASH_DEVICE_DRIVER, /* device name */
++        .max_speed_hz = 5*1000*1000, /* max freq this device can work with */
++        .bus_num = SPI_BUS_NUM_1, /* which driver to attach this device to */
++        .chip_select = SPI_CHIP_SELECT_NUM_0, /* which chip select this device is connected to */
++        .mode = SPI_CPOL | SPI_CPHA | SPI_DMA, /* operating modes */
++		.flash_name = S25FL032P_SPI_FLASH_NAME, 	/* Flash name is one of the flash in the flash table.*/
++						/* This flash table information is maintained in the */
++						/* SPI flash client driver. */
++    },
++};
++
++//Legacy spi
++
++static int c2k_spi_cs[2] = {0};
++
++static struct c2k_spi_master c2k_spi_1_data = {
++	.chipselect = c2k_spi_cs,
++	.num_chipselect = ARRAY_SIZE(c2k_spi_cs),
++	.bus_num = SPI_BUS_NUM_0, /* This field is used to identify LS SPI flash/HS SPI flash */
++};
++
++
++static struct device_d device_spi = {
++	.id = -1,
++	.name = "c2k_spi",
++	.map_base = SPI_BASEADDR,
++	.platform_data = &c2k_spi_1_data,
++};
++
++//--------------
++//Fast spi
++
++static int c2k_fast_spi_cs[2] = {0};
++
++static struct c2k_spi_master c2k_fast_spi_1_data = {
++	.chipselect = c2k_fast_spi_cs,
++	.num_chipselect = ARRAY_SIZE(c2k_fast_spi_cs),
++	.bus_num = SPI_BUS_NUM_1, /* This field is used to identify LS SPI flash/HS SPI flash */
++};
++
++
++static struct device_d device_fast_spi = {
++	.id = -1,
++	.name = "c2k_spi",
++	.map_base = FAST_SPI_BASEADDR,
++	.platform_data = &c2k_fast_spi_1_data,
++};
++#endif
++
++#if defined(CONFIG_NET_COMCERTO_2000)
++struct c2000_eth_platform_data eth0_pdata = {
++	.gemac_port = 0,
++	.mac_addr = 0,
++};
++
++struct device_d c2000_eth0 = {
++	.id = 0,
++	.name = "c2000_eth",
++	.map_base = COMCERTO_AXI_HFE_CFG_BASE,
++	/* .size  = 16M, */
++	.platform_data = &eth0_pdata,
++};
++
++struct c2000_eth_platform_data eth1_pdata = {
++	.gemac_port = 1,
++	.mac_addr = 0,
++};
++
++struct device_d c2000_eth1 = {
++	.id = 1,
++	.name = "c2000_eth",
++	.map_base = COMCERTO_AXI_HFE_CFG_BASE,
++	/* .size  = 16M, */
++	.platform_data = &eth1_pdata,
++};
++#endif
++
++static struct memory_platform_data sdram_pdata = {
++	.name = "ram0",
++	.flags = DEVFS_RDWR,
++};
++
++static struct device_d sdram_dev = {
++	.id = -1,
++	.name = "mem",
++	.map_base = 0x00000000,
++	.size = SZ_512M,
++	.platform_data = &sdram_pdata,
++};
++
++static struct fast_uart_plat serial_plat = {
++	.clock = 200000000,      /* 200MHz  */
++};
++
++static struct device_d fast_uart_device = {
++	.id       = -1,
++	.name     = "fast_uart",
++	.map_base = UART_BASEADDR,
++	.platform_data = (void *)&serial_plat,
++};
++
++static struct ehci_platform_data ehci_pdata = {
++	.flags = 0,
++	.hccr_offset = 0x0,
++	.hcor_offset = 0x10,
++};
++
++static struct device_d usbh2_dev = {
++	.id	  = -1,
++	.name     = "ehci",
++	.map_base = COMCERTO_AXI_USB2p0_CFG_BASE,
++	.size     = SZ_16M,
++	.platform_data = &ehci_pdata,
++};
++
++static int c2000_device_init(void)
++{
++#ifdef	CONFIG_COMCERTO_BOOTLOADER
++	u32 bootopt;
++#endif
++	int clk = HAL_get_axi_clk(); // Get AXI bus freq in MHz
++	serial_plat.clock = clk * 1000 * 1000;
++	register_device(&fast_uart_device);
++
++#ifdef CONFIG_SPI
++	spi_register_board_info(c2k_spi_dev_1, ARRAY_SIZE(c2k_spi_dev_1));
++	register_device(&device_spi);
++	register_device(&device_fast_spi);
++#endif
++
++#if defined(CONFIG_NET_COMCERTO_2000)
++	register_device(&c2000_eth0);
++	register_device(&c2000_eth1);
++#endif
++
++	register_device(&usbh2_dev);
++
++	//Exp bus soft reset
++	writel (0x1, EXP_SWRST_REG);
++	while(readl(EXP_SWRST_REG) & 0x1);
++
++	/* IBR, when booting from NOR, is changing expansion bus CS0 Mem Segment size to 1MiB
++	instead of the default reset value of 128MiB. Put back the reset default value */
++	writel(EXP_CS0_SEG_END_VAL, EXP_CS0_SEG_REG);
++
++	writel(EXP_CS1_BASE_VAL, EXP_CS1_BASE_REG);
++	writel(EXP_CS1_SEG_END_VAL, EXP_CS1_SEG_REG);
++
++	writel(EXP_CS2_BASE_VAL, EXP_CS2_BASE_REG);
++	writel(EXP_CS2_SEG_END_VAL, EXP_CS2_SEG_REG);
++
++	writel(EXP_CS3_BASE_VAL, EXP_CS3_BASE_REG);
++	writel(EXP_CS3_SEG_END_VAL, EXP_CS3_SEG_REG);
++
++#ifdef CONFIG_COMCERTO_NAND
++	writel(EXP_CS4_BASE_VAL, EXP_CS4_BASE_REG);
++	writel(EXP_CS4_SEG_END_VAL, EXP_CS4_SEG_REG);
++	//MLC NAND on RV340 is 8-bit. Enable 8-bit bus
++	writel((readl(EXP_CS4_CFG_REG) & (~0x6)), EXP_CS4_CFG_REG);
++
++#endif
++
++	//CS0 EXP bus Timing tune. It reduces the time to flash NOR
++	writel(0x03034007, EXP_CS0_TMG1_REG);
++	writel(0x04040502, EXP_CS0_TMG2_REG);
++
++#ifdef CONFIG_COMCERTO_NAND
++#ifdef CONFIG_COMCERTO_BOOTLOADER
++	//CS4 EXP bus Timing tune.
++	writel(0x1a1a401f, EXP_CS4_TMG1_REG);
++	writel(0x06060a04, EXP_CS4_TMG2_REG);
++#endif
++#endif
++	/* External reset to PCIe devices, Atheros Switch and FXS block, GPIO27 is used for TM_EXT_RESET*/
++	/*It seems some pcie wifi card has problem with the way external reset was being
++	  done (reset line high/delay/low/delay/high sequence) earlier. Instead simple
++	  reset pulse works for fine for these card and all the cards and it includes atheros
++	  switch*/
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_27, COMCERTO_GPIO_OUTPUT_REG);
++	writel( readl(COMCERTO_GPIO_OE_REG) | GPIO_27, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_27, COMCERTO_GPIO_OUTPUT_REG);
++
++	//For 16bit ddr, reduce the size to half 
++	if (is_16bitDDR_config())
++		sdram_dev.size >>= 1;
++
++	register_device(&sdram_dev);
++
++#ifdef	CONFIG_COMCERTO_BOOTLOADER
++	armlinux_add_dram(&sdram_dev);
++	armlinux_set_bootparams((void *)0x100);
++	armlinux_set_architecture(MACH_TYPE_COMCERTO);
++
++	bootopt = ((readl(COMCERTO_GPIO_SYSTEM_CONFIG) >>  BOOTSTRAP_BOOT_OPT_SHIFT) & BOOTSTRAP_BOOT_OPT_MASK);
++
++	/* ENV for SPI */
++	bootopt = ((readl(COMCERTO_GPIO_SYSTEM_CONFIG) >>  BOOTSTRAP_BOOT_OPT_SHIFT) & BOOTSTRAP_BOOT_OPT_MASK);
++	if(bootopt == BOOT_LS_SPI){
++		/* ENV for SPI */
++		printf("Using ENV from SPI Flash.\n");
++		if (cdev_by_name(SPI_FLASH_BAREBOX_DEV_NAME))
++		{
++			devfs_add_partition(SPI_FLASH_BAREBOX_DEV_NAME, 0xA0000, 0x20000, PARTITION_FIXED, "env0");
++			protect_file("/dev/env0", 1);
++		}
++	}
++	else if(bootopt == BOOT_HS_SPI){
++		/* ENV for SPI */
++		printf("Using ENV from Fast SPI Flash.\n");
++		if (cdev_by_name(FAST_SPI_FLASH_BAREBOX_DEV_NAME))
++		{
++			devfs_add_partition(FAST_SPI_FLASH_BAREBOX_DEV_NAME, 0xA0000, 0x20000, PARTITION_FIXED, "env0");
++			protect_file("/dev/env0", 1);
++		}
++	}else{
++		/* ENV for NOR */
++		printf("Using ENV from NOR Flash.\n");
++		devfs_add_partition("nor0", 0xA0000, 0x20000, PARTITION_FIXED, "env0");
++		protect_file("/dev/env0", 1);
++	}
++
++
++	/* Config GPIO Select */
++	writel(readl(COMCERTO_GPIO_PIN_SELECT_REG) & 0x00000000, COMCERTO_GPIO_PIN_SELECT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_PIN_SELECT_REG) | 0x0ffff000, COMCERTO_GPIO_EXT_PIN_SELECT_REG);
++	/* Config GPIO Output Enable */
++	writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_1, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_2, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_3, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) & ~GPIO_4, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) & ~GPIO_5, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) & ~GPIO_6, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) & ~GPIO_7, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_8, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) & ~GPIO_9, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_10, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_11, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) & ~GPIO_12, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_13, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) & ~GPIO_14, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_15, COMCERTO_GPIO_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_44, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_45, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_46, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_47, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_48, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) & ~GPIO_49, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_50, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_51, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_52, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_53, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_54, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_55, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_56, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_57, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_58, COMCERTO_GPIO_EXT_OE_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OE_REG) | GPIO_59, COMCERTO_GPIO_EXT_OE_REG);
++	/* Config GPIO Output */
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_1, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_2, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_3, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_8, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_10, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_11, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_13, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_15, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_44, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_45, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_46, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_47, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_48, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_50, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_51, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_52, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_53, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_54, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_55, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_56, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_57, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_58, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_59, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	/* GPIO Reset External Device */
++	udelay(100000);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_1, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_2, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_3, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_47, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) & ~GPIO_48, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	udelay(100000);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_1, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_2, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_3, COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_47, COMCERTO_GPIO_EXT_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_EXT_OUTPUT_REG) | GPIO_48, COMCERTO_GPIO_EXT_OUTPUT_REG);
++#endif
++	return 0;
++}
++
++int c2000_eth_board_init(int gemac_port)
++{
++	return 0;
++}
++
++device_initcall(c2000_device_init);
++
+diff --git a/arch/arm/boards/comcerto-rv340/config.h b/arch/arm/boards/comcerto-rv340/config.h
+new file mode 100644
+index 0000000..02e432a
+--- /dev/null
++++ b/arch/arm/boards/comcerto-rv340/config.h
+@@ -0,0 +1,51 @@
++#ifndef __CONFIG_H
++#define __CONFIG_H
++
++#define CONFIG_LBA48
++
++#define DDR_SIZE        SZ_512M
++
++#define CFG_I2C_EEPROM0_ADDR     0x50
++#define I2C_EEPROM0_DEVICE_NAME	"eeprom0"
++#define I2C_EEPROM_PAGE_SZ	128
++#define I2C_EEPROM_AT24C512B_SZ	64 * 1024
++#define I2C_EEPROM_SIZE		I2C_EEPROM_AT24C512B_SZ
++#define I2C_EEPROM0_SZ		(I2C_EEPROM_AT24C512B_SZ)
++
++#define NOR_FLASH_SIZE          64 * 1024 * 1024
++
++#define EMAC0_PHY_ADDR	5
++#define EMAC1_PHY_ADDR	6
++#define EMAC2_PHY_ADDR	0
++#define EMAC0_FLAGS 	0
++#define EMAC1_FLAGS 	0
++#define EMAC2_FLAGS 	GEMAC_NO_PHY
++
++#define EXP_CS0_BASE_VAL	0x0
++#define EXP_CS0_SEG_SIZE_VAL	0x7FFF
++#define EXP_CS0_SEG_END_VAL	(EXP_CS0_BASE_VAL + EXP_CS0_SEG_SIZE_VAL)
++
++#define EXP_CS1_BASE_VAL	(EXP_CS0_SEG_END_VAL + 1)
++#define EXP_CS1_SEG_SIZE_VAL	0xFF
++#define EXP_CS1_SEG_END_VAL	(EXP_CS1_BASE_VAL + EXP_CS1_SEG_SIZE_VAL)
++
++#define EXP_CS2_BASE_VAL	(EXP_CS1_SEG_END_VAL + 1)
++#define EXP_CS2_SEG_SIZE_VAL	0xFF
++#define EXP_CS2_SEG_END_VAL	(EXP_CS2_BASE_VAL + EXP_CS2_SEG_SIZE_VAL)
++
++#define EXP_CS3_BASE_VAL	(EXP_CS2_SEG_END_VAL + 1)
++#define EXP_CS3_SEG_SIZE_VAL	0xFF
++#define EXP_CS3_SEG_END_VAL	(EXP_CS3_BASE_VAL + EXP_CS3_SEG_SIZE_VAL)
++
++#define EXP_CS4_BASE_VAL	(EXP_CS3_SEG_END_VAL + 1)
++#define EXP_CS4_SEG_SIZE_VAL	0xFF
++#define EXP_CS4_SEG_END_VAL	(EXP_CS4_BASE_VAL + EXP_CS4_SEG_SIZE_VAL)
++
++#define SHIFT_4K_MUL	12
++
++#define COMCERTO_EXP_CS4_BASE_ADDR	(COMCERTO_AXI_EXP_BASE + (EXP_CS4_BASE_VAL << SHIFT_4K_MUL))
++
++#define COMCERTO_NAND_FLASH_SIZE	(256UL * 1024UL * 1024UL)
++
++#endif  /* __CONFIG_H */
++
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+new file mode 100644
+index 0000000..367f5e5
+--- /dev/null
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -0,0 +1,44 @@
++#!/bin/sh
++
++# use 'dhcp' to do dhcp in barebox and in kernel
++# use 'none' if you want to skip kernel ip autoconfiguration
++ip=none
++
++# or set your networking parameters here
++eth0.ipaddr=192.168.1.1
++eth0.netmask=255.255.255.0
++eth0.serverip=192.168.1.101
++#eth0.gateway=192.168.1.254
++eth0.ethaddr=00:0A:0B:0C:0D:0E
++eth1.ethaddr=00:1A:1B:1C:1D:1E
++eth2.ethaddr=00:2A:2B:2C:2D:2E
++
++# can be either 'nfs', 'tftp' , 'nor' , 'nand' and 'sata'
++kernel_loc=nand
++
++# can be either 'net', 'nor' ,'initrd' , 'nand' and 'sata'
++rootfs_loc=nand
++
++# barebox images
++uloaderimage=microloader-nor-M86298-c2krv340.bin
++bareboximage=barebox-c2krv340.bin
++
++# can be either 'jffs2' , 'ubifs' or 'ext4
++rootfs_type=ubifs
++rootfsimage=openwrt-comcerto2000-hgw-rootfs-ubi_nand.img
++
++# The image type of the kernel. Can be uimage, multi-uimage, zimage, raw, or raw_lzo
++kernelimage_type=uimage
++kernelimage=openwrt-comcerto2000-hgw-uImage.img
++
++nand_device="comcertonand"
++nand_parts="512k(barebox),128k(env),4M(kernel),-(rootfs)"
++rootfs_mtdblock_nand=3
++
++autoboot_timeout=3
++
++usb3_internal_clk="yes"
++
++bootargs="console=ttyS0,115200n8, init=/etc/preinit"
++bootargs="$bootargs mac_addr=$eth0.ethaddr,$eth1.ethaddr,$eth2.ethaddr"
++
+diff --git a/arch/arm/configs/comcerto-2k_rv340_defconfig b/arch/arm/configs/comcerto-2k_rv340_defconfig
+new file mode 100644
+index 0000000..0e775d4
+--- /dev/null
++++ b/arch/arm/configs/comcerto-2k_rv340_defconfig
+@@ -0,0 +1,399 @@
++#
++# Automatically generated make config: don't edit
++# Linux/arm 2011.06.0 Barebox Configuration
++# Tue Feb 17 20:42:18 2015
++#
++# CONFIG_BOARD_LINKER_SCRIPT is not set
++CONFIG_GENERIC_LINKER_SCRIPT=y
++CONFIG_ARM=y
++CONFIG_ARM_LINUX=y
++
++#
++# System Type
++#
++CONFIG_ARCH_COMCERTO=y
++# CONFIG_ARCH_AT91 is not set
++# CONFIG_ARCH_EP93XX is not set
++# CONFIG_ARCH_IMX is not set
++# CONFIG_ARCH_MXS is not set
++# CONFIG_ARCH_NETX is not set
++# CONFIG_ARCH_NOMADIK is not set
++# CONFIG_ARCH_OMAP is not set
++# CONFIG_ARCH_S3C24xx is not set
++# CONFIG_ARCH_VERSATILE is not set
++
++#
++# Comcerto Configuration
++#
++CONFIG_ARCH_HAS_LOWLEVEL_INIT=y
++CONFIG_BOARDINFO="Mindspeed C2000"
++
++#
++# SoC Selection
++#
++CONFIG_COMCERTO_C2000=y
++
++#
++# Board Selection
++#
++# CONFIG_MACH_COMCERTO_C2K_EVM is not set
++# CONFIG_MACH_COMCERTO_C2K_MFCNEVM is not set
++CONFIG_MACH_COMCERTO_C2K_RV340=y
++# CONFIG_MACH_COMCERTO_C2K_ASIC is not set
++# CONFIG_MACH_COMCERTO_C2K_RTSM is not set
++
++#
++# Build Selection
++#
++# CONFIG_COMCERTO_VERIFICATION is not set
++# CONFIG_COMCERTO_DIAG is not set
++CONFIG_COMCERTO_BOOTLOADER=y
++# CONFIG_COMCERTO_ULOADER is not set
++# CONFIG_COMCERTO_NAND_ULOADER is not set
++CONFIG_COMCERTO_NAND=y
++CONFIG_COMCERTO_SERDES=y
++CONFIG_COMCERTO_I2C=y
++CONFIG_COMCERTO_SATA=y
++CONFIG_COMCERTO_SECUREBOOT=y
++# CONFIG_SECUREBOOT_TEST is not set
++# CONFIG_M86201 is not set
++# CONFIG_M86202 is not set
++# CONFIG_M86203 is not set
++# CONFIG_M86204 is not set
++# CONFIG_M86206 is not set
++# CONFIG_M86207 is not set
++# CONFIG_M86208 is not set
++# CONFIG_M8620X is not set
++# CONFIG_M86260 is not set
++# CONFIG_M86261 is not set
++# CONFIG_M86261_NAS is not set
++# CONFIG_M86262 is not set
++# CONFIG_M8626X is not set
++# CONFIG_M86291 is not set
++# CONFIG_M86292 is not set
++# CONFIG_M86293 is not set
++# CONFIG_M86294 is not set
++# CONFIG_M86295 is not set
++# CONFIG_M86296 is not set
++# CONFIG_M86297 is not set
++# CONFIG_M86298 is not set
++# CONFIG_M8629X is not set
++
++#
++# Processor Type
++#
++CONFIG_CPU_32=y
++CONFIG_CPU_32v7=y
++
++#
++# processor features
++#
++# CONFIG_BOOT_ENDIANNESS_SWITCH is not set
++# CONFIG_AEABI is not set
++
++#
++# Arm specific settings         
++#
++CONFIG_CMD_ARM_CPUINFO=y
++# CONFIG_ARM_OPTIMZED_STRING_FUNCTIONS is not set
++CONFIG_ARM_EXCEPTIONS=y
++CONFIG_DEFCONFIG_LIST="$ARCH_DEFCONFIG"
++CONFIG_GREGORIAN_CALENDER=y
++CONFIG_HAS_KALLSYMS=y
++CONFIG_HAS_MODULES=y
++CONFIG_CMD_MEMORY=y
++CONFIG_ENV_HANDLING=y
++
++#
++# General Settings              
++#
++CONFIG_LOCALVERSION_AUTO=y
++CONFIG_ENVIRONMENT_VARIABLES=y
++
++#
++# memory layout                 
++#
++CONFIG_HAVE_CONFIGURABLE_TEXT_BASE=y
++CONFIG_TEXT_BASE=0x2000000
++CONFIG_HAVE_CONFIGURABLE_MEMORY_LAYOUT=y
++CONFIG_MEMORY_LAYOUT_DEFAULT=y
++# CONFIG_MEMORY_LAYOUT_FIXED is not set
++CONFIG_STACK_SIZE=0x8000
++CONFIG_MALLOC_SIZE=0x1800000
++# CONFIG_BROKEN is not set
++CONFIG_EXPERIMENTAL=y
++CONFIG_MALLOC_DLMALLOC=y
++# CONFIG_MODULES is not set
++# CONFIG_KALLSYMS is not set
++CONFIG_PROMPT="Barebox-C2K >"
++CONFIG_BAUDRATE=115200
++CONFIG_LONGHELP=y
++CONFIG_CBSIZE=1024
++CONFIG_MAXARGS=16
++CONFIG_SHELL_HUSH=y
++# CONFIG_SHELL_SIMPLE is not set
++CONFIG_GLOB=y
++CONFIG_PROMPT_HUSH_PS2="> "
++# CONFIG_HUSH_FANCY_PROMPT is not set
++CONFIG_HUSH_GETOPT=y
++CONFIG_CMDLINE_EDITING=y
++CONFIG_AUTO_COMPLETE=y
++CONFIG_MEM_SIZE=y
++# CONFIG_MENU is not set
++CONFIG_PASSWORD=y
++CONFIG_PASSWD_SUM_MD5=y
++# CONFIG_PASSWD_SUM_SHA1 is not set
++# CONFIG_PASSWD_SUM_SHA256 is not set
++CONFIG_DYNAMIC_CRC_TABLE=y
++CONFIG_ERRNO_MESSAGES=y
++CONFIG_TIMESTAMP=y
++CONFIG_CONSOLE_FULL=y
++CONFIG_CONSOLE_ACTIVATE_FIRST=y
++# CONFIG_OF_FLAT_TREE is not set
++CONFIG_PARTITION=y
++CONFIG_DEFAULT_ENVIRONMENT=y
++CONFIG_DEFAULT_ENVIRONMENT_GENERIC=y
++CONFIG_DEFAULT_ENVIRONMENT_PATH="arch/arm/boards/comcerto-rv340/env"
++# CONFIG_POLLER is not set
++
++#
++# Debugging                     
++#
++# CONFIG_DEBUG_INFO is not set
++# CONFIG_ENABLE_FLASH_NOISE is not set
++# CONFIG_ENABLE_PARTITION_NOISE is not set
++# CONFIG_ENABLE_DEVICE_NOISE is not set
++CONFIG_COMMAND_SUPPORT=y
++
++#
++# commands                      
++#
++
++#
++# scripting                     
++#
++CONFIG_CMD_EDIT=y
++CONFIG_CMD_SLEEP=y
++CONFIG_CMD_SAVEENV=y
++CONFIG_CMD_LOADENV=y
++CONFIG_CMD_EXPORT=y
++CONFIG_CMD_PRINTENV=y
++CONFIG_CMD_READLINE=y
++CONFIG_CMD_TRUE=y
++CONFIG_CMD_FALSE=y
++CONFIG_CMD_LOGIN=y
++CONFIG_CMD_PASSWD=y
++CONFIG_PASSWD_MODE_HIDE=y
++# CONFIG_PASSWD_MODE_STAR is not set
++# CONFIG_PASSWD_MODE_CLEAR is not set
++
++#
++# file commands                 
++#
++CONFIG_CMD_LS=y
++CONFIG_CMD_RM=y
++CONFIG_CMD_CAT=y
++CONFIG_CMD_MKDIR=y
++CONFIG_CMD_RMDIR=y
++CONFIG_CMD_CP=y
++CONFIG_CMD_PWD=y
++CONFIG_CMD_CD=y
++CONFIG_CMD_MOUNT=y
++CONFIG_CMD_UMOUNT=y
++CONFIG_CMD_NAND=y
++CONFIG_CMD_NOR=y
++CONFIG_CMD_UPDATE_SPI=y
++CONFIG_CMD_UPDATE_FAST_SPI=y
++CONFIG_CMD_COPY=y
++
++#
++# console                       
++#
++CONFIG_CMD_CLEAR=y
++CONFIG_CMD_ECHO=y
++CONFIG_CMD_ECHO_E=y
++
++#
++# memory                        
++#
++CONFIG_CMD_LOADB=y
++CONFIG_CMD_LOADY=y
++CONFIG_CMD_MEMINFO=y
++CONFIG_CMD_CRC=y
++CONFIG_CMD_CRC_CMP=y
++CONFIG_CMD_MTEST=y
++CONFIG_CMD_MTEST_ALTERNATIVE=y
++
++#
++# flash                         
++#
++CONFIG_CMD_FLASH=y
++CONFIG_CMD_UBI=y
++
++#
++# booting                       
++#
++CONFIG_CMD_BOOTM=y
++CONFIG_CMD_BOOTM_ZLIB=y
++CONFIG_CMD_BOOTM_BZLIB=y
++CONFIG_CMD_BOOTM_SHOW_TYPE=y
++CONFIG_CMD_BOOTZ=y
++CONFIG_CMD_BOOTU=y
++CONFIG_CMD_RESET=y
++CONFIG_CMD_GO=y
++CONFIG_CMD_TIMEOUT=y
++CONFIG_CMD_PARTITION=y
++CONFIG_CMD_TEST=y
++CONFIG_CMD_VERSION=y
++CONFIG_CMD_HELP=y
++CONFIG_CMD_DEVINFO=y
++CONFIG_CMD_UNLZO=y
++CONFIG_CMD_I2C=y
++CONFIG_CMD_USB=y
++
++#
++# c2000			
++#
++CONFIG_CMD_SOCINFO=y
++CONFIG_CMD_GEMAC_STATS=y
++CONFIG_CMD_PFE_STATS=y
++CONFIG_CMD_AR8328=y
++CONFIG_CMD_PFE_COMMANDS=y
++CONFIG_CMD_SATA=y
++CONFIG_NET=y
++# CONFIG_NET_DHCP is not set
++# CONFIG_NET_NFS is not set
++CONFIG_NET_PING=y
++CONFIG_NET_TFTP=y
++# CONFIG_NET_TFTP_PUSH is not set
++# CONFIG_NET_NETCONSOLE is not set
++# CONFIG_NET_RESOLV is not set
++
++#
++# Drivers                       
++#
++
++#
++# serial drivers                
++#
++# CONFIG_DRIVER_SERIAL_ARM_DCC is not set
++CONFIG_DRIVER_FAST_UART=y
++# CONFIG_DRIVER_SERIAL_NS16550 is not set
++CONFIG_MIIDEV=y
++
++#
++# Network drivers               
++#
++# CONFIG_DRIVER_NET_SMC911X is not set
++# CONFIG_DRIVER_NET_SMC91111 is not set
++# CONFIG_NET_USB is not set
++CONFIG_NET_COMCERTO=y
++CONFIG_NET_COMCERTO_2000=y
++CONFIG_AR8328_SWITCH=y
++
++#
++# SPI drivers                   
++#
++CONFIG_SPI=y
++CONFIG_DRIVER_SPI_C2K=y
++CONFIG_DRIVER_SPI_DMA_C2K=y
++CONFIG_DRIVER_FAST_SPI_C2K=y
++CONFIG_C2K_SPI_API=y
++CONFIG_C2K_SPI_COMMON=y
++CONFIG_SPI_FLASH_C2K=y
++CONFIG_CSI_FLASH=y
++CONFIG_SPI_FLASH=y
++CONFIG_FAST_SPI_FLASH=y
++CONFIG_I2C=y
++
++#
++# I2C Hardware Bus support
++#
++# CONFIG_I2C_C2K is not set
++
++#
++# flash drivers                 
++#
++CONFIG_DRIVER_CFI=y
++CONFIG_DRIVER_CFI_INTEL=y
++CONFIG_DRIVER_CFI_AMD=y
++CONFIG_DRIVER_CFI_BANK_WIDTH_1=y
++CONFIG_DRIVER_CFI_BANK_WIDTH_2=y
++CONFIG_DRIVER_CFI_BANK_WIDTH_4=y
++# CONFIG_DRIVER_CFI_BANK_WIDTH_8 is not set
++CONFIG_CFI_BUFFER_WRITE=y
++CONFIG_MTD=y
++CONFIG_NAND=y
++CONFIG_MTD_NAND_ECC_BCH=y
++# CONFIG_MTD_NAND_BCH is not set
++CONFIG_NAND_WRITE=y
++CONFIG_NAND_ECC_SOFT=y
++# CONFIG_NAND_ECC_HW is not set
++CONFIG_NAND_ECC_HW_SYNDROME=y
++# CONFIG_NAND_ECC_HW_NONE is not set
++CONFIG_NAND_COMCERTO_ECC_24_HW_BCH=y
++CONFIG_COMCERTO_NAND_ERASE_FBB=y
++CONFIG_NAND_INFO=y
++CONFIG_NAND_BBT=y
++CONFIG_NAND_READ_OOB=y
++CONFIG_NAND_COMCERTO=y
++# CONFIG_MTD_NAND_VERIFY_WRITE is not set
++# CONFIG_MTD_NAND_ECC_SMC is not set
++CONFIG_MTD_NAND_IDS=y
++CONFIG_UBI=y
++# CONFIG_ATA is not set
++CONFIG_USB=y
++CONFIG_USB_EHCI=y
++CONFIG_USB_ULPI=y
++CONFIG_USB_ISP1504=y
++CONFIG_USB_TWL4030=y
++# CONFIG_USB_GADGET is not set
++# CONFIG_USB_GADGET_DFU is not set
++# CONFIG_USB_GADGET_SERIAL is not set
++# CONFIG_VIDEO is not set
++# CONFIG_MCI is not set
++
++#
++# MFD
++#
++# CONFIG_I2C_MC13892 is not set
++# CONFIG_I2C_MC34704 is not set
++# CONFIG_I2C_MC9SDZ60 is not set
++# CONFIG_I2C_LP3972 is not set
++# CONFIG_I2C_TWL4030 is not set
++# CONFIG_DRIVER_SPI_MC13783 is not set
++# CONFIG_LED is not set
++
++#
++# OTP driver                
++#
++CONFIG_OTP=y
++CONFIG_DRIVER_OTP=y
++
++#
++# SPAcc driver                
++#
++CONFIG_SPACC=y
++CONFIG_DRIVER_SPACC=y
++
++#
++# Filesystem support            
++#
++CONFIG_FS_CRAMFS=y
++CONFIG_FS_RAMFS=y
++CONFIG_FS_DEVFS=y
++CONFIG_FS_FAT=y
++CONFIG_FS_FAT_WRITE=y
++CONFIG_FS_FAT_LFN=y
++CONFIG_PARTITION_NEED_MTD=y
++CONFIG_ZLIB=y
++CONFIG_BZLIB=y
++CONFIG_CRC32=y
++CONFIG_CRC16=y
++CONFIG_DIGEST=y
++CONFIG_MD5=y
++# CONFIG_SHA1 is not set
++# CONFIG_SHA256 is not set
++# CONFIG_GENERIC_FIND_NEXT_BIT is not set
++CONFIG_PROCESS_ESCAPE_SEQUENCE=y
++CONFIG_LZO_DECOMPRESS=y
+diff --git a/arch/arm/configs/comcerto-2k_rv340_diags_defconfig b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+new file mode 100644
+index 0000000..a91f45c
+--- /dev/null
++++ b/arch/arm/configs/comcerto-2k_rv340_diags_defconfig
+@@ -0,0 +1,441 @@
++#
++# Automatically generated make config: don't edit
++# Linux/arm 2011.06.0 Barebox Configuration
++# Tue Feb 17 19:05:29 2015
++#
++# CONFIG_BOARD_LINKER_SCRIPT is not set
++CONFIG_GENERIC_LINKER_SCRIPT=y
++CONFIG_ARM=y
++CONFIG_ARM_LINUX=y
++
++#
++# System Type
++#
++CONFIG_ARCH_COMCERTO=y
++# CONFIG_ARCH_AT91 is not set
++# CONFIG_ARCH_EP93XX is not set
++# CONFIG_ARCH_IMX is not set
++# CONFIG_ARCH_MXS is not set
++# CONFIG_ARCH_NETX is not set
++# CONFIG_ARCH_NOMADIK is not set
++# CONFIG_ARCH_OMAP is not set
++# CONFIG_ARCH_S3C24xx is not set
++# CONFIG_ARCH_VERSATILE is not set
++
++#
++# Comcerto Configuration
++#
++CONFIG_ARCH_HAS_LOWLEVEL_INIT=y
++CONFIG_BOARDINFO="Mindspeed C2000"
++
++#
++# SoC Selection
++#
++CONFIG_COMCERTO_C2000=y
++
++#
++# Board Selection
++#
++# CONFIG_MACH_COMCERTO_C2K_EVM is not set
++# CONFIG_MACH_COMCERTO_C2K_MFCNEVM is not set
++CONFIG_MACH_COMCERTO_C2K_RV340=y
++# CONFIG_MACH_COMCERTO_C2K_ASIC is not set
++# CONFIG_MACH_COMCERTO_C2K_RTSM is not set
++
++#
++# Build Selection
++#
++# CONFIG_COMCERTO_VERIFICATION is not set
++CONFIG_COMCERTO_DIAG=y
++# CONFIG_COMCERTO_BOOTLOADER is not set
++# CONFIG_COMCERTO_ULOADER is not set
++# CONFIG_COMCERTO_NAND_ULOADER is not set
++CONFIG_COMCERTO_NAND=y
++CONFIG_COMCERTO_SERDES=y
++CONFIG_COMCERTO_I2C=y
++CONFIG_COMCERTO_SATA=y
++CONFIG_COMCERTO_SECUREBOOT=y
++# CONFIG_SECUREBOOT_TEST is not set
++# CONFIG_M86201 is not set
++# CONFIG_M86202 is not set
++# CONFIG_M86203 is not set
++# CONFIG_M86204 is not set
++# CONFIG_M86206 is not set
++# CONFIG_M86207 is not set
++# CONFIG_M86208 is not set
++# CONFIG_M8620X is not set
++# CONFIG_M86260 is not set
++# CONFIG_M86261 is not set
++# CONFIG_M86261_NAS is not set
++# CONFIG_M86262 is not set
++# CONFIG_M8626X is not set
++# CONFIG_M86291 is not set
++# CONFIG_M86292 is not set
++# CONFIG_M86293 is not set
++# CONFIG_M86294 is not set
++# CONFIG_M86295 is not set
++# CONFIG_M86296 is not set
++# CONFIG_M86297 is not set
++# CONFIG_M86298 is not set
++# CONFIG_M8629X is not set
++CONFIG_COMCERTO_TEST=y
++
++#
++# Comcerto Diagnostic Configuration
++#
++CONFIG_COMCERTO_DIAG_DDR=y
++# CONFIG_COMCERTO_DIAG_DPI is not set
++# CONFIG_COMCERTO_DIAG_PFE is not set
++# CONFIG_COMCERTO_DIAG_TZ is not set
++# CONFIG_COMCERTO_DIAG_L2CC is not set
++# CONFIG_COMCERTO_DIAG_DUALCORE is not set
++# CONFIG_COMCERTO_DIAG_DECT is not set
++# CONFIG_COMCERTO_DIAG_PCIE is not set
++# CONFIG_COMCERTO_DIAG_FUART is not set
++# CONFIG_COMCERTO_DIAG_NOR is not set
++# CONFIG_COMCERTO_DIAG_UTILPE_IPSEC is not set
++# CONFIG_COMCERTO_DIAG_ZDSTDM is not set
++# CONFIG_COMCERTO_DIAG_ZDS_SLIC is not set
++CONFIG_COMCERTO_DIAG_SPI=y
++# CONFIG_COMCERTO_DIAG_MSIF_TDM is not set
++# CONFIG_COMCERTO_DIAG_MSIF_SLIC is not set
++CONFIG_COMCERTO_DIAG_I2C=y
++CONFIG_COMCERTO_DIAG_OTP=y
++# CONFIG_COMCERTO_DIAG_ETH is not set
++CONFIG_COMCERTO_DIAG_USB3=y
++CONFIG_COMCERTO_DIAG_NAND_ECC=y
++# CONFIG_COMCERTO_DIAG_SATA is not set
++# CONFIG_COMCERTO_DIAG_GPIO is not set
++# CONFIG_COMCERTO_DIAG_SFP is not set
++# CONFIG_COMCERTO_DIAG_LCD is not set
++CONFIG_COMCERTO_TEST_DDR=y
++CONFIG_COMCERTO_TEST_SPI=y
++CONFIG_COMCERTO_TEST_I2C=y
++CONFIG_COMCERTO_TEST_OTP=y
++CONFIG_COMCERTO_TEST_USB3=y
++CONFIG_COMCERTO_TEST_NAND_ECC=y
++
++#
++# Processor Type
++#
++CONFIG_CPU_32=y
++CONFIG_CPU_32v7=y
++
++#
++# processor features
++#
++# CONFIG_BOOT_ENDIANNESS_SWITCH is not set
++CONFIG_ARCH_HAS_L2X0=y
++CONFIG_CACHE_L2X0=y
++# CONFIG_AEABI is not set
++
++#
++# Arm specific settings         
++#
++CONFIG_CMD_ARM_CPUINFO=y
++# CONFIG_ARM_OPTIMZED_STRING_FUNCTIONS is not set
++CONFIG_ARM_EXCEPTIONS=y
++CONFIG_DEFCONFIG_LIST="$ARCH_DEFCONFIG"
++CONFIG_GREGORIAN_CALENDER=y
++CONFIG_HAS_KALLSYMS=y
++CONFIG_HAS_MODULES=y
++CONFIG_CMD_MEMORY=y
++CONFIG_ENV_HANDLING=y
++
++#
++# General Settings              
++#
++CONFIG_LOCALVERSION_AUTO=y
++CONFIG_ENVIRONMENT_VARIABLES=y
++
++#
++# memory layout                 
++#
++CONFIG_HAVE_MMU=y
++CONFIG_MMU=y
++CONFIG_HAVE_CONFIGURABLE_TEXT_BASE=y
++CONFIG_TEXT_BASE=0x2000000
++CONFIG_HAVE_CONFIGURABLE_MEMORY_LAYOUT=y
++CONFIG_MEMORY_LAYOUT_DEFAULT=y
++# CONFIG_MEMORY_LAYOUT_FIXED is not set
++CONFIG_STACK_SIZE=0x8000
++CONFIG_MALLOC_SIZE=0x1800000
++# CONFIG_BROKEN is not set
++CONFIG_EXPERIMENTAL=y
++CONFIG_MALLOC_DLMALLOC=y
++# CONFIG_MODULES is not set
++# CONFIG_KALLSYMS is not set
++CONFIG_PROMPT="Barebox-C2K >"
++CONFIG_BAUDRATE=115200
++CONFIG_LONGHELP=y
++CONFIG_CBSIZE=1024
++CONFIG_MAXARGS=16
++CONFIG_SHELL_HUSH=y
++# CONFIG_SHELL_SIMPLE is not set
++CONFIG_GLOB=y
++CONFIG_PROMPT_HUSH_PS2="> "
++# CONFIG_HUSH_FANCY_PROMPT is not set
++CONFIG_HUSH_GETOPT=y
++CONFIG_CMDLINE_EDITING=y
++CONFIG_AUTO_COMPLETE=y
++CONFIG_MEM_SIZE=y
++# CONFIG_MENU is not set
++CONFIG_PASSWORD=y
++CONFIG_PASSWD_SUM_MD5=y
++# CONFIG_PASSWD_SUM_SHA1 is not set
++# CONFIG_PASSWD_SUM_SHA256 is not set
++CONFIG_DYNAMIC_CRC_TABLE=y
++CONFIG_ERRNO_MESSAGES=y
++CONFIG_TIMESTAMP=y
++CONFIG_CONSOLE_FULL=y
++CONFIG_CONSOLE_ACTIVATE_FIRST=y
++# CONFIG_OF_FLAT_TREE is not set
++CONFIG_PARTITION=y
++CONFIG_DEFAULT_ENVIRONMENT=y
++CONFIG_DEFAULT_ENVIRONMENT_GENERIC=y
++CONFIG_DEFAULT_ENVIRONMENT_PATH="arch/arm/boards/comcerto-rv340/env"
++# CONFIG_POLLER is not set
++
++#
++# Debugging                     
++#
++# CONFIG_DEBUG_INFO is not set
++# CONFIG_ENABLE_FLASH_NOISE is not set
++# CONFIG_ENABLE_PARTITION_NOISE is not set
++# CONFIG_ENABLE_DEVICE_NOISE is not set
++CONFIG_COMMAND_SUPPORT=y
++
++#
++# commands                      
++#
++
++#
++# scripting                     
++#
++CONFIG_CMD_EDIT=y
++CONFIG_CMD_SLEEP=y
++CONFIG_CMD_SAVEENV=y
++CONFIG_CMD_LOADENV=y
++CONFIG_CMD_EXPORT=y
++CONFIG_CMD_PRINTENV=y
++CONFIG_CMD_READLINE=y
++CONFIG_CMD_TRUE=y
++CONFIG_CMD_FALSE=y
++CONFIG_CMD_LOGIN=y
++CONFIG_CMD_PASSWD=y
++CONFIG_PASSWD_MODE_HIDE=y
++# CONFIG_PASSWD_MODE_STAR is not set
++# CONFIG_PASSWD_MODE_CLEAR is not set
++
++#
++# file commands                 
++#
++CONFIG_CMD_LS=y
++CONFIG_CMD_RM=y
++CONFIG_CMD_CAT=y
++CONFIG_CMD_MKDIR=y
++CONFIG_CMD_RMDIR=y
++CONFIG_CMD_CP=y
++CONFIG_CMD_PWD=y
++CONFIG_CMD_CD=y
++CONFIG_CMD_MOUNT=y
++CONFIG_CMD_UMOUNT=y
++CONFIG_CMD_NAND=y
++CONFIG_CMD_NOR=y
++CONFIG_CMD_UPDATE_SPI=y
++CONFIG_CMD_UPDATE_FAST_SPI=y
++CONFIG_CMD_COPY=y
++
++#
++# console                       
++#
++CONFIG_CMD_CLEAR=y
++CONFIG_CMD_ECHO=y
++CONFIG_CMD_ECHO_E=y
++
++#
++# memory                        
++#
++CONFIG_CMD_LOADB=y
++CONFIG_CMD_LOADY=y
++CONFIG_CMD_MEMINFO=y
++CONFIG_CMD_CRC=y
++CONFIG_CMD_CRC_CMP=y
++CONFIG_CMD_MTEST=y
++CONFIG_CMD_MTEST_ALTERNATIVE=y
++
++#
++# flash                         
++#
++CONFIG_CMD_FLASH=y
++CONFIG_CMD_UBI=y
++
++#
++# booting                       
++#
++CONFIG_CMD_BOOTM=y
++CONFIG_CMD_BOOTM_ZLIB=y
++CONFIG_CMD_BOOTM_BZLIB=y
++CONFIG_CMD_BOOTM_SHOW_TYPE=y
++CONFIG_CMD_BOOTZ=y
++CONFIG_CMD_BOOTU=y
++CONFIG_CMD_RESET=y
++CONFIG_CMD_GO=y
++CONFIG_CMD_TIMEOUT=y
++CONFIG_CMD_PARTITION=y
++CONFIG_CMD_TEST=y
++CONFIG_CMD_VERSION=y
++CONFIG_CMD_HELP=y
++CONFIG_CMD_DEVINFO=y
++CONFIG_CMD_UNLZO=y
++CONFIG_CMD_I2C=y
++CONFIG_CMD_USB=y
++
++#
++# c2000			
++#
++CONFIG_CMD_SOCINFO=y
++CONFIG_CMD_GEMAC_STATS=y
++CONFIG_CMD_PFE_STATS=y
++CONFIG_CMD_PFE_DIAGS=y
++CONFIG_CMD_AR8328=y
++CONFIG_CMD_DIAGS=y
++CONFIG_CMD_PFE_COMMANDS=y
++CONFIG_CMD_SATA=y
++CONFIG_NET=y
++# CONFIG_NET_DHCP is not set
++# CONFIG_NET_NFS is not set
++CONFIG_NET_PING=y
++CONFIG_NET_TFTP=y
++# CONFIG_NET_TFTP_PUSH is not set
++# CONFIG_NET_NETCONSOLE is not set
++# CONFIG_NET_RESOLV is not set
++
++#
++# Drivers                       
++#
++
++#
++# serial drivers                
++#
++# CONFIG_DRIVER_SERIAL_ARM_DCC is not set
++CONFIG_DRIVER_FAST_UART=y
++# CONFIG_DRIVER_SERIAL_NS16550 is not set
++CONFIG_MIIDEV=y
++
++#
++# Network drivers               
++#
++# CONFIG_DRIVER_NET_SMC911X is not set
++# CONFIG_DRIVER_NET_SMC91111 is not set
++# CONFIG_NET_USB is not set
++CONFIG_NET_COMCERTO=y
++CONFIG_NET_COMCERTO_2000=y
++CONFIG_AR8328_SWITCH=y
++
++#
++# SPI drivers                   
++#
++CONFIG_SPI=y
++CONFIG_DRIVER_SPI_C2K=y
++CONFIG_DRIVER_SPI_DMA_C2K=y
++CONFIG_DRIVER_FAST_SPI_C2K=y
++CONFIG_C2K_SPI_API=y
++CONFIG_C2K_SPI_COMMON=y
++CONFIG_SPI_FLASH_C2K=y
++CONFIG_CSI_FLASH=y
++CONFIG_SPI_FLASH=y
++CONFIG_FAST_SPI_FLASH=y
++CONFIG_I2C=y
++
++#
++# I2C Hardware Bus support
++#
++# CONFIG_I2C_C2K is not set
++
++#
++# flash drivers                 
++#
++CONFIG_DRIVER_CFI=y
++CONFIG_DRIVER_CFI_INTEL=y
++CONFIG_DRIVER_CFI_AMD=y
++CONFIG_DRIVER_CFI_BANK_WIDTH_1=y
++CONFIG_DRIVER_CFI_BANK_WIDTH_2=y
++CONFIG_DRIVER_CFI_BANK_WIDTH_4=y
++# CONFIG_DRIVER_CFI_BANK_WIDTH_8 is not set
++CONFIG_CFI_BUFFER_WRITE=y
++CONFIG_MTD=y
++CONFIG_NAND=y
++CONFIG_MTD_NAND_ECC_BCH=y
++# CONFIG_MTD_NAND_BCH is not set
++CONFIG_NAND_WRITE=y
++CONFIG_NAND_ECC_SOFT=y
++# CONFIG_NAND_ECC_HW is not set
++CONFIG_NAND_ECC_HW_SYNDROME=y
++# CONFIG_NAND_ECC_HW_NONE is not set
++CONFIG_NAND_COMCERTO_ECC_24_HW_BCH=y
++CONFIG_COMCERTO_NAND_ERASE_FBB=y
++CONFIG_NAND_INFO=y
++CONFIG_NAND_BBT=y
++CONFIG_NAND_READ_OOB=y
++CONFIG_NAND_COMCERTO=y
++# CONFIG_MTD_NAND_VERIFY_WRITE is not set
++# CONFIG_MTD_NAND_ECC_SMC is not set
++CONFIG_MTD_NAND_IDS=y
++CONFIG_UBI=y
++# CONFIG_ATA is not set
++CONFIG_USB=y
++CONFIG_USB_EHCI=y
++CONFIG_USB_ULPI=y
++CONFIG_USB_ISP1504=y
++CONFIG_USB_TWL4030=y
++# CONFIG_USB_GADGET is not set
++# CONFIG_USB_GADGET_DFU is not set
++# CONFIG_USB_GADGET_SERIAL is not set
++# CONFIG_VIDEO is not set
++# CONFIG_MCI is not set
++
++#
++# MFD
++#
++# CONFIG_I2C_MC13892 is not set
++# CONFIG_I2C_MC34704 is not set
++# CONFIG_I2C_MC9SDZ60 is not set
++# CONFIG_I2C_LP3972 is not set
++# CONFIG_I2C_TWL4030 is not set
++# CONFIG_DRIVER_SPI_MC13783 is not set
++# CONFIG_LED is not set
++
++#
++# OTP driver                
++#
++CONFIG_OTP=y
++CONFIG_DRIVER_OTP=y
++
++#
++# SPAcc driver                
++#
++CONFIG_SPACC=y
++CONFIG_DRIVER_SPACC=y
++
++#
++# Filesystem support            
++#
++CONFIG_FS_CRAMFS=y
++CONFIG_FS_RAMFS=y
++CONFIG_FS_DEVFS=y
++CONFIG_FS_FAT=y
++CONFIG_FS_FAT_WRITE=y
++CONFIG_FS_FAT_LFN=y
++CONFIG_PARTITION_NEED_MTD=y
++CONFIG_ZLIB=y
++CONFIG_BZLIB=y
++CONFIG_CRC32=y
++CONFIG_CRC16=y
++CONFIG_DIGEST=y
++CONFIG_MD5=y
++# CONFIG_SHA1 is not set
++# CONFIG_SHA256 is not set
++# CONFIG_GENERIC_FIND_NEXT_BIT is not set
++CONFIG_PROCESS_ESCAPE_SEQUENCE=y
++CONFIG_LZO_DECOMPRESS=y
+diff --git a/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig b/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig
+new file mode 100644
+index 0000000..2cfd152
+--- /dev/null
++++ b/arch/arm/configs/comcerto-2k_rv340_nand_uloader_defconfig
+@@ -0,0 +1,315 @@
++#
++# Automatically generated make config: don't edit
++# Linux/arm 2011.06.0 Barebox Configuration
++# Tue Feb 17 19:10:45 2015
++#
++# CONFIG_BOARD_LINKER_SCRIPT is not set
++CONFIG_GENERIC_LINKER_SCRIPT=y
++CONFIG_ARM=y
++
++#
++# System Type
++#
++CONFIG_ARCH_COMCERTO=y
++# CONFIG_ARCH_AT91 is not set
++# CONFIG_ARCH_EP93XX is not set
++# CONFIG_ARCH_IMX is not set
++# CONFIG_ARCH_MXS is not set
++# CONFIG_ARCH_NETX is not set
++# CONFIG_ARCH_NOMADIK is not set
++# CONFIG_ARCH_OMAP is not set
++# CONFIG_ARCH_S3C24xx is not set
++# CONFIG_ARCH_VERSATILE is not set
++
++#
++# Comcerto Configuration
++#
++CONFIG_ARCH_HAS_LOWLEVEL_INIT=y
++CONFIG_BOARDINFO="Mindspeed C2000"
++
++#
++# SoC Selection
++#
++CONFIG_COMCERTO_C2000=y
++
++#
++# Board Selection
++#
++# CONFIG_MACH_COMCERTO_C2K_EVM is not set
++# CONFIG_MACH_COMCERTO_C2K_MFCNEVM is not set
++CONFIG_MACH_COMCERTO_C2K_RV340=y
++# CONFIG_MACH_COMCERTO_C2K_ASIC is not set
++# CONFIG_MACH_COMCERTO_C2K_RTSM is not set
++
++#
++# Build Selection
++#
++# CONFIG_COMCERTO_VERIFICATION is not set
++# CONFIG_COMCERTO_DIAG is not set
++# CONFIG_COMCERTO_BOOTLOADER is not set
++# CONFIG_COMCERTO_ULOADER is not set
++CONFIG_COMCERTO_NAND_ULOADER=y
++CONFIG_COMCERTO_PLL=y
++CONFIG_COMCERTO_DDR=y
++CONFIG_COMCERTO_NAND=y
++CONFIG_COMCERTO_SECUREBOOT=y
++# CONFIG_SECUREBOOT_TEST is not set
++CONFIG_BOOTB=y
++# CONFIG_M86201 is not set
++# CONFIG_M86202 is not set
++# CONFIG_M86203 is not set
++# CONFIG_M86204 is not set
++# CONFIG_M86206 is not set
++# CONFIG_M86207 is not set
++# CONFIG_M86208 is not set
++# CONFIG_M8620X is not set
++# CONFIG_M86260 is not set
++# CONFIG_M86261 is not set
++# CONFIG_M86261_NAS is not set
++# CONFIG_M86262 is not set
++# CONFIG_M8626X is not set
++# CONFIG_M86291 is not set
++# CONFIG_M86292 is not set
++# CONFIG_M86293 is not set
++# CONFIG_M86294 is not set
++# CONFIG_M86295 is not set
++# CONFIG_M86296 is not set
++# CONFIG_M86297 is not set
++CONFIG_M86298=y
++CONFIG_M8629X=y
++
++#
++# Processor Type
++#
++CONFIG_CPU_32=y
++CONFIG_CPU_32v7=y
++
++#
++# processor features
++#
++# CONFIG_BOOT_ENDIANNESS_SWITCH is not set
++# CONFIG_AEABI is not set
++
++#
++# Arm specific settings         
++#
++# CONFIG_CMD_ARM_CPUINFO is not set
++# CONFIG_ARM_OPTIMZED_STRING_FUNCTIONS is not set
++# CONFIG_ARM_EXCEPTIONS is not set
++CONFIG_DEFCONFIG_LIST="$ARCH_DEFCONFIG"
++CONFIG_HAS_KALLSYMS=y
++CONFIG_HAS_MODULES=y
++# CONFIG_CMD_MEMORY is not set
++CONFIG_HAVE_NOSHELL=y
++
++#
++# General Settings              
++#
++# CONFIG_LOCALVERSION_AUTO is not set
++CONFIG_ENVIRONMENT_VARIABLES=y
++
++#
++# memory layout                 
++#
++CONFIG_HAVE_CONFIGURABLE_TEXT_BASE=y
++CONFIG_TEXT_BASE=0x83000000
++CONFIG_HAVE_CONFIGURABLE_MEMORY_LAYOUT=y
++# CONFIG_MEMORY_LAYOUT_DEFAULT is not set
++CONFIG_MEMORY_LAYOUT_FIXED=y
++CONFIG_STACK_BASE=0x000C000
++CONFIG_STACK_SIZE=0x1000
++CONFIG_MALLOC_BASE=0x000D000
++CONFIG_MALLOC_SIZE=0x3000
++# CONFIG_BROKEN is not set
++# CONFIG_EXPERIMENTAL is not set
++CONFIG_MALLOC_DLMALLOC=y
++# CONFIG_KALLSYMS is not set
++CONFIG_PROMPT="uLoader >"
++CONFIG_BAUDRATE=115200
++CONFIG_SIMPLE_READLINE=y
++# CONFIG_LONGHELP is not set
++CONFIG_CBSIZE=1024
++CONFIG_MAXARGS=16
++# CONFIG_SHELL_HUSH is not set
++CONFIG_SHELL_SIMPLE=y
++# CONFIG_SHELL_NONE is not set
++# CONFIG_CMDLINE_EDITING is not set
++# CONFIG_MEM_SIZE is not set
++# CONFIG_MENU is not set
++# CONFIG_PASSWORD is not set
++CONFIG_DYNAMIC_CRC_TABLE=y
++# CONFIG_ERRNO_MESSAGES is not set
++# CONFIG_TIMESTAMP is not set
++CONFIG_CONSOLE_FULL=y
++CONFIG_CONSOLE_ACTIVATE_FIRST=y
++# CONFIG_OF_FLAT_TREE is not set
++# CONFIG_PARTITION is not set
++# CONFIG_DEFAULT_ENVIRONMENT is not set
++# CONFIG_POLLER is not set
++
++#
++# Debugging                     
++#
++# CONFIG_DEBUG_INFO is not set
++# CONFIG_ENABLE_FLASH_NOISE is not set
++# CONFIG_ENABLE_PARTITION_NOISE is not set
++# CONFIG_ENABLE_DEVICE_NOISE is not set
++CONFIG_COMMAND_SUPPORT=y
++
++#
++# commands                      
++#
++
++#
++# scripting                     
++#
++# CONFIG_CMD_EDIT is not set
++# CONFIG_CMD_EXEC is not set
++# CONFIG_CMD_SLEEP is not set
++# CONFIG_CMD_SAVEENV is not set
++# CONFIG_CMD_LOADENV is not set
++# CONFIG_CMD_EXPORT is not set
++# CONFIG_CMD_PRINTENV is not set
++# CONFIG_CMD_READLINE is not set
++# CONFIG_CMD_TRUE is not set
++# CONFIG_CMD_FALSE is not set
++# CONFIG_CMD_LOGIN is not set
++# CONFIG_CMD_PASSWD is not set
++
++#
++# file commands                 
++#
++# CONFIG_CMD_LS is not set
++# CONFIG_CMD_RM is not set
++# CONFIG_CMD_CAT is not set
++# CONFIG_CMD_MKDIR is not set
++# CONFIG_CMD_RMDIR is not set
++# CONFIG_CMD_CP is not set
++# CONFIG_CMD_PWD is not set
++# CONFIG_CMD_CD is not set
++# CONFIG_CMD_MOUNT is not set
++# CONFIG_CMD_UMOUNT is not set
++CONFIG_CMD_NAND=y
++# CONFIG_CMD_NOR is not set
++# CONFIG_CMD_UPDATE_SPI is not set
++# CONFIG_CMD_UPDATE_FAST_SPI is not set
++# CONFIG_CMD_COPY is not set
++
++#
++# console                       
++#
++# CONFIG_CMD_CLEAR is not set
++# CONFIG_CMD_ECHO is not set
++
++#
++# memory                        
++#
++# CONFIG_CMD_LOADB is not set
++# CONFIG_CMD_MEMINFO is not set
++# CONFIG_CMD_CRC is not set
++# CONFIG_CMD_MTEST is not set
++
++#
++# flash                         
++#
++CONFIG_CMD_FLASH=y
++# CONFIG_CMD_UBI is not set
++
++#
++# booting                       
++#
++# CONFIG_CMD_BOOTM is not set
++# CONFIG_CMD_BOOTZ is not set
++# CONFIG_CMD_BOOTU is not set
++# CONFIG_CMD_RESET is not set
++CONFIG_CMD_GO=y
++CONFIG_CMD_BOOTB=y
++# CONFIG_CMD_TIMEOUT is not set
++CONFIG_CMD_PARTITION=y
++# CONFIG_CMD_VERSION is not set
++# CONFIG_CMD_HELP is not set
++# CONFIG_CMD_DEVINFO is not set
++# CONFIG_CMD_UNLZO is not set
++
++#
++# c2000			
++#
++# CONFIG_CMD_SOCINFO is not set
++# CONFIG_CMD_GEMAC_STATS is not set
++# CONFIG_CMD_PFE_STATS is not set
++# CONFIG_CMD_PFE_COMMANDS is not set
++# CONFIG_NET is not set
++
++#
++# Drivers                       
++#
++
++#
++# serial drivers                
++#
++# CONFIG_DRIVER_SERIAL_ARM_DCC is not set
++CONFIG_DRIVER_FAST_UART=y
++# CONFIG_DRIVER_SERIAL_NS16550 is not set
++
++#
++# SPI drivers                   
++#
++# CONFIG_SPI is not set
++# CONFIG_I2C is not set
++
++#
++# flash drivers                 
++#
++# CONFIG_DRIVER_CFI is not set
++CONFIG_MTD=y
++CONFIG_NAND=y
++# CONFIG_MTD_NAND_ECC_BCH is not set
++# CONFIG_NAND_WRITE is not set
++# CONFIG_NAND_ECC_SOFT is not set
++# CONFIG_NAND_ECC_HW is not set
++CONFIG_NAND_ECC_HW_SYNDROME=y
++# CONFIG_NAND_ECC_HW_NONE is not set
++CONFIG_NAND_COMCERTO_ECC_24_HW_BCH=y
++# CONFIG_COMCERTO_NAND_ERASE_FBB is not set
++CONFIG_NAND_INFO=y
++# CONFIG_NAND_BBT is not set
++# CONFIG_NAND_READ_OOB is not set
++CONFIG_NAND_COMCERTO=y
++# CONFIG_MTD_NAND_VERIFY_WRITE is not set
++# CONFIG_MTD_NAND_ECC_SMC is not set
++CONFIG_MTD_NAND_IDS=y
++# CONFIG_UBI is not set
++# CONFIG_ATA is not set
++# CONFIG_USB is not set
++# CONFIG_USB_GADGET is not set
++# CONFIG_VIDEO is not set
++# CONFIG_MCI is not set
++
++#
++# MFD
++#
++# CONFIG_LED is not set
++
++#
++# OTP driver                
++#
++# CONFIG_OTP is not set
++# CONFIG_DRIVER_OTP is not set
++
++#
++# SPAcc driver                
++#
++CONFIG_SPACC=y
++CONFIG_DRIVER_SPACC=y
++
++#
++# Filesystem support            
++#
++# CONFIG_FS_CRAMFS is not set
++# CONFIG_FS_RAMFS is not set
++# CONFIG_FS_DEVFS is not set
++# CONFIG_FS_FAT is not set
++CONFIG_CRC32=y
++# CONFIG_DIGEST is not set
++# CONFIG_GENERIC_FIND_NEXT_BIT is not set
++# CONFIG_PROCESS_ESCAPE_SEQUENCE is not set
+diff --git a/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+new file mode 100644
+index 0000000..40bb04a
+--- /dev/null
++++ b/arch/arm/configs/comcerto-2k_rv340_uloader_defconfig
+@@ -0,0 +1,310 @@
++#
++# Automatically generated make config: don't edit
++# Linux/arm 2011.06.0 Barebox Configuration
++# Tue Feb 17 19:09:05 2015
++#
++# CONFIG_BOARD_LINKER_SCRIPT is not set
++CONFIG_GENERIC_LINKER_SCRIPT=y
++CONFIG_ARM=y
++
++#
++# System Type
++#
++CONFIG_ARCH_COMCERTO=y
++# CONFIG_ARCH_AT91 is not set
++# CONFIG_ARCH_EP93XX is not set
++# CONFIG_ARCH_IMX is not set
++# CONFIG_ARCH_MXS is not set
++# CONFIG_ARCH_NETX is not set
++# CONFIG_ARCH_NOMADIK is not set
++# CONFIG_ARCH_OMAP is not set
++# CONFIG_ARCH_S3C24xx is not set
++# CONFIG_ARCH_VERSATILE is not set
++
++#
++# Comcerto Configuration
++#
++CONFIG_ARCH_HAS_LOWLEVEL_INIT=y
++CONFIG_BOARDINFO="Mindspeed C2000"
++
++#
++# SoC Selection
++#
++CONFIG_COMCERTO_C2000=y
++
++#
++# Board Selection
++#
++# CONFIG_MACH_COMCERTO_C2K_EVM is not set
++# CONFIG_MACH_COMCERTO_C2K_MFCNEVM is not set
++CONFIG_MACH_COMCERTO_C2K_RV340=y
++# CONFIG_MACH_COMCERTO_C2K_ASIC is not set
++# CONFIG_MACH_COMCERTO_C2K_RTSM is not set
++
++#
++# Build Selection
++#
++# CONFIG_COMCERTO_VERIFICATION is not set
++# CONFIG_COMCERTO_DIAG is not set
++# CONFIG_COMCERTO_BOOTLOADER is not set
++CONFIG_COMCERTO_ULOADER=y
++# CONFIG_COMCERTO_NAND_ULOADER is not set
++CONFIG_COMCERTO_PLL=y
++CONFIG_COMCERTO_DDR=y
++CONFIG_COMCERTO_NAND=y
++CONFIG_COMCERTO_SECUREBOOT=y
++# CONFIG_SECUREBOOT_TEST is not set
++CONFIG_BOOTB=y
++# CONFIG_M86201 is not set
++# CONFIG_M86202 is not set
++# CONFIG_M86203 is not set
++# CONFIG_M86204 is not set
++# CONFIG_M86206 is not set
++# CONFIG_M86207 is not set
++# CONFIG_M86208 is not set
++# CONFIG_M8620X is not set
++# CONFIG_M86260 is not set
++# CONFIG_M86261 is not set
++# CONFIG_M86261_NAS is not set
++# CONFIG_M86262 is not set
++# CONFIG_M8626X is not set
++# CONFIG_M86291 is not set
++# CONFIG_M86292 is not set
++# CONFIG_M86293 is not set
++# CONFIG_M86294 is not set
++# CONFIG_M86295 is not set
++# CONFIG_M86296 is not set
++# CONFIG_M86297 is not set
++CONFIG_M86298=y
++CONFIG_M8629X=y
++
++#
++# Processor Type
++#
++CONFIG_CPU_32=y
++CONFIG_CPU_32v7=y
++
++#
++# processor features
++#
++# CONFIG_BOOT_ENDIANNESS_SWITCH is not set
++# CONFIG_AEABI is not set
++
++#
++# Arm specific settings         
++#
++# CONFIG_CMD_ARM_CPUINFO is not set
++# CONFIG_ARM_OPTIMZED_STRING_FUNCTIONS is not set
++# CONFIG_ARM_EXCEPTIONS is not set
++CONFIG_DEFCONFIG_LIST="$ARCH_DEFCONFIG"
++CONFIG_HAS_KALLSYMS=y
++CONFIG_HAS_MODULES=y
++# CONFIG_CMD_MEMORY is not set
++CONFIG_HAVE_NOSHELL=y
++
++#
++# General Settings              
++#
++# CONFIG_LOCALVERSION_AUTO is not set
++CONFIG_ENVIRONMENT_VARIABLES=y
++
++#
++# memory layout                 
++#
++CONFIG_HAVE_CONFIGURABLE_TEXT_BASE=y
++CONFIG_TEXT_BASE=0x83000000
++CONFIG_HAVE_CONFIGURABLE_MEMORY_LAYOUT=y
++# CONFIG_MEMORY_LAYOUT_DEFAULT is not set
++CONFIG_MEMORY_LAYOUT_FIXED=y
++CONFIG_STACK_BASE=0x000C000
++CONFIG_STACK_SIZE=0x1000
++CONFIG_MALLOC_BASE=0x000D000
++CONFIG_MALLOC_SIZE=0x3000
++# CONFIG_BROKEN is not set
++# CONFIG_EXPERIMENTAL is not set
++CONFIG_MALLOC_DLMALLOC=y
++# CONFIG_KALLSYMS is not set
++CONFIG_PROMPT="uLoader >"
++CONFIG_BAUDRATE=115200
++CONFIG_SIMPLE_READLINE=y
++# CONFIG_LONGHELP is not set
++CONFIG_CBSIZE=1024
++CONFIG_MAXARGS=16
++# CONFIG_SHELL_HUSH is not set
++CONFIG_SHELL_SIMPLE=y
++# CONFIG_SHELL_NONE is not set
++# CONFIG_CMDLINE_EDITING is not set
++CONFIG_MEM_SIZE=y
++# CONFIG_MENU is not set
++# CONFIG_PASSWORD is not set
++CONFIG_DYNAMIC_CRC_TABLE=y
++# CONFIG_ERRNO_MESSAGES is not set
++# CONFIG_TIMESTAMP is not set
++CONFIG_CONSOLE_FULL=y
++CONFIG_CONSOLE_ACTIVATE_FIRST=y
++# CONFIG_OF_FLAT_TREE is not set
++# CONFIG_PARTITION is not set
++# CONFIG_DEFAULT_ENVIRONMENT is not set
++# CONFIG_POLLER is not set
++
++#
++# Debugging                     
++#
++# CONFIG_DEBUG_INFO is not set
++# CONFIG_ENABLE_FLASH_NOISE is not set
++# CONFIG_ENABLE_PARTITION_NOISE is not set
++# CONFIG_ENABLE_DEVICE_NOISE is not set
++CONFIG_COMMAND_SUPPORT=y
++
++#
++# commands                      
++#
++
++#
++# scripting                     
++#
++# CONFIG_CMD_EDIT is not set
++# CONFIG_CMD_EXEC is not set
++# CONFIG_CMD_SLEEP is not set
++# CONFIG_CMD_SAVEENV is not set
++# CONFIG_CMD_LOADENV is not set
++# CONFIG_CMD_EXPORT is not set
++# CONFIG_CMD_PRINTENV is not set
++# CONFIG_CMD_READLINE is not set
++# CONFIG_CMD_TRUE is not set
++# CONFIG_CMD_FALSE is not set
++# CONFIG_CMD_LOGIN is not set
++# CONFIG_CMD_PASSWD is not set
++
++#
++# file commands                 
++#
++# CONFIG_CMD_LS is not set
++# CONFIG_CMD_RM is not set
++# CONFIG_CMD_CAT is not set
++# CONFIG_CMD_MKDIR is not set
++# CONFIG_CMD_RMDIR is not set
++# CONFIG_CMD_CP is not set
++# CONFIG_CMD_PWD is not set
++# CONFIG_CMD_CD is not set
++# CONFIG_CMD_MOUNT is not set
++# CONFIG_CMD_UMOUNT is not set
++# CONFIG_CMD_NOR is not set
++# CONFIG_CMD_UPDATE_SPI is not set
++# CONFIG_CMD_UPDATE_FAST_SPI is not set
++# CONFIG_CMD_COPY is not set
++
++#
++# console                       
++#
++# CONFIG_CMD_CLEAR is not set
++# CONFIG_CMD_ECHO is not set
++
++#
++# memory                        
++#
++# CONFIG_CMD_LOADB is not set
++# CONFIG_CMD_MEMINFO is not set
++# CONFIG_CMD_CRC is not set
++# CONFIG_CMD_MTEST is not set
++
++#
++# flash                         
++#
++# CONFIG_CMD_FLASH is not set
++# CONFIG_CMD_UBI is not set
++
++#
++# booting                       
++#
++# CONFIG_CMD_BOOTM is not set
++# CONFIG_CMD_BOOTZ is not set
++# CONFIG_CMD_BOOTU is not set
++# CONFIG_CMD_RESET is not set
++# CONFIG_CMD_GO is not set
++CONFIG_CMD_BOOTB=y
++# CONFIG_CMD_TIMEOUT is not set
++# CONFIG_CMD_PARTITION is not set
++# CONFIG_CMD_VERSION is not set
++# CONFIG_CMD_HELP is not set
++# CONFIG_CMD_DEVINFO is not set
++# CONFIG_CMD_UNLZO is not set
++
++#
++# c2000			
++#
++# CONFIG_CMD_SOCINFO is not set
++# CONFIG_CMD_GEMAC_STATS is not set
++# CONFIG_CMD_PFE_STATS is not set
++# CONFIG_CMD_PFE_COMMANDS is not set
++# CONFIG_NET is not set
++
++#
++# Drivers                       
++#
++
++#
++# serial drivers                
++#
++# CONFIG_DRIVER_SERIAL_ARM_DCC is not set
++CONFIG_DRIVER_FAST_UART=y
++# CONFIG_DRIVER_SERIAL_NS16550 is not set
++
++#
++# SPI drivers                   
++#
++CONFIG_SPI=y
++CONFIG_DRIVER_SPI_C2K=y
++CONFIG_DRIVER_SPI_DMA_C2K=y
++CONFIG_DRIVER_FAST_SPI_C2K=y
++CONFIG_C2K_SPI_API=y
++CONFIG_C2K_SPI_COMMON=y
++CONFIG_SPI_FLASH_C2K=y
++# CONFIG_CSI_FLASH is not set
++CONFIG_SPI_FLASH=y
++CONFIG_FAST_SPI_FLASH=y
++# CONFIG_I2C is not set
++
++#
++# flash drivers                 
++#
++# CONFIG_DRIVER_CFI is not set
++CONFIG_MTD=y
++# CONFIG_NAND is not set
++# CONFIG_UBI is not set
++# CONFIG_ATA is not set
++# CONFIG_USB is not set
++# CONFIG_USB_GADGET is not set
++# CONFIG_VIDEO is not set
++# CONFIG_MCI is not set
++
++#
++# MFD
++#
++# CONFIG_I2C_MC13892 is not set
++# CONFIG_DRIVER_SPI_MC13783 is not set
++# CONFIG_LED is not set
++
++#
++# OTP driver                
++#
++# CONFIG_OTP is not set
++CONFIG_DRIVER_OTP=y
++
++#
++# SPAcc driver                
++#
++CONFIG_SPACC=y
++CONFIG_DRIVER_SPACC=y
++
++#
++# Filesystem support            
++#
++# CONFIG_FS_CRAMFS is not set
++# CONFIG_FS_RAMFS is not set
++# CONFIG_FS_DEVFS is not set
++# CONFIG_FS_FAT is not set
++CONFIG_CRC32=y
++# CONFIG_DIGEST is not set
++# CONFIG_GENERIC_FIND_NEXT_BIT is not set
++# CONFIG_PROCESS_ESCAPE_SEQUENCE is not set
+diff --git a/arch/arm/mach-comcerto/Kconfig b/arch/arm/mach-comcerto/Kconfig
+index 81a211e..f5c5d9e 100644
+--- a/arch/arm/mach-comcerto/Kconfig
++++ b/arch/arm/mach-comcerto/Kconfig
+@@ -36,6 +36,10 @@ config  MACH_COMCERTO_C2K_MFCNEVM
+         bool "MFCN_EVM"
+         help
+ 
++config  MACH_COMCERTO_C2K_RV340
++	bool "RV340"
++	help
++
+ config  MACH_COMCERTO_C2K_ASIC
+ 	bool "ASIC"
+ 	help
+diff --git a/arch/arm/mach-comcerto/include/mach/comcerto_spi.h b/arch/arm/mach-comcerto/include/mach/comcerto_spi.h
+index 3a5a8fd..c6fe0d2 100644
+--- a/arch/arm/mach-comcerto/include/mach/comcerto_spi.h
++++ b/arch/arm/mach-comcerto/include/mach/comcerto_spi.h
+@@ -34,6 +34,7 @@ struct c2k_spi_master {
+ #define	SPI_FLASH_DEVICE_DRIVER		"c2k_spi_flash"
+ 
+ #define	MX66L51235F_SPI_FLASH_NAME	"MX66L51235F"
++#define S25FL032P_SPI_FLASH_NAME	"S25FL032P"
+ #define	S25FL064A_SPI_FLASH_NAME	"S25FL064A"
+ #define	S25FL128P_SPI_FLASH_NAME	"S25FL128P"
+ #define	S25FL256_SPI_FLASH_NAME		"S25FL256"
+diff --git a/defaultenv/bin/boot b/defaultenv/bin/boot
+index 47fe6b9..573bb73 100755
+--- a/defaultenv/bin/boot
++++ b/defaultenv/bin/boot
+@@ -60,11 +60,7 @@ else
+ 		if [ -z $ubiroot ]; then
+ 			ubiroot="rootfs"
+ 		fi
+-		if [ x$rootfs_loc = xnand ]; then
+-			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock,4096"
+-		else
+-			bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock"
+-		fi
++		bootargs="$bootargs root=ubi0:$ubiroot ubi.mtd=$rootfs_mtdblock"
+ 	else
+ 		bootargs="$bootargs root=/dev/mtdblock$rootfs_mtdblock"
+ 	fi
+diff --git a/drivers/mtd/nand/comcerto_nand.c b/drivers/mtd/nand/comcerto_nand.c
+index d002cff..e6776b2 100644
+--- a/drivers/mtd/nand/comcerto_nand.c
++++ b/drivers/mtd/nand/comcerto_nand.c
+@@ -487,9 +487,8 @@ static int comcerto_calculate_ecc(struct mtd_info *mtd,
+ static int comcerto_correct_ecc(struct mtd_info *mtd, uint8_t *dat,
+ 		uint8_t *read_ecc, uint8_t *calc_ecc)
+ {
+-#if !defined (CONFIG_NAND_COMCERTO_ECC_8_HW_BCH) && !defined (CONFIG_NAND_COMCERTO_ECC_24_HW_BCH)
+ 	struct nand_chip *nand_device = mtd->priv;
+-#else
++#if defined (CONFIG_NAND_COMCERTO_ECC_8_HW_BCH) || defined (CONFIG_NAND_COMCERTO_ECC_24_HW_BCH)
+ 	uint8_t err_count = 0;
+ 	uint32_t err_corr_data_prev;
+ #endif
+diff --git a/drivers/net/comcerto/c2000_eth.c b/drivers/net/comcerto/c2000_eth.c
+index 980138f..28cf5bc 100755
+--- a/drivers/net/comcerto/c2000_eth.c
++++ b/drivers/net/comcerto/c2000_eth.c
+@@ -50,7 +50,11 @@ struct gemac_s gem_info[] = {
+ 
+ 		/* phy iface */
+ 		.phy_reg_index = EMAC_PORT_0,
++#ifdef EMAC0_PHY_ADDR
+ 		.phy_address = EMAC0_PHY_ADDR,
++#else
++		.phy_address = 0,
++#endif
+ 	},
+ 	/* PORT_1 configuration */
+ 	{
+@@ -62,7 +66,11 @@ struct gemac_s gem_info[] = {
+ 
+ 		/* phy iface */
+ 		.phy_reg_index = EMAC_PORT_0,
++#ifdef EMAC1_PHY_ADDR
+ 		.phy_address = EMAC1_PHY_ADDR,
++#else
++		.phy_address = 0,
++#endif
+ 	},
+ 
+ 	/* PORT_2 configuration */
+@@ -75,7 +83,11 @@ struct gemac_s gem_info[] = {
+ 
+ 		/* phy iface */
+ 		.phy_reg_index = EMAC_PORT_0,
++#ifdef EMAC2_PHY_ADDR
++		.phy_address = EMAC2_PHY_ADDR,
++#else
+ 		.phy_address = 0,
++#endif
+ 	},
+ };
+ 
+@@ -434,8 +446,10 @@ static int c2000_eth_init(struct eth_device *edev)
+ 
+ 	if (!(gem->flags & GEMAC_NO_PHY) && (gem->gemac_mode == RGMII) )
+         {
++#if !defined(CONFIG_MACH_COMCERTO_C2K_RV340)
+ 		miidev_enable_rgmii_rx_delay(&priv->miidev);
+ 		miidev_enable_rgmii_tx_delay(&priv->miidev);
++#endif
+ 		miidev_restart_aneg(&priv->miidev);
+ 	}
+ 
+@@ -541,7 +555,9 @@ static int c2000_eth_probe(struct device_d *dev)
+ 	priv->miidev.flags = 0;
+ 	priv->miidev.edev = edev;
+ 
++#if !defined(CONFIG_MACH_COMCERTO_C2K_RV340)
+         if(priv->gemac_port == 0)
++#endif
+ 	{
+ 		gemac_set_mdc_div(priv->gem->gemac_base, MDC_DIV_96);
+ 		gemac_enable_mdio(priv->gem->gemac_base);
+diff --git a/drivers/net/miidev.c b/drivers/net/miidev.c
+index 27b24e9..45248e6 100755
+--- a/drivers/net/miidev.c
++++ b/drivers/net/miidev.c
+@@ -28,6 +28,7 @@
+ #include <net.h>
+ #include <malloc.h>
+ 
++#if !defined(CONFIG_MACH_COMCERTO_C2K_RV340)
+ #define DEBUG_PORT_ADDRESS          29
+ #define DEBUG_PORT_DATA             30
+ 
+@@ -61,7 +62,7 @@ void miidev_enable_rgmii_tx_delay(struct mii_device *mdev)
+         val |= 0x100;
+         phy_debug_write(mdev, mdev->address, 0x5, val);
+ }
+-
++#endif
+ 
+ int miidev_restart_aneg(struct mii_device *mdev)
+ {
+diff --git a/drivers/spi/c2k_spi_flash.c b/drivers/spi/c2k_spi_flash.c
+index 7fe142d..ba43fd1 100644
+--- a/drivers/spi/c2k_spi_flash.c
++++ b/drivers/spi/c2k_spi_flash.c
+@@ -469,6 +469,8 @@ struct c2k_spi_flash_table flash_table[]= {
+ 	 S25FL128P_FLASH_PAGE_SIZE, S25FL128P_CHUNK_SIZE,  S25FL128P_FLASH_SUPPORT_ADDRESS_MODE},
+ 	{S25FL256_FLASH_NAME, S25FL256_FLASH_SIZE, S25FL256_FLASH_SECTOR_SIZE,
+ 	 S25FL256_FLASH_PAGE_SIZE, S25FL256_CHUNK_SIZE, S25FL256_FLASH_SUPPORT_ADDRESS_MODE},
++	{S25FL032P_FLASH_NAME, S25FL032P_FLASH_SIZE, S25FL032P_FLASH_SECTOR_SIZE,
++	 S25FL032P_FLASH_PAGE_SIZE, S25FL032P_CHUNK_SIZE,  S25FL032P_FLASH_SUPPORT_ADDRESS_MODE},
+ };
+ /* chunk size is assigning to flash device based on the dma configuration in probe.*/
+ /* The value in the above array will be overwritten in probe function. */
+diff --git a/drivers/spi/c2k_spi_flash.h b/drivers/spi/c2k_spi_flash.h
+index fc87b4d..faa2009 100644
+--- a/drivers/spi/c2k_spi_flash.h
++++ b/drivers/spi/c2k_spi_flash.h
+@@ -93,6 +93,13 @@ struct c2k_spi_flash_table {
+ #define	S25FL256_CHUNK_SIZE			(128)
+ #define	S25FL256_FLASH_SUPPORT_ADDRESS_MODE	(4)
+ 
++#define	S25FL032P_FLASH_NAME			S25FL032P_SPI_FLASH_NAME
++#define	S25FL032P_FLASH_SIZE			(4*1024*1024)
++#define	S25FL032P_FLASH_SECTOR_SIZE		(64*1024)
++#define	S25FL032P_FLASH_PAGE_SIZE		(256)
++#define	S25FL032P_CHUNK_SIZE			(8)
++#define	S25FL032P_FLASH_SUPPORT_ADDRESS_MODE	(3)
++
+ 
+ #define	DUS_DMA_READ_WRITE_CHUNK_SIZE		(128)
+ #define	NO_DUS_DMA_READ_WRITE_CHUNK_SIZE	(8)
+diff --git a/uldr_sku_gen.sh b/uldr_sku_gen.sh
+index 40bd43c..1784cef 100755
+--- a/uldr_sku_gen.sh
++++ b/uldr_sku_gen.sh
+@@ -5,7 +5,7 @@
+ }
+ 
+ cd $1
+-sku=$(echo $2 | sed -e 's\uloader\\g' | sed -e 's\c2kevm\\g' | sed -e 's\c2kasic\\g' | sed -e 's\nand\\g' | sed -e 's\c2kmfcnevm\\g')
++sku=$(echo $2 | sed -e 's\uloader\\g' | sed -e 's\c2kevm\\g' | sed -e 's\c2kasic\\g' | sed -e 's\nand\\g' | sed -e 's\c2kmfcnevm\\g' | sed -e 's\c2krv340\\g')
+ bin_file=$3
+ size=$(ls -l barebox.bin | cut -d' ' -f 5)
+ head -c 48 barebox.bin > temp.bin
+-- 
+2.7.4
+

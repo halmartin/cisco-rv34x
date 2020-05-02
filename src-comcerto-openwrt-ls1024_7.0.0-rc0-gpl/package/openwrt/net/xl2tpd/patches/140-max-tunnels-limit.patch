@@ -1,0 +1,40 @@
+diff -aurN '--exclude-from=files' orig-xl2tpd-1.3.1/aaa.c xl2tpd-1.3.1/aaa.c
+--- orig-xl2tpd-1.3.1/aaa.c	2011-10-07 00:52:05.000000000 +0530
++++ xl2tpd-1.3.1/aaa.c	2016-02-12 10:51:43.276696000 +0530
+@@ -100,11 +100,36 @@
+     }
+ }
+ 
++#define MAX_TUNNELS 25
+ unsigned int get_addr (struct iprange *ipr)
+ {
+     unsigned int x, y;
+     int status;
+     struct iprange *ipr2;
++    int temp_count=0;
++    struct iprange *temp_iprange=ipr;
++
++    while (temp_iprange)
++    {
++        if (temp_iprange->sense == SENSE_ALLOW)
++            for (x = ntohl (temp_iprange->start); x <= ntohl (temp_iprange->end); x++)
++            {
++                /* Found an IP in an ALLOW range, check to be sure it is
++                   consistant through the remaining regions */
++                if (ip_used (x))
++                {
++			temp_count++;
++                }
++                if(temp_count >= MAX_TUNNELS)
++                {
++        		l2tp_log (LOG_WARNING, "L2TP MAX tunnels exceeded.\n");
++    			return 0;
++                }
++            };
++        temp_iprange = temp_iprange->next;
++    }
++    l2tp_log (LOG_WARNING, "L2TP tunnels used:%d.\n",temp_count);
++
+     while (ipr)
+     {
+         if (ipr->sense == SENSE_ALLOW)

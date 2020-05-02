@@ -1,0 +1,25 @@
+--- a/pam_ldap.c	2016-02-19 14:50:40.422616003 +0530
++++ b/pam_ldap.c	2016-02-19 14:50:49.722616100 +0530
+@@ -3505,6 +3505,10 @@ pam_sm_authenticate (pam_handle_t * pamh
+                                      _cleanup_data);
+        
+        }
++       if(rc == PAM_SUCCESS)
++           syslog(LOG_INFO, "pam_ldap:User %s authentication %s",username,rc==PAM_SUCCESS ? "succeeded":"failed");
++       else
++           syslog(LOG_ERR, "pam_ldap:User %s authentication %s",username,rc==PAM_SUCCESS ? "succeeded":"failed");
+ 
+ 	  return rc;
+ 	}
+@@ -3557,6 +3561,11 @@ pam_sm_authenticate (pam_handle_t * pamh
+                             _cleanup_data);
+    }
+ 
++   if(rc == PAM_SUCCESS)
++       syslog(LOG_INFO, "pam_ldap:User %s authentication %s",username,rc==PAM_SUCCESS ? "succeeded":"failed");
++   else
++       syslog(LOG_ERR, "pam_ldap:User %s authentication %s",username,rc==PAM_SUCCESS ? "succeeded":"failed");
++
+   return rc;
+ }
+ 

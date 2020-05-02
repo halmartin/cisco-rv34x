@@ -1,0 +1,102 @@
+#!/bin/sh
+
+cmm -c query swqos reset >/tmp/swqos
+
+swqos=$(cat /tmp/swqos | grep -E "Queue [0-9]*:|Packets Processed" | sed s/"    "//g | awk 1 ORS=' ' | sed s/"Packets Processed:"//g | sed s/"Packets Dropped:"//g | sed s/": Q"/":0,0 Q"/g | sed s/Queue/./g |sed s/" "//g)
+
+eg_sch=$(echo $swqos | grep -o ".5:" | grep -v "[0-9]5:")
+board=$(uci get systeminfo.sysinfo.pid | awk -F '-' '{print $1}')
+
+if [ "$board" = "RV340" ] || [ "$board" = "RV340W" ] || [ "$board" = "RV345P" ] || [ "$board" = "RV345" ]; then
+	if [ -n "$eg_sch" ];then
+		#eg_usb1=$(echo $swqos | cut -f 1-9 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		eg_usb1=$(echo $swqos | awk -F '.' -v OFS=. '{print $2,$9,$8,$7,$6,$5,$4,$3}' | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		#eg_usb2=$(echo $swqos | cut -f 10-17 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		eg_usb2=$(echo $swqos | awk -F '.' -v OFS=. '{print $10,$17,$16,$15,$14,$13,$12,$11}' | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		ing_wan1=$(echo $swqos | cut -f 18-25 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		ing_wan2=$(echo $swqos | cut -f 26-33 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		ing_usb1=$(echo $swqos | cut -f 34-41 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		eg_usb1="$eg_usb1",
+		eg_usb2="$eg_usb2",
+		ing_usb2=$(echo $swqos | cut -f 42-49 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		count=$(echo "$ing_usb2" | awk -F ',' '{ print NF}')
+		if [ "$count" = "15" ]; then
+			ing_usb2="$ing_usb2"0,0
+		fi
+	else
+		#eg_usb1=$(echo $swqos | cut -f 1-5 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		eg_usb1=$(echo $swqos | awk -F '.' -v OFS=. '{print $2,$5,$4,$3}' | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		#eg_usb2=$(echo $swqos | cut -f 6-9 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		eg_usb2=$(echo $swqos | awk -F '.' -v OFS=. '{print $6,$9,$8,$7}' | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		eg_usb1=$eg_usb1,0,0,0,0,0,0,0,0,
+		eg_usb2=$eg_usb2,0,0,0,0,0,0,0,0,
+		ing_wan1=$(echo $swqos | cut -f 10-17 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		ing_wan2=$(echo $swqos | cut -f 18-25 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		ing_usb1=$(echo $swqos | cut -f 26-33 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		ing_usb2=$(echo $swqos | cut -f 34-41 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+
+		count=$(echo "$ing_usb2" | awk -F ',' '{ print NF}')
+		if [ "$count" = "15" ]; then
+			ing_usb2="$ing_usb2"0,0
+		fi
+	fi
+
+	eg_wan1=$(cat /sys/devices/platform/pfe.0/tmu1_queues | head -n 8 | sed s/" "//g | awk -F ',' '{print $3 $2}' | awk -F ":" '{print $2","$4}' | sed s/"(llm)head"//g | awk 1 ORS=' ' | sed s/" "/,/g)
+	eg_wan2=$(cat /sys/devices/platform/pfe.0/tmu0_queues | head -n 8 | sed s/" "//g | awk -F ',' '{print $3 $2}' | awk -F ":" '{print $2","$4}' | sed s/"(llm)head"//g | awk 1 ORS=' ' | sed s/" "/,/g)
+
+	ing_wan1="$(echo $ing_wan1 | cut -f 3-32 -d ,),$(echo $ing_wan1 | cut -f 1-2 -d ,)"
+	ing_wan2="$(echo $ing_wan2 | cut -f 3-32 -d ,),$(echo $ing_wan2 | cut -f 1-2 -d ,)"
+	ing_usb1="$(echo $ing_usb1 | cut -f 3-32 -d ,),$(echo $ing_usb1 | cut -f 1-2 -d ,)"
+	ing_usb2="$(echo $ing_usb2 | cut -f 3-32 -d ,),$(echo $ing_usb2 | cut -f 1-2 -d ,)"
+	echo "qos,WAN1,$eg_wan1$ing_wan1">/tmp/newqosstats
+	echo "qos,WAN2,$eg_wan2$ing_wan2">>/tmp/newqosstats
+	echo "qos,USB1,$eg_usb1$ing_usb1">>/tmp/newqosstats
+	echo "qos,USB2,$eg_usb2$ing_usb2">>/tmp/newqosstats
+
+else #Assuming all PP boards
+
+	if [ -n "$eg_sch" ];then
+		eg_usb1=$(echo $swqos | cut -f 1-9 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		ing_wan1=$(echo $swqos | cut -f 10-17 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		ing_usb1=$(echo $swqos | cut -f 18-25 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		eg_usb1="$eg_usb1",
+		count=$(echo "$ing_usb1" | wc -c)
+		if [ "$count" = "29" ]; then
+			ing_usb1="$ing_usb1"0,0
+		fi
+	else
+		eg_usb1=$(echo $swqos | cut -f 1-5 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		eg_usb2=$(echo $swqos | cut -f 6-9 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		eg_usb1=$eg_usb1,0,0,0,0,0,0,0,0,
+		ing_wan1=$(echo $swqos | cut -f 6-13 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		ing_usb1=$(echo $swqos | cut -f 14-21 -d . | sed s/".[0-9]*:"/,/g | cut -f 2-20 -d ,)
+		count=$(echo "$ing_usb1" | wc -c)
+		if [ "$count" = "29" ]; then
+			ing_usb1="$ing_usb1"0,0
+		fi
+	fi
+
+	eg_wan1=$(cat /sys/devices/platform/pfe.0/tmu0_queues | head -n 8 | sed s/" "//g | awk -F ',' '{print $3 $2}' | awk -F ":" '{print $2","$4}' | sed s/"(llm)head"//g | awk 1 ORS=' ' | sed s/" "/,/g)
+
+	ing_wan1="$(echo $ing_wan1 | cut -f 3-32 -d ,),$(echo $ing_wan1 | cut -f 1-2 -d ,)"
+	ing_usb1="$(echo $ing_usb1 | cut -f 3-32 -d ,),$(echo $ing_usb1 | cut -f 1-2 -d ,)"
+	echo "qos,WAN1,$eg_wan1$ing_wan1">/tmp/newqosstats
+	echo "qos,WAN2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,">>/tmp/newqosstats
+	echo "qos,USB1,$eg_usb1$ing_usb1">>/tmp/newqosstats
+	echo "qos,USB2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,">>/tmp/newqosstats
+fi
+[ -f /tmp/stats/qosstats ] || {
+	echo "qos,WAN1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,">/tmp/stats/qosstats
+	echo "qos,WAN2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,">>/tmp/stats/qosstats
+	echo "qos,USB1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,">>/tmp/stats/qosstats
+	echo "qos,USB2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,">>/tmp/stats/qosstats
+}
+awk -F,  'BEGIN{inf[1]="WAN1";inf[2]="WAN2";inf[3]="USB1";inf[4]="USB2";} 
+{for (i=3;i<=NF;i++) total[FNR","i]+=$i;} 
+END{for (j=1;j<=FNR;j++) 
+{ printf "qos,%s,",inf[ j]; 
+for (i=3;i<=NF;i++) 
+printf "%i,",total[j","i]; print "";}}' /tmp/stats/qosstats /tmp/newqosstats > /tmp/tmpqosstats
+
+mv /tmp/tmpqosstats /tmp/stats/qosstats
+rm /tmp/newqosstats

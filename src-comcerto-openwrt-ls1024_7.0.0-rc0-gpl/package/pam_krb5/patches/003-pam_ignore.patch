@@ -1,0 +1,12 @@
+--- a/auth.c	2015-10-09 18:58:42.815342387 +0530
++++ b/auth.c	2015-10-09 18:56:28.109033717 +0530
+@@ -1089,5 +1089,9 @@ done:
+         else
+             pamk5_context_free(args);
+     }
++    if (pamret == PAM_AUTHINFO_UNAVAIL)
++    {
++        pamret = PAM_IGNORE;
++    }
+     return pamret;
+ }

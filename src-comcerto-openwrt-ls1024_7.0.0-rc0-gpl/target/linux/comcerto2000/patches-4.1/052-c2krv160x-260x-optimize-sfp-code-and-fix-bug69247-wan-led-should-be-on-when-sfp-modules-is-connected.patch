@@ -1,0 +1,23 @@
+# 2017-04-21: harry.lin <harry.lin@deltaww.com>
+# Fix bug69247: wan led should be on when sfp modules is connected.
+--- linux-4.1.8/drivers/net/phy/broadcom.c.org	2017-04-21 15:08:20.470670995 +0800
++++ linux-4.1.8/drivers/net/phy/broadcom.c	2017-04-21 15:17:10.450670651 +0800
+@@ -375,6 +375,9 @@
+ 
+ 			phy_mode = 1;
+ 
++			phy_write(phydev, 0x1e, 0x23e);
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) | (1 << 6));
++
+ 			phydev->autoneg = AUTONEG_DISABLE;
+ 			phydev->duplex = DUPLEX_FULL;
+ 			phy_write(phydev, 0x1e, 0x233);
+@@ -414,7 +417,7 @@
+ 			phy_mode = 2;
+ 
+ 			phy_write(phydev, 0x1e, 0x23e);
+-			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~(1 << 0));
++			phy_write(phydev, 0x1f, phy_read(phydev, 0x1f) & ~((1 << 0) | (1 << 6)));
+ 
+ 			phy_write(phydev, 0x1e, 0x21);
+ 			phy_write(phydev, 0x1f, (phy_read(phydev, 0x1f) & ~(3 << 1)) & ~(1 << 0));

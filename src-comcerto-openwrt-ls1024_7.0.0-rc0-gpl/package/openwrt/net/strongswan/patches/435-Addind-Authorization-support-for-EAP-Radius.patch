@@ -1,0 +1,115 @@
+From c668c2b66640d9c699707294efdfea799594bf82 Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Date: Fri, 18 Aug 2017 17:54:50 +0530
+Subject: [PATCH] 435 Addind Authorization support for EAP-Radius
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+---
+ src/libcharon/plugins/eap_radius/eap_radius.c | 84 ++++++++++++++++++++++++++-
+ 1 file changed, 83 insertions(+), 1 deletion(-)
+
+diff --git a/src/libcharon/plugins/eap_radius/eap_radius.c b/src/libcharon/plugins/eap_radius/eap_radius.c
+index a2530e6..10164d9 100644
+--- a/src/libcharon/plugins/eap_radius/eap_radius.c
++++ b/src/libcharon/plugins/eap_radius/eap_radius.c
+@@ -308,6 +308,82 @@ static void process_class(radius_message_t *msg)
+ }
+ 
+ /**
++ * Handle the Class attribute as group membership information for authorization
++ */
++static status_t process_class_authorize(radius_message_t *msg)
++{
++	enumerator_t *enumerator;
++	chunk_t data;
++	int type;
++	char cmd[256] = {'\0'};
++	char buffer[64] = {'\0'};
++	FILE *fp = NULL;
++	char service[256] = {'\0'};
++	char conn_name[256] = {'\0'};
++	status_t status = FAILED;
++
++	enumerator = msg->create_enumerator(msg);
++	while (enumerator->enumerate(enumerator, &type, &data))
++	{
++		char group_name[data.len + 1];
++		if (type == RAT_CLASS)
++		{
++			ike_sa_t *ike_sa;
++
++			if (data.len >= 44)
++			{	/* quirk: ignore long class attributes, these are used for
++				 * other purposes by some RADIUS servers (such as NPS). */
++				continue;
++			}
++
++			ike_sa = charon->bus->get_sa(charon->bus);
++			if (ike_sa)
++			{
++//				snprintf(buf, sizeof(buf), "%.*s", (int)data.len, data.ptr);
++				snprintf(group_name, sizeof(group_name), "%.*s", (int)data.len, data.ptr);
++				sprintf(conn_name, "%s", ike_sa->get_name(ike_sa));
++				if(strncmp(conn_name,"s2s_",4) == 0)
++				{
++					strcpy(service,"s2s-vpn");
++				}
++				else
++				{
++					strcpy(service,"ezvpn");
++				}
++//				DBG1(DBG_IKE, "group_name is:%s: and conn_name is %s service is %s ",group_name,conn_name,service);
++				DBG1(DBG_CFG, "received group membership '%s' from RADIUS", group_name);
++				sprintf(cmd,"/usr/bin/userauth authorize %s %s %s",service,group_name,conn_name);
++				fp = popen(cmd,"r");
++				if (fp == NULL)
++				{
++					DBG1(DBG_IKE,"Unable to execute /usr/bin/userauth");
++					status = FAILED;
++					break;
++				}
++				while(fgets(buffer, sizeof(buffer), fp) != NULL)
++				{
++					if (strcmp(buffer, "PAM_AUTH_ERR") ==0 )
++					{
++						DBG1(DBG_IKE, "Authorization failed for group=%s",group_name);
++					}
++					else if(strcmp(buffer, "PAM_SUCCESS") ==0 )
++					{
++						DBG1(DBG_IKE, "Authorization success for group=%s",group_name);
++						status = SUCCESS;
++						break;
++					}
++				}
++				pclose(fp);
++				if (status == SUCCESS)
++					break;
++			}
++		}
++	}
++	enumerator->destroy(enumerator);
++	return status;
++}
++
++/**
+  * Handle the Filter-Id attribute as IPsec CHILD_SA name
+  */
+ static void process_filter_id(radius_message_t *msg)
+@@ -685,7 +761,13 @@ METHOD(eap_method_t, process, status_t,
+ 				eap_radius_process_attributes(response);
+ 				DBG1(DBG_IKE, "RADIUS authentication of '%Y' successful",
+ 					 this->peer);
+-				status = SUCCESS;
++				if (lib->settings->get_bool(lib->settings,
++						"%s.plugins.eap-radius.class_group", FALSE, lib->ns))
++				{
++					status = process_class_authorize(response);
++				}
++				else
++					status = SUCCESS;
+ 				break;
+ 			case RMC_ACCESS_REJECT:
+ 			default:
+-- 
+1.9.1
+

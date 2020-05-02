@@ -1,0 +1,43 @@
+From c8a52fd1f3847bddcfdd6ede7943341b9a39edeb Mon Sep 17 00:00:00 2001
+From: "venkat.upputuri" <venkat.upputuri@freescale.com>
+Date: Wed, 22 Apr 2015 18:21:18 +0530
+Subject: [PATCH 02/19] LOG : 81458 [C2K/CISCO SBR] PPTP Passthrough support
+
+- The PPTP conntrack will be created with help of TCP control connection. This TCP control
+  connection is master conntrack for the PPTP connection. PPTP connection need to be removed
+  when TCP control connection is destroyed.
+- The PPTP connection will be destroyed from TCP control connection terimination.
+  So, we should clear the IP_PERMANENT bit (set by CMM) during TCP connection destroy.
+  Otherwise the PPTP TCP control connection is removed and PPTP child connection will
+  be there forever.
+---
+ net/netfilter/nf_conntrack_pptp.c |   13 +++++++++++++
+ 1 files changed, 13 insertions(+), 0 deletions(-)
+
+diff --git a/net/netfilter/nf_conntrack_pptp.c b/net/netfilter/nf_conntrack_pptp.c
+index 31d56b2..7896839 100644
+--- a/net/netfilter/nf_conntrack_pptp.c
++++ b/net/netfilter/nf_conntrack_pptp.c
+@@ -154,6 +154,19 @@ static int destroy_sibling_or_exp(struct net *net, struct nf_conn *ct,
+ 		pr_debug("setting timeout of conntrack %p to 0\n", sibling);
+ 		sibling->proto.gre.timeout	  = 0;
+ 		sibling->proto.gre.stream_timeout = 0;
++#ifdef CONFIG_CPE_FAST_PATH
++		/** 
++		 * The PPTP connection child connection of TCP control connection. So, this connection 
++		 * will not be destroyed by timeout (in PFE/Linux). Instead this connection should be 
++		 * destroyed, when TCP control connection is closed.
++		 *
++		 * This function is called during TCP control connection destroy, We need to clear
++		 * IPS_PERMANENT bit here. So that, this connection will get destroyed, otherwise this 
++		 * connection will never get deleted (left as zombie).
++		 */ 
++  
++		clear_bit(IPS_PERMANENT_BIT, &sibling->status);
++#endif
+ 		if (del_timer(&sibling->timeout))
+ 			sibling->timeout.function((unsigned long)sibling);
+ 		nf_ct_put(sibling);
+-- 
+1.7.7.4
+

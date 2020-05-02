@@ -1,0 +1,41 @@
+#!/bin/sh
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Script for testing button.
+
+#SYS Reset Button
+if [ ! -e /sys/class/gpio/gpio46 ]; then
+    echo 46 > /sys/class/gpio/export
+fi
+
+#WIFI Enable Button
+if [ ! -e /sys/class/gpio/gpio6 ]; then
+    echo 6 > /sys/class/gpio/export
+fi
+
+button=$1
+
+if [ "${button}" = "reset" ];then
+    while true
+    do
+        value=`cat /sys/class/gpio/gpio46/value`
+        if [ $value -eq '0' ];then
+            echo Reset Button Pressed!
+            break
+        fi
+        sleep 1
+    done
+    
+elif [ "${button}" = "wifi" ];then
+    value=`cat /sys/class/gpio/gpio6/value`
+    if [ $value -eq '0' ];then
+        echo Wifi Enable!
+        break
+    else
+        echo Wifi Disable!
+	break
+    fi
+    
+else
+    echo "[button] reset wifi"
+fi
+

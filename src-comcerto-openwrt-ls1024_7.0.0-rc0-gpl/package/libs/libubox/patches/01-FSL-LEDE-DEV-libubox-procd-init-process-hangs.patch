@@ -1,0 +1,12 @@
+diff -uarN a/uloop.c b/uloop.c
+--- a/uloop.c	2016-09-19 17:38:05.373988000 +0530
++++ b/uloop.c	2016-09-19 17:38:55.024374000 +0530
+@@ -256,7 +256,7 @@
+ {
+ 	int n, nfds;
+ 
+-	nfds = epoll_wait(poll_fd, events, ARRAY_SIZE(events), timeout);
++	nfds = epoll_wait(poll_fd, events, ARRAY_SIZE(events), timeout < 0 ? 8000 : timeout);
+ 	for (n = 0; n < nfds; ++n) {
+ 		struct uloop_fd_event *cur = &cur_fds[n];
+ 		struct uloop_fd *u = events[n].data.ptr;

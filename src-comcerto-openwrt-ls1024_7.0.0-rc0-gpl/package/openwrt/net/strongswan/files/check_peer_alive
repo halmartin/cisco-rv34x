@@ -1,0 +1,89 @@
+#!/usr/bin/perl
+#UDP keep-alive test client
+
+use IO::Socket::INET;
+use Getopt::Long;
+
+# flush after every write
+$| = 1;
+
+sub help ()
+{
+	#print "check_peer_alive <PeerIP> <LocalIP>\n\tPeerIP - Remote Tunnel Endpoint to reach.\n\tLocalIP - Local IP with which to be queried\n";
+	print "$0 <PeerIP> <LocalIP | any>\n\tPeerIP - Remote Tunnel Endpoint to reach.\n\tLocalIP - Local IP with which to be queried\n\tany - NOT bind on any of the interface.\n";
+}
+
+#printf("Total args:%d\n", $#ARGV + 1);
+
+if ($#ARGV != 1) #0,1 are our args
+{
+	#Error condition. Args must be passed
+	help();
+	exit 1; #some error number
+}
+
+my $socket;	#Socket
+my $data;	#Data to be sent to peer
+my $rcv_data;	#Data that is received from peer
+my $fh;		#File handler
+
+#  We call IO::Socket::INET->new() to create the UDP Socket
+# and bind with the PeerAddr.
+#PeerAddr  => '91.91.91.2',
+#LocalAddr => '170.1.1.73',
+
+if ($ARGV[1] eq "any")
+{
+	$socket = new IO::Socket::INET (
+		PeerAddr  => $ARGV[0],
+		LocalPort => '500',
+		PeerPort  => '500',
+		Proto     => 'udp',
+		ReusePort => 1,
+		ReuseAddr => 1
+	) or die "ERROR Socket: (Socket creation): $!\n";
+}
+else
+{
+	$socket = new IO::Socket::INET (
+		PeerAddr  => $ARGV[0],
+		LocalAddr => $ARGV[1],
+		LocalPort => '500',
+		PeerPort  => '500',
+		Proto     => 'udp',
+		ReusePort => 1,
+		ReuseAddr => 1
+	) or die "ERROR Socket: (Socket creation): $!\n";
+}
+
+#set recv socket timeout
+$socket->setsockopt(SOL_SOCKET,SO_RCVTIMEO, pack('L!L!', 5, 0)) or (
+	$socket->close() and
+	die "ERROR setsockopt: (setting receive timeout): $!\n"
+);
+
+#read ISAKMP data to be sent
+open $fh, '<', '/tmp/ipsec/isakmp.bin' or (
+	$socket->close() and
+	die "ERROR open: (isakmp.bin file): $!\n"
+);
+binmode($fh);
+read($fh,$data,500);	#read complete data to 'data' variable from the file. It is already known that the file has 500bytes of data.
+close($fh);
+
+#Send data i,e ISAKMP first packet to Peer.
+$socket->send($data) or (
+	$socket->close() and
+	die "ERROR: (send data to Peer): $!\n"
+);
+
+#read operation
+$socket->recv($rcv_data,1024) or (
+	$socket->close() and
+	die "ERROR: (Timeout to receive data from peer): $!"
+);
+
+#print "Data received from socket : $rcv_data\n";
+#Peer is reachable
+$socket->close();
+exit 0

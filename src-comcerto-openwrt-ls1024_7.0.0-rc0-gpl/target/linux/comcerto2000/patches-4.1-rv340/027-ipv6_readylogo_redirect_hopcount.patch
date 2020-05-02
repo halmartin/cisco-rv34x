@@ -1,0 +1,20 @@
+--- linux-4.1.8_orig/net/ipv6/ndisc.c	2017-03-09 14:23:27.606809720 +0530
++++ linux-4.1.8/net/ipv6/ndisc.c	2017-03-09 14:37:05.300386745 +0530
+@@ -1448,12 +1448,17 @@ static void ndisc_fill_redirect_hdr_opti
+ 					   int rd_len)
+ {
+ 	u8 *opt = skb_put(skb, rd_len);
++    int hopcnt=0;
+ 
+ 	memset(opt, 0, 8);
+ 	*(opt++) = ND_OPT_REDIRECT_HDR;
+ 	*(opt++) = (rd_len >> 3);
+ 	opt += 6;
+ 
++    hopcnt=ipv6_hdr(orig_skb)->hop_limit;
++    if((hopcnt > 1) && (hopcnt <= 255))
++        ipv6_hdr(orig_skb)->hop_limit=hopcnt-1;
++
+ 	memcpy(opt, ipv6_hdr(orig_skb), rd_len - 8);
+ }
+ 

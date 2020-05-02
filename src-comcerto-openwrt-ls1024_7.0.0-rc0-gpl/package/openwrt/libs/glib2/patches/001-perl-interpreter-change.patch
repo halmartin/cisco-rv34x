@@ -1,0 +1,11 @@
+# 2017-04-05: Siva Prasad Meduri <siva.meduri@nxp.com>
+# Patch which contains Perl interpreter change where default perl interpreter path is used
+diff -Naur glib-2.41.1-org/gobject/glib-mkenums.in glib-2.41.1/gobject/glib-mkenums.in
+--- glib-2.41.1-org/gobject/glib-mkenums.in	2014-05-22 22:18:37.000000000 +0530
++++ glib-2.41.1/gobject/glib-mkenums.in	2017-04-05 11:06:51.803259688 +0530
+@@ -1,4 +1,4 @@
+-#! @PERL_PATH@
++#! /usr/bin/perl
+ 
+ use warnings;
+ use File::Basename;

@@ -1,0 +1,27 @@
+From 6731d0463818f699d993625d3a442bf0fcd1730a Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy <ganesh.reddy@nxp.com>
+Date: Mon, 2 Jan 2017 17:57:50 +0530
+Subject: [PATCH 56/60] SBR-887 Changing barebox version to 1.0.00.05
+
+There is an issue addressed towards SBR-3884. To track this, Incrementing barebox version by 1
+Signed-off-by: Ganesh Reddy <ganesh.reddy@nxp.com>
+---
+ commands/version_rv340.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/commands/version_rv340.c b/commands/version_rv340.c
+index c4dc39f..0a0d941 100644
+--- a/commands/version_rv340.c
++++ b/commands/version_rv340.c
+@@ -24,7 +24,7 @@
+ #include <common.h>
+ #include <command.h>
+ 
+-const char version_string_rv340[] = "1.0.00.04";
++const char version_string_rv340[] = "1.0.00.05";
+ 
+ static int do_version_rv340(struct command *cmdtp, int argc, char *argv[])
+ {
+-- 
+2.7.4
+

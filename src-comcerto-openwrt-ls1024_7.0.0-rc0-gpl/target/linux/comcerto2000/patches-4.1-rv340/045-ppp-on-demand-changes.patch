@@ -1,0 +1,169 @@
+--- a/drivers/net/ppp/ppp_generic.c	2017-03-17 03:25:24.998428828 -0500
++++ b/drivers/net/ppp/ppp_generic.c	2017-03-17 04:46:58.390655188 -0500
+@@ -40,6 +40,7 @@
+ #include <linux/if_arp.h>
+ #include <linux/ip.h>
+ #include <linux/tcp.h>
++#include <linux/udp.h>
+ #include <linux/spinlock.h>
+ #include <linux/rwsem.h>
+ #include <linux/stddef.h>
+@@ -56,6 +57,7 @@
+ #if defined(CONFIG_CPE_FAST_PATH)
+ #include <linux/jiffies.h>
+ #endif
++#include <net/ip.h>
+ 
+ #define PPP_VERSION	"2.4.2"
+ 
+@@ -247,6 +249,20 @@ struct ppp_net {
+ #define seq_before(a, b)	((s32)((a) - (b)) < 0)
+ #define seq_after(a, b)		((s32)((a) - (b)) > 0)
+ 
++static struct ppp_idle_pktfilt_tab {
++        unsigned char  proto;
++        unsigned short port;
++} ppp_recv_pktfilt_tab[] = {
++        { IPPROTO_TCP,  0 },     /* TCP - all */
++        { IPPROTO_ICMP,  0 },     /* ICMP - all */
++        { IPPROTO_IGMP,  0 },     /* IGMP - all */
++        { IPPROTO_ICMPV6,  0 },     /* ICMPv6 - all */
++        { IPPROTO_UDP,  53 },     /* DNS - port 53 */
++        { IPPROTO_UDP,  520 },    /* NTP - port 520 */
++        { IPPROTO_UDP,  123 },    /* NTP - port 123 */
++        { -1,           0 }     /* terminator entry */
++};
++
+ /* Prototypes. */
+ static int ppp_unattached_ioctl(struct net *net, struct ppp_file *pf,
+ 			struct file *file, unsigned int cmd, unsigned long arg);
+@@ -285,6 +301,7 @@ static int unit_get(struct idr *p, void
+ static int unit_set(struct idr *p, void *ptr, int n);
+ static void unit_put(struct idr *p, int n);
+ static void *unit_find(struct idr *p, int n);
++static int ppp_run_recv_pkt_filter(int l3proto, struct sk_buff *skb);
+ 
+ static struct class *ppp_class;
+ 
+@@ -1229,6 +1246,7 @@ ppp_send_frame(struct ppp *ppp, struct s
+ 	struct sk_buff *new_skb;
+ 	int len;
+ 	unsigned char *cp;
++	int skb_iif;
+ 
+ 	if (proto < 0x8000) {
+ #ifdef CONFIG_PPP_FILTER
+@@ -1247,15 +1265,20 @@ ppp_send_frame(struct ppp *ppp, struct s
+ 		}
+ 		/* if this packet passes the active filter, record the time */
+ 		if (!(ppp->active_filter &&
+-		      BPF_PROG_RUN(ppp->active_filter, skb) == 0))
+-			ppp->last_xmit = jiffies;
++		      BPF_PROG_RUN(ppp->active_filter, skb) == 0)) {
++			/* skip the updation of record time for self generated packets */
++				if (skb->skb_iif)
++					ppp->last_xmit = jiffies;
++		}
+ 		skb_pull(skb, 2);
+ #else
+ 		/* for data packets, record the time */
+-		ppp->last_xmit = jiffies;
++		/* skip the updation of record time for self generated packets */
++		if(skb->skb_iif)
++			ppp->last_xmit = jiffies;
+ #endif /* CONFIG_PPP_FILTER */
+ 	}
+-
++	skb_iif = skb->skb_iif;
+ 	++ppp->stats64.tx_packets;
+ 	ppp->stats64.tx_bytes += skb->len - 2;
+ 
+@@ -1320,11 +1343,16 @@ ppp_send_frame(struct ppp *ppp, struct s
+ 	 * queue it up for pppd to receive.
+ 	 */
+ 	if (ppp->flags & SC_LOOP_TRAFFIC) {
+-		if (ppp->file.rq.qlen > PPP_MAX_RQLEN)
+-			goto drop;
+-		skb_queue_tail(&ppp->file.rq, skb);
+-		wake_up_interruptible(&ppp->file.rwait);
+-		return;
++		/* below check added for demand dialling is appled only for LAN side traffic.
++		   queue the packet to daemon, only in incase of incoming interface is non-zero
++		   i.e it is not self generated pacekt. */
++		if((skb_iif) || (proto > 0x8000)) {
++			if (ppp->file.rq.qlen > PPP_MAX_RQLEN)
++				goto drop;
++			skb_queue_tail(&ppp->file.rq, skb);
++			wake_up_interruptible(&ppp->file.rwait);
++			return;
++		}
+ 	}
+ 
+ 	ppp->xmit_pending = skb;
+@@ -1768,6 +1796,55 @@ ppp_receive_error(struct ppp *ppp)
+ 		slhc_toss(ppp->vj);
+ }
+ 
++static int
++ppp_run_recv_pkt_filter(int l3proto, struct sk_buff *skb)
++{
++	struct ppp_idle_pktfilt_tab *pft;
++	struct iphdr *ip;
++	struct udphdr *udp;
++	unsigned char l4proto = 0;
++
++	if (skb->pkt_type == PACKET_MULTICAST)
++		return 1;
++
++	/* here unable to identify the self or forward packet in case of NAT,
++	   because of DNAT is applied after PPP.
++	   skip the updation of last_recv for self and forward ICMP packets. */
++	if (l3proto == PPP_IP) {
++		ip = (struct iphdr *)(skb->data + 2); /* skip ppp header 2 byes */
++		if (ip->ihl < 5 || ip->version != 4)
++			return 1;
++		if (skb->len < ((ip->ihl * 4) + 2))
++			return 1;
++		if (ip_is_fragment(ip))
++			return 1;
++		l4proto = skb->data[11]; /* include 2 bytes PPP header */
++	}
++	else if (l3proto == PPP_IPV6)
++		l4proto = skb->data[9]; /* include 2 bytes PPP header */
++
++        for (pft=ppp_recv_pktfilt_tab; pft->proto != -1; pft++) {
++            if (l4proto == pft->proto) {
++                switch(l4proto) {
++                case IPPROTO_UDP:
++			if (l3proto == PPP_IP) {
++				if (skb->len > ((ip->ihl * 4) + 4)) {
++					udp = (struct udphdr *) &((int *)ip)[ip->ihl];
++					if ((udp->dest == htons(pft->port)) ||
++						(udp->source == htons(pft->port)))
++						return 1;
++				}
++			}
++	                break;
++
++			default:
++				return 1;
++			}
++		}
++	}
++	return 0;
++}
++
+ static void
+ ppp_receive_nonmp_frame(struct ppp *ppp, struct sk_buff *skb)
+ {
+@@ -1882,7 +1959,9 @@ ppp_receive_nonmp_frame(struct ppp *ppp,
+ 			}
+ 			if (!(ppp->active_filter &&
+ 			      BPF_PROG_RUN(ppp->active_filter, skb) == 0))
+-				ppp->last_recv = jiffies;
++				if (ppp_run_recv_pkt_filter(proto, skb) == 0) {
++					ppp->last_recv = jiffies;
++				}
+ 			__skb_pull(skb, 2);
+ 		} else
+ #endif /* CONFIG_PPP_FILTER */

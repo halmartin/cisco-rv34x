@@ -1,0 +1,29 @@
+From 04efb818792dfe3074ffb675557ae15d79cdd268 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy <ganesh.reddy@nxp.com>
+Date: Wed, 21 Nov 2018 00:20:45 +0530
+Subject: [PATCH] Version increment of barebox to indicate the bug fix change.
+
+Signed-off-by: Ganesh Reddy <ganesh.reddy@nxp.com>
+---
+ commands/version_rv340.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/commands/version_rv340.c b/commands/version_rv340.c
+index 7b22f7b..ac64334 100644
+--- a/commands/version_rv340.c
++++ b/commands/version_rv340.c
+@@ -27,9 +27,10 @@
+ /*
+ * 1.0.00.06 - This was the latest release version of barebox from BB2-MR0 code.
+ * 1.0.02.01 - This version indicates the barebox is from bb2_dev branch of PP code.
++* 1.0.02.02 - Change to address nand read as per linux to check "ret" properly
+ *
+ */
+-const char version_string_rv340[] = "1.0.02.01";
++const char version_string_rv340[] = "1.0.02.02";
+ 
+ static int do_version_rv340(struct command *cmdtp, int argc, char *argv[])
+ {
+-- 
+2.7.4
+

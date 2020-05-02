@@ -1,0 +1,127 @@
+--- a/scripts/netifd-proto.sh	2018-06-25 15:01:14.544238522 +0530
++++ b/scripts/netifd-proto.sh	2018-06-25 15:05:40.764238511 +0530
+@@ -2,6 +2,7 @@
+ 
+ . /usr/share/libubox/jshn.sh
+ . $NETIFD_MAIN_DIR/utils.sh
++. /lib/functions/network.sh
+ 
+ proto_config_add_int() {
+ 	config_add_int "$@"
+@@ -394,7 +395,115 @@
+ 				[[ "$proto" == "$1" ]] || return 0
+ 
+ 				case "$cmd" in
+-					setup) _proto_do_setup "$1";;
++					setup)
++						#Note:During our testing when wan mode/protocol changes, netifd events are
++						#	not synchronous, so adding a delay to make them synchronous.
++						#logger -t testing "############I am may sleep here 4 sec for proper sync-up for interface:$interface, data:$data, ifname:$ifname"
++						[ "$1" == "pppoe" ] && {
++							nonLogicalIface=$(echo $interface | sed s/p//g)
++							__network_device isup $nonLogicalIface up
++							if [ "$isup" == "1" ]
++							then
++								#It means that the physical interface is UP. So bring it DOWN.
++								#logger -t testing "############ physical is UP, so bring it DOWN on $nonLogicalIface in the context of $interface for proto:$1"
++								ifdown $nonLogicalIface
++								sleep 2
++							else
++								ispending=$(ifstatus $nonLogicalIface | grep pending | grep true)
++								[ -n "$ispending" ] && {
++									#It means that the physical interface is pending for UP. So bring it DOWN.
++									#logger -t testing "############ physical is UP for pending, so bring it DOWN on $nonLogicalIface in the context of $interface for proto:$1"
++									ifdown $nonLogicalIface
++									sleep 2
++								}
++							fi
++							#Check If shared.
++							[ "$(uci get network.$interface.ipv6 2>/dev/null)" == "1" ] && {
++								if [ ! $(echo $iface | cut -d _ -f 1 | grep 6) ]
++								then
++									#A Non-v6 interface in reality, which means a shared profile.
++									nonLogicalIfacev6=$(echo $interface | sed s/p/6/g)
++									__network_device isupv6 $nonLogicalIfacev6 up
++									if [ "$isupv6" == "1" ]
++									then
++										#It means that the v6 physical interface is UP. bring it down.
++										#logger -t testing "######Bringing down v6 interface for a shared profile."
++										ifdown $nonLogicalIfacev6
++										sleep 1
++									else
++										ispendingv6=$(ifstatus $nonLogicalIfacev6 | grep pending | grep true)
++										[ -n "$ispendingv6" ] && {
++											#It means that the physica interface is in pending for UP.
++											#logger -t testing "######Bringing down v6 in pending state interface for a shared profile."
++											ifdown $nonLogicalIfacev6
++											sleep 1
++										}
++									fi
++								fi
++							}
++							sleep 4
++						}
++						[ "$1" == "dhcp" ] && {
++							#When protocol is DHCP, don't bring it up unless it is enabled in UCI.
++							isEnable=$(uci get network.$interface.enable)
++							[ "$isEnable" == "0" ] && {
++								#logger -t testing "########### Though DHCP protocol, UCI is down. So not bringing it UP."
++								return 0
++							}
++							sleep 4
++						}
++						[ "$1" == "pptp" -o "$1" == "l2tp" ] && {
++							nonLogicalIface=$(echo $interface | sed s/p//g)
++							currentProto=`uci get network.$nonLogicalIface.proto`
++							oldProto=`uci get network-bkp.$nonLogicalIface.proto`
++							currentLogicalProto=`uci get network.$interface.proto`
++							oldLogicalProto=`uci get network-bkp.$interface.proto`
++							#If old and current protocol of non-logical iface is same, we need to raise a 
++							#	ifdown before setting up the PPTP/L2TP iface.
++							if [ "$currentProto" == "$oldProto" ]
++							then
++								if [ "$currentProto" == "static" ]
++								then
++									#Check if device is also needed?
++									#logger -t testing "########### protocol to bringup is PPTP/L2TP, previous proto is static. So bring it down"
++									env -i ACTION=ifdown INTERFACE=$nonLogicalIface DEVICE= /sbin/hotplug-call iface
++								elif [ "$currentProto" == "dhcp" ]
++								then
++									isoldEnable=`uci get network-bkp.$nonLogicalIface.enable`
++									if [ "$isoldEnable" == "1" ]
++									then
++										#logger -t testing "########### protocol to bringup is PPTP/L2TP, previous proto is dhcp. So ifdown is needed"
++										env -i ACTION=ifdown INTERFACE=$nonLogicalIface DEVICE= /sbin/hotplug-call iface
++									else
++										#At worst case, check if logical ifaces protocol changed, then ifdown needed.
++										if [ "$currentLogicalProto" != "$oldLogicalProto" ]
++										then
++										#Now in this case, old protocol might be pppoe, so we need to bring up if it is DHCP
++											if [ "$oldProto" == "dhcp" ]
++											then
++											#this is needed for sure.
++												#logger -t testing "########### protocol to bringup is PPTP/L2TP, previous proto is dhcp(which is disabled). So ifup for dhcp is needed"
++												ifup $nonLogicalIface
++											fi
++											#below ifdown is also needed.
++											env -i ACTION=ifdown INTERFACE=$nonLogicalIface DEVICE= /sbin/hotplug-call iface
++										else
++											sleep 4
++										fi
++									fi
++								fi
++							else
++								if [ "$oldLogicalProto" == "pppoe" ]
++								then
++									#logger -t testing "######## since old inactive iface is not coming up, we call ifup of it."
++									ifup $nonLogicalIface
++									env -i ACTION=ifdown INTERFACE=$nonLogicalIface DEVICE= /sbin/hotplug-call iface
++								fi
++								#logger -t testing "########### old and new proto are not same for PPTP/L2TP. Hence sleeping"
++								sleep 4
++							fi
++						}
++						_proto_do_setup "$1";;
+ 					teardown) _proto_do_teardown "$1" ;;
+ 					renew) _proto_do_renew "$1" ;;
+ 					*) return 1 ;;

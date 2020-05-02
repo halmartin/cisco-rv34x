@@ -1,0 +1,113 @@
+--- a/src/source/ieee802_1x.c	2017-12-08 16:08:17.392367365 +0530
++++ b/src/source/ieee802_1x.c	2017-12-08 16:07:56.516366876 +0530
+@@ -1428,11 +1428,11 @@ ieee802_1x_receive_auth(rtapd *rtapd, st
+ 	u32 session_timeout = 0, idle_timeout = 0, termination_action;
+ 	int session_timeout_set, idle_timeout_set; 
+ 	int	free_flag = 0;
+-        char groupname[64] = {'\0'};
+-        int group_authorize = 0;
+-        FILE *fp = NULL;
+-        char buffer[256]={'\0'};
+-        char cmd[256]={'\0'};
++    char groupname[64] = {'\0'};
++    int group_authorize = 0;
++    FILE *fp = NULL;
++    char buffer[256]={'\0'};
++    char cmd[256]={'\0'};
+ 
+ 
+ 	DBGPRINT(RT_DEBUG_TRACE,"Receive IEEE802_1X Response Packet From Radius Server. \n");
+@@ -1440,49 +1440,67 @@ ieee802_1x_receive_auth(rtapd *rtapd, st
+     
+     Radius_msg_get_attr(msg, RADIUS_ATTR_CLASS, groupname,sizeof(groupname));
+ 
+-   	if(strcmp(groupname,"") == 0)
+-	{
+-		if(msg->hdr->code == RADIUS_CODE_ACCESS_ACCEPT)
++        /*If the group sent by server is NULL we are filling default group configured by user into groupname*/
++		if((msg->hdr->code == RADIUS_CODE_ACCESS_ACCEPT) && (strcmp(groupname,"") == 0) )
+ 		{
+-			DBGPRINT(RT_DEBUG_ERROR,"Incoming RADIUS packet did not have class-25 attribute\n");
+-        		return RADIUS_RX_UNKNOWN;
++            char grp_cmd[48]={'\0'};
++            char default_group[32]={'\0'};
++            FILE *grp_fp=NULL;
++            
++            sprintf(grp_cmd,"uci get aaa.aaa_0.default_group");
++            grp_fp=popen(grp_cmd,"r");
++            if(fgets(default_group, sizeof(default_group), grp_fp) == NULL)
++            {
++                pclose(grp_fp);
++                DBGPRINT(RT_DEBUG_ERROR,"Incoming RADIUS packet did not have class-25 attribute and there is no default group\n");
++                return RADIUS_RX_UNKNOWN;
++            }
++            else
++            {
++                default_group[strlen(default_group)-1]='\0';
++                pclose(grp_fp);
++               
++                strcpy(groupname,default_group);
++            }
++
+ 		}
+-    		group_authorize = 1;
+-	}
+-   	else 
++   
++        /*This code tries to authorize the use based on the group it belongs to*/    
++        if((msg->hdr->code == RADIUS_CODE_ACCESS_ACCEPT) && (strcmp(groupname,"") != 0)) 
+         {
+-    		//group_authorize = authorize(groupname);
+-                sprintf(cmd, "/usr/bin/userauth authorize %s %s", "dot1x", groupname);
+-                fp = popen(cmd,"r");
++            sprintf(cmd, "/usr/bin/userauth authorize %s %s", "dot1x", groupname);
++            fp = popen(cmd,"r");
+         	if (fp == NULL)
+         	{
+        		   syslog(LOG_ERR, "Localdb:popen Failed.");
+        		   return RADIUS_RX_UNKNOWN;
+-       		 }
++       		}
+ 
+-       		 while(fgets(buffer, sizeof(buffer), fp) != NULL)
+-       		 {
++       		while(fgets(buffer, sizeof(buffer), fp) != NULL)
++       		{
+        		   if (strcmp(buffer, "PAM_AUTH_ERR") ==0 )
+        		   {
+        		      pclose(fp);
+        		      return RADIUS_RX_UNKNOWN;
+        		   }
+-       		   else if(strcmp(buffer, "PAM_SUCCESS") ==0 )
++               else if(strcmp(buffer, "PAM_SUCCESS") ==0 )
+        		   {
+-                     group_authorize = 1;
+-                     syslog(LOG_ERR, "Localdb:authorization sucess group:%s",
+-                                        groupname);
+-       		     pclose(fp);
+-                     break;
++                    group_authorize = 1;
++                    syslog(LOG_ERR, "Localdb:authorization sucess group:%s",
++                                    groupname);
++       		        pclose(fp);
++                    break;
+        		   }
+-                 }
++            }
++
++            if(group_authorize == 0)
++            {
++                DBGPRINT(RT_DEBUG_ERROR,"group is not authorised so returning RADIUS_RX_UNKNOWN \n");
++                return RADIUS_RX_UNKNOWN;
++            }
++
+         }
+ 
+-    	if(group_authorize == 0)
+-	{
+-		DBGPRINT(RT_DEBUG_ERROR,"group is not authorised so returning RADIUS_RX_UNKNOWN \n");
+-        	return RADIUS_RX_UNKNOWN;
+-	}
+ 
+ 	sta = Ap_get_sta_radius_identifier(rtapd, msg->hdr->identifier);
+ 	if (sta == NULL)

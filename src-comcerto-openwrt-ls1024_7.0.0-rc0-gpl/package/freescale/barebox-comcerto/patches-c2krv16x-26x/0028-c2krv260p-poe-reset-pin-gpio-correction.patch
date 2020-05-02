@@ -1,0 +1,13 @@
+# 2017-07-01: Rajeshkumar K <rajeshkumar.k@nxp.com>
+# Changes to hold the PoE reset pin to active low,untill the PoE application starts.
+--- barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c
++++ barebox-2011.06.0/arch/arm/boards/comcerto-rv16x-26x/c2k_rv16x-26x.c
+@@ -353,8 +353,6 @@
+ 	//POE RESET
+ 	writel(readl(COMCERTO_GPIO_OE_REG) | GPIO_15, COMCERTO_GPIO_OE_REG);
+ 	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~GPIO_15, COMCERTO_GPIO_OUTPUT_REG);
+-	udelay(100000);
+-	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | GPIO_15, COMCERTO_GPIO_OUTPUT_REG);
+ 
+ #ifdef CONFIG_I2C_C2K
+ 	i2c_register_board_info(0, i2c_devices, ARRAY_SIZE(i2c_devices));

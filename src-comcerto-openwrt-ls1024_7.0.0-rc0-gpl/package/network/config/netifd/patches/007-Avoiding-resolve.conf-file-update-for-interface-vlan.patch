@@ -1,0 +1,51 @@
+From 7d9b06decc4df2f24e8247aeeaccba0467a6444a Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Mon, 5 Feb 2018 13:55:00 +0530
+Subject: [PATCH] Avoiding resolve.conf file update for interface vlan*, since
+ we dont have that in our deployment
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ interface-ip.c | 7 ++++++-
+ interface.c    | 7 ++++++-
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/interface-ip.c b/interface-ip.c
+index a7c3060..ffb7e0d 100644
+--- a/interface-ip.c
++++ b/interface-ip.c
+@@ -1252,7 +1252,12 @@ interface_ip_update_complete(struct interface_ip_settings *ip)
+ 	vlist_flush(&ip->route);
+ 	vlist_flush(&ip->addr);
+ 	vlist_flush(&ip->prefix);
+-	interface_write_resolv_conf();
++	if(strncmp(ip->iface->name, "vlan", 4)!=0)
++		interface_write_resolv_conf();
++	/*else
++	{
++		netifd_log_message(L_WARNING, "Differing resolv.conf update for interface '%s'\n", ip->iface->name);
++	}*/
+ }
+ 
+ void
+diff --git a/interface.c b/interface.c
+index 3add6e0..2cde9e2 100644
+--- a/interface.c
++++ b/interface.c
+@@ -633,7 +633,12 @@ interface_proto_cb(struct interface_proto_state *state, enum interface_proto_eve
+ 		return;
+ 	}
+ 
+-	interface_write_resolv_conf();
++	if(strncmp(iface->name, "vlan", 4)!=0)
++		interface_write_resolv_conf();
++	/*else
++	{
++		netifd_log_message(L_WARNING, "Differing resolv.conf update for interface '%s'\n", iface->name);
++	}*/
+ }
+ 
+ void interface_set_proto_state(struct interface *iface, struct interface_proto_state *state)
+-- 
+1.9.1
+

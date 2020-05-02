@@ -1,0 +1,4 @@
+Changes done.
+1. Firewall.config file is changed to enable conntrack even if masq is disbaled.
+2. Firewall.config file is updated with Allow HTTP, SIP traffic from WAN zone and 
+   WAN zone forward is updated from REJECT to ACCEPT.

@@ -1,0 +1,45 @@
+From c48dd0f79d916637edd9a0651e65efb8422929df Mon Sep 17 00:00:00 2001
+From: user <abdul.moiz@nxp.com>
+Date: Wed, 31 Aug 2016 16:32:20 +0530
+Subject: [PATCH 52/60] SBR-3271 Fix for saveenv Out of Memory issue
+
+Signed-off-by: user <abdul.moiz@nxp.com>
+---
+ commands/version_rv340.c | 2 +-
+ common/environment.c     | 6 ++++++
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/commands/version_rv340.c b/commands/version_rv340.c
+index 4a84aa4..7ce0464 100644
+--- a/commands/version_rv340.c
++++ b/commands/version_rv340.c
+@@ -24,7 +24,7 @@
+ #include <common.h>
+ #include <command.h>
+ 
+-const char version_string_rv340[] = "1.0.00.02";
++const char version_string_rv340[] = "1.0.00.03";
+ 
+ static int do_version_rv340(struct command *cmdtp, int argc, char *argv[])
+ {
+diff --git a/common/environment.c b/common/environment.c
+index 0fdbd03..58c6e20 100644
+--- a/common/environment.c
++++ b/common/environment.c
+@@ -205,7 +205,13 @@ int envfs_load(char *filename, char *dir)
+ 	}
+ 
+ 	size = ENVFS_32(super.size);
++#ifdef CONFIG_MACH_COMCERTO_C2K_RV340
++	/* Adding 16 byte extra allocation to accommodate extra bytes 
++           read while reading data from SPI flash device into the buffer */
++	buf = xmalloc(size+16);
++#else
+ 	buf = xmalloc(size);
++#endif
+ 	buf_free = buf;
+ 	ret = read(envfd, buf, size);
+ 	if (ret < size) {
+-- 
+2.7.4
+

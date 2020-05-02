@@ -1,0 +1,465 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+#stats pattern:
+# "$tunnel_number;$final_tunnel_name;$tun_enable;$status;$auth;$local_group;$remote_group;$remote_gateway;$final_profile;$wan_interface;$ike_sa_time;$ipsec_sa_time;$tx_bytes;$rx_bytes;$tx_packets;$rx_packets" >> /tmp/stats/sitetosite_stats
+
+tunnel_number=1;
+ipsec_sa_exist=0;
+rm -f /tmp/stats/sitetosite_stats
+touch /tmp/stats/sitetosite_stats
+statusall_log_file=/tmp/statusall.log
+
+site2site(){
+	local cfg=$1
+	local tunnel_name tun_enable profile keying_mode auth local_sec_group local_group remote_sec_group remote_group remote_gateway wan_interface
+	local ike_sa_time ipsec_sa_time tx_bytes rx_bytes tx_packets rx_packets final_profile in_spi out_spi tun_up wan_proto
+	config_get tunnel_name "$cfg" tunnel_name
+	config_get_bool tun_enable "$cfg" enable 0
+
+	config_get profile "$cfg" profile
+	final_profile=`echo $profile | cut -d '_' -f 2-`
+	config_get keying_mode "$profile" keying_mode
+
+	config_get local_sec_group "$cfg" local_sec_group
+	if [ "$local_sec_group" = 'ip' ]
+	then
+		config_get local_group "$cfg" local_sec_ip
+	elif [ "$local_sec_group" = 'subnet' ]
+	then
+		config_get local_subnet "$cfg" local_subnet
+		config_get local_subnetmask "$cfg" local_subnetmask
+		local_group="$local_subnet/$local_subnetmask"
+	elif [ "$local_sec_group" = 'ipgroup' ]
+	then
+		config_get local_group "$cfg" local_ip_group
+	elif [ "$local_sec_group" = 'any' ]
+	then
+		local_group="0.0.0.0/0"
+	elif [ "$local_sec_group" = 'gre' ]
+	then
+		config_get local_group "$cfg" local_gre_iface
+		remote_group=$local_group
+	fi
+
+	config_get remote_sec_group "$cfg" remote_sec_group
+
+	if [ "$remote_sec_group" = 'ip' ]
+	then
+		config_get remote_group "$cfg" remote_sec_ip
+	elif [ "$remote_sec_group" = 'subnet' ]
+	then
+		config_get remote_subnet "$cfg" remote_subnet
+		config_get remote_subnetmask "$cfg" remote_subnetmask
+		remote_group="$remote_subnet/$remote_subnetmask"
+	elif [ "$remote_sec_group" = 'ipgroup' ]
+	then
+		config_get remote_group "$cfg" remote_ip_group
+	elif [ "$remote_sec_group" = 'any' ]
+	then
+		remote_group="0.0.0.0/0"
+	fi
+
+	config_get remote_gateway "$cfg" remote_endpoint
+
+	[ "$remote_gateway" == "%any" ] && {
+		remote_gateway="Any"
+	}
+
+	config_get wan_interface "$cfg" wan_interface
+	network_get_mwanproto_cached wan_proto "$wan_interface"
+
+	if [ "$tun_enable" == "1" ]
+	then
+	#{
+# Not needed if tunnel is disabled.
+		if [ "$keying_mode" = 'auto' ]
+		then
+		#{
+			config_get auth "$profile" p2_prop
+#			ipsec statusall $tunnel_name | grep -e "$tunnel_name.*:" > $statusall_log_file
+			ipsec statusall | grep  "$tunnel_name" | grep "ESTABLISHED" -A 100 > $statusall_log_file
+
+			local tunnel_backup=`uci_get strongswan "$tunnel_name" tunnel_backup`
+			[ "$tunnel_backup" -eq 1 ] && {
+				ipsec statusall "$tunnel_name"_bkp | grep -e "$tunnel_name.*:" >> $statusall_log_file
+			}
+
+			tun_up=`grep -e "ESTABLISHED" $statusall_log_file`
+			if [ -n "$tun_up" ]
+			then
+			#{
+				status="UP"
+				Forremote_gateway=`echo $tun_up | grep -e "_bkp"`
+				[ -n "$Forremote_gateway" ] && {
+					config_get remote_gateway "$cfg" remote_backup
+					config_get wan_interface "$cfg" local_backup_iface
+				}
+				ike_sa_var=`grep "SPIs" $statusall_log_file | grep "reauthentication in\|rekeying in"`
+				ipsec_sa_time_variable=`grep "rekeying in" $statusall_log_file`
+#				SPI_var=`grep -e "ESP.*SPIs:" $statusall_log_file`
+				 in_spi=`grep -e "ESP.*SPIs:" $statusall_log_file | cut -f 3 -d ":" |cut -d " " -f 2 | cut -f 1 -d "_"`
+				out_spi=`grep -e "ESP.*SPIs:" $statusall_log_file | cut -f 3 -d ":" |cut -d " " -f 3 | cut -f 1 -d "_"`
+
+				if [ -n "$ike_sa_var" ]
+				then
+				#{
+					line_string_ike=`echo $ike_sa_var | sed -n -e 's/^.* in //p'`
+					set $line_string_ike
+
+					if [ "$2" == "months" ]
+					then
+					#{
+						ike_sa_time=`expr $1 \* 2592000`
+					#}
+					elif [ "$2" == "days" ]
+					then
+					#{
+						ike_sa_time=`expr $1 \* 86400`
+					#}
+					elif [ "$2" == "hours" ]
+					then
+					#{
+						ike_sa_time=`expr $1 \* 3600`
+					#}
+					elif [ "$2" == "minutes" ]
+					then
+					#{
+						 ike_sa_time=`expr $1 \* 60`
+					#}
+					else
+					#{
+						ike_sa_time=$1
+					#}
+					fi
+				#}
+				fi
+
+				if [ -n "$ipsec_sa_time_variable" ]
+				then
+				#{
+					ipsec_sa_exist=1
+					line_string_ipsec=`echo $ipsec_sa_time_variable | sed -n -e 's/^.* in //p'`
+					set $line_string_ipsec
+
+					if [ "$2" == "months" ]
+					then
+					#{
+						ipsec_sa_time=`expr $1 \* 2592000`
+					#}
+					elif [ "$2" == "days" ]
+					then
+					#{
+						ipsec_sa_time=`expr $1 \* 86400`
+					#}
+					elif [ "$2" == "hours" ]
+					then
+					#{
+						ipsec_sa_time=`expr $1 \* 3600`
+					#}
+					elif [ "$2" == "minutes" ]
+					then
+					#{
+						ipsec_sa_time=`expr $1 \* 60`
+					#}
+					else
+					#{
+						ipsec_sa_time=$1
+					#}
+					fi
+				#}
+				fi
+
+#				if [ -n "$SPI_var" ]
+#				then
+				#{
+#					in_spi=`echo $SPI_var|cut -f 8 -d ' '|cut -f 1 -d '_'`
+#					out_spi=`echo $SPI_var|cut -f 9 -d ' '|cut -f 1 -d '_'`
+				#}
+#				fi
+
+				rm $statusall_log_file 
+
+				if [ $ipsec_sa_exist == "0" ]
+				then
+				#{
+#IKE is up but ipsec is down
+					status="DOWN"
+					ike_sa_time=0
+					ipsec_sa_time=0
+					tx_bytes=0
+					rx_bytes=0
+					tx_packets=0
+					rx_packets=0
+				#}
+				else
+				#{
+					case $wan_proto in
+					l2tp|pptp)
+						for inspi in $in_spi
+						do
+							rx_pkts=`setkey -D | grep -A9 $inspi | grep "allocated" | xargs | awk -F ' ' '{print $2}'`
+							rx_byts=`setkey -D | grep -A9 $inspi | grep "bytes" | xargs | awk -F ' ' '{print $2}' | awk -F'(' '{print $1}'`
+
+							rx_packets=$((rx_packets+$rx_pkts))
+							rx_bytes=$((rx_bytes+$rx_byts))
+						done
+
+						for outspi in $out_spi
+						do
+							tx_pkts=`setkey -D | grep -A9 $outspi | grep "allocated" | xargs | awk -F ' ' '{print $2}'`
+							tx_byts=`setkey -D | grep -A9 $outspi | grep "bytes" | xargs | awk -F ' ' '{print $2}' | awk -F'(' '{print $1}'`
+
+							tx_packets=$((tx_packets+$tx_pkts))
+							tx_bytes=$((tx_bytes+$tx_byts))
+						done
+					;;
+					*)
+						cmm -c set stat enable ipsec
+						for inspi in $in_spi
+						do
+							inspi=$(echo $inspi | sed 's/^0*//')
+							rx_pkts=`cmm -c show stat ipsec query|grep -A4 $inspi|grep "Packets Processed"|cut -d ":" -f 2 | xargs`
+							rx_byts=`cmm -c show stat ipsec query|grep -A4 $inspi|grep "Bytes Processed"|cut -d ":" -f 2 | xargs`
+
+							[ -n "$rx_pkts" ] && {
+							rx_packets=$((rx_packets+$rx_pkts))
+							}
+							[ -n "$rx_byts" ] && {
+							rx_bytes=$((rx_bytes+$rx_byts))
+							}
+						done
+
+						for outspi in $out_spi
+						do
+							outspi=$(echo $outspi | sed 's/^0*//')
+							tx_pkts=`cmm -c show stat ipsec query|grep -A4 $outspi|grep "Packets Processed"|cut -d ":" -f 2 | xargs`
+							tx_byts=`cmm -c show stat ipsec query|grep -A4 $outspi|grep "Bytes Processed"|cut -d ":" -f 2 | xargs`
+
+							[ -n "$tx_pkts" ] && {
+							tx_packets=$((tx_packets+$tx_pkts))
+							}
+							[ -n "$tx_byts" ] && {
+							tx_bytes=$((tx_bytes+$tx_byts))
+							}
+						done
+					;;
+					esac
+				#}
+				fi
+
+			#}
+			else	#Tunnele status is down
+			#{
+
+				status="DOWN"
+				ike_sa_time=0
+				ipsec_sa_time=0
+				tx_bytes=0
+				rx_bytes=0
+				tx_packets=0
+				rx_packets=0
+			#}
+			fi
+		#}
+		else #manual mode
+		#{
+			local auth_alg enc_alg
+			local local_gateway
+			config_get enc_alg "$profile" enc_alg
+			config_get auth_alg "$profile" auth_alg
+			config_get in_spi "$profile" in_spi
+			config_get out_spi "$profile" out_spi
+			in_spi=`echo $in_spi | cut -d 'x' -f 2-`
+			out_spi=`echo $out_spi | cut -d 'x' -f 2-`
+
+			auth=$enc_alg-$auth_alg
+			ipsec_sa_time=0;
+			ike_sa_time=0;
+			status="UP";
+
+			cmm -c set stat enable ipsec
+			network_get_wanip_cached local_gateway $wan_interface
+			rx_packets=`cmm -c show stat ipsec query|grep -A4 $in_spi|grep -A3 $local_gateway|grep "Packets Processed"|cut -d ":" -f 2 | xargs`
+			rx_bytes=`cmm -c show stat ipsec query|grep -A4 $in_spi|grep -A3 $local_gateway|grep "Bytes Processed"|cut -d ":" -f 2 | xargs`
+			tx_packets=`cmm -c show stat ipsec query|grep -A4 $out_spi|grep -A3 $remote_gateway|grep "Packets Processed"|cut -d ":" -f 2 | xargs`
+			tx_bytes=`cmm -c show stat ipsec query|grep -A4 $out_spi|grep -A3 $remote_gateway|grep "Bytes Processed"|cut -d ":" -f 2 | xargs`
+		#}
+		fi	#keying_mode
+
+	#}
+	else	## not needed if tunnel is disabled.
+	#{
+		if [ "$keying_mode" = 'auto' ]
+		then
+		#{
+			config_get auth "$profile" p2_prop
+		#}
+		else #manual mode
+		#{
+			local auth_alg enc_alg
+			config_get enc_alg "$profile" enc_alg
+			config_get auth_alg "$profile" auth_alg
+			auth=$enc_alg-$auth_alg
+		#}
+		fi	#keying_mode
+		ipsec_sa_time=0;
+		ike_sa_time=0;
+		status="DISABLED";
+		tx_bytes=0;
+		rx_bytes=0;
+		tx_packets=0;
+		rx_packets=0;
+	#}
+	fi	## not needed if tunnel is disabled. 
+
+	local final_tunnel_name=`echo $tunnel_name | cut -d '_' -f 2-`
+	wan_interface="$(echo $wan_interface|tr '[a-z]' '[A-Z]')"
+	echo "$tunnel_number;$final_tunnel_name;$tun_enable;$status;$auth;$local_group;$remote_group;$remote_gateway;$final_profile;$wan_interface;$ike_sa_time;$ipsec_sa_time;$tx_bytes;$rx_bytes;$tx_packets;$rx_packets" >> /tmp/stats/sitetosite_stats
+	tunnel_number=$((tunnel_number+1));
+}
+
+greoipsec(){
+	local cfg=$1
+	local tunnel_name tun_enable profile auth local_group remote_group remote_gateway wan_interface
+	local ike_sa_time ipsec_sa_time tx_bytes rx_bytes tx_packets rx_packets final_profile in_spi out_spi tun_up
+	config_get tunnel_name "$cfg" gre_tunnel_name
+	config_get_bool tun_enable "$cfg" enable 0
+
+	config_get profile "$cfg" profile
+	final_profile=`echo $profile | cut -d '_' -f 2-`
+	local_group=0.0.0.0/0
+	remote_group=0.0.0.0/0
+
+	config_get remote_gateway "$cfg" tunnel_destination 
+
+	config_get wan_interface "$cfg" tunnel_source 
+
+	if [ "$tun_enable" == "1" ]
+	then
+# Not needed if tunnel is disabled.
+		config_get auth "$profile" p2_prop
+		ipsec statusall $tunnel_name | grep -e "$tunnel_name.*:" > $statusall_log_file
+		tun_up=`grep -e "ESTABLISHED" $statusall_log_file`
+		if [ -n "$tun_up" ]
+		then
+			status="UP"
+			ike_sa_var=`grep "reauthentication in" $statusall_log_file`
+			ipsec_sa_time_variable=`grep "rekeying in" $statusall_log_file`
+			SPI_var=`grep -e "ESP.*SPIs:" $statusall_log_file`
+
+			if [ -n "$ike_sa_var" ]
+			then
+				line_string_ike=$ike_sa_var
+				set $line_string_ike
+
+				if [ "$10" == "months" ]
+				then
+					ike_sa_time=`expr $9 \* 2592000`
+					elif [ "$10" == "days" ]
+				then
+					ike_sa_time=`expr $9 \* 86400`
+					elif [ "$11" == "hours" ]
+				then
+					ike_sa_time=`expr $10 \* 3600`
+				elif [ "$11" == "minutes" ]
+				then
+					 ike_sa_time=`expr $10 \* 60`
+				else
+					ike_sa_time=$10
+				fi
+			fi
+
+			if [ -n "$ipsec_sa_time_variable" ]
+			then
+				ipsec_sa_exist=1
+				line_string_ipsec=$ipsec_sa_time_variable
+				set $line_string_ipsec
+
+				if [ "$10" == "months" ]
+				then
+					ipsec_sa_time=`expr $9 \* 2592000`
+				elif [ "$10" == "days" ]
+				then
+					ipsec_sa_time=`expr $9 \* 86400`
+				elif [ "$10" == "hours" ]
+				then
+					ipsec_sa_time=`expr $9 \* 3600`
+				elif [ "$10" == "minutes" ]
+				then
+					ipsec_sa_time=`expr $9 \* 60`
+				else
+					ipsec_sa_time=$9
+				fi
+			fi
+
+			if [ -n "$SPI_var" ]
+			then
+				in_spi=`echo $SPI_var|cut -f 8 -d ' '|cut -f 1 -d '_'`
+				out_spi=`echo $SPI_var|cut -f 9 -d ' '|cut -f 1 -d '_'`
+			fi
+
+			rm $statusall_log_file 
+
+			if [ $ipsec_sa_exist == "0" ]
+			then
+#IKE is up but ipsec is down
+				status="DOWN"
+				ike_sa_time=0
+				ipsec_sa_time=0
+				tx_bytes=0
+				rx_bytes=0
+				tx_packets=0
+				rx_packets=0
+			else
+				in_spi=$(echo $in_spi | sed 's/^0*//')
+				out_spi=$(echo $out_spi | sed 's/^0*//')
+
+				cmm -c set stat enable ipsec
+				rx_packets=`cmm -c show stat ipsec query|grep -A4 $in_spi|grep "Packets Processed"|cut -d ":" -f 2 | xargs`
+				rx_bytes=`cmm -c show stat ipsec query|grep -A4 $in_spi|grep "Bytes Processed"|cut -d ":" -f 2 | xargs`
+				tx_packets=`cmm -c show stat ipsec query|grep -A4 $out_spi|grep "Packets Processed"|cut -d ":" -f 2 | xargs`
+				tx_bytes=`cmm -c show stat ipsec query|grep -A4 $out_spi|grep "Bytes Processed"|cut -d ":" -f 2 | xargs`
+			fi
+
+		else	#Tunnele status is down
+			status="DOWN"
+			ike_sa_time=0
+			ipsec_sa_time=0
+			tx_bytes=0
+			rx_bytes=0
+			tx_packets=0
+			rx_packets=0
+		fi
+	else	## not needed if tunnel is disabled.
+		config_get auth "$profile" p2_prop
+		ipsec_sa_time=0;
+		ike_sa_time=0;
+		status="DISABLED";
+		tx_bytes=0;
+		rx_bytes=0;
+		tx_packets=0;
+		rx_packets=0;
+	fi	## not needed if tunnel is disabled. 
+
+	local final_tunnel_name=`echo $tunnel_name | cut -d '_' -f 2-`
+	wan_interface="$(echo $wan_interface|tr '[a-z]' '[A-Z]')"
+	echo "$tunnel_number;$final_tunnel_name;$tun_enable;$status;$auth;$local_group;$remote_group;$remote_gateway;$final_profile;$wan_interface;$ike_sa_time;$ipsec_sa_time;$tx_bytes;$rx_bytes;$tx_packets;$rx_packets" >> /tmp/stats/sitetosite_stats
+	tunnel_number=$((tunnel_number+1));
+}
+
+start() {
+
+	config_load strongswan
+
+	args=""
+	config_foreach site2site site2site
+	config_foreach greoipsec greoipsec
+}
+stop() {
+
+	return 0;
+}
+start

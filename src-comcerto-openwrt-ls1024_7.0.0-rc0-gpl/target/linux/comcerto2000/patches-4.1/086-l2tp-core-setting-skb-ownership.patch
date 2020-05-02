@@ -1,0 +1,35 @@
+From 03d60772811833c9adf0f5da0bf1e27a1a7a2c6c Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Fri, 23 Mar 2018 15:57:49 +0530
+Subject: [PATCH] PPSBR-2367 Setting proper skb ownership
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ net/l2tp/l2tp_core.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/net/l2tp/l2tp_core.c b/net/l2tp/l2tp_core.c
+index a29a504..54ea80f 100644
+--- a/net/l2tp/l2tp_core.c
++++ b/net/l2tp/l2tp_core.c
+@@ -16,6 +16,8 @@
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+  * published by the Free Software Foundation.
++ *
++ * Fixes:	22/3/2018	Setting Proper ownership for xmit skb
+  */
+ 
+ #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+@@ -1172,6 +1174,8 @@ int l2tp_xmit_skb(struct l2tp_session *session, struct sk_buff *skb, int hdr_len
+ 		break;
+ 	}
+ 
++	skb_set_owner_w(skb, sk);
++
+ 	l2tp_xmit_core(session, skb, fl, data_len);
+ out_unlock:
+ 	bh_unlock_sock(sk);
+-- 
+1.9.1
+

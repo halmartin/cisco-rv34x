@@ -1,0 +1,26 @@
+--- a/miniupnpd.c	2016-07-02 19:51:44.217512350 +0530
++++ b/miniupnpd.c	2016-07-02 19:51:19.181512350 +0530
+@@ -452,10 +452,13 @@
+ 	{
+ 		struct upnphttp * tmp = 0;
+ 		char addr_str[64];
++		struct lan_addr_s * lan_addr;
++		char purl[16]={};
+ 
+ 		sockaddr_to_string((struct sockaddr *)&clientname, addr_str, sizeof(addr_str));
+ 		syslog(LOG_INFO, "%s connection from %s", protocol, addr_str);
+-		if(get_lan_for_peer((struct sockaddr *)&clientname) == NULL)
++		lan_addr = get_lan_for_peer((struct sockaddr *)&clientname);
++		if(lan_addr == NULL)
+ 		{
+ 			/* The peer is not a LAN ! */
+ 			syslog(LOG_WARNING,
+@@ -495,6 +498,8 @@
+ #else
+ 				tmp->clientaddr = clientname.sin_addr;
+ #endif
++				strncpy(purl,lan_addr->str,15);
++				snprintf(presentationurl, PRESENTATIONURL_MAX_LEN,"http://%s/",purl);
+ 				return tmp;
+ 			}
+ 			else

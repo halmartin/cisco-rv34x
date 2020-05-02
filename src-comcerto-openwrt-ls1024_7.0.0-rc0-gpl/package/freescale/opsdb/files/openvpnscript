@@ -1,0 +1,30 @@
+#/bin/sh
+
+BASEPATH=/tmp
+statsfile=$BASEPATH/stats/openvpn_stats
+tmp_statsfile=$BASEPATH/stats/tmp_openvpn_stats
+rm -f $statsfile
+touch $statsfile
+{ echo "status 2"; sleep 0.5s; } | telnet 127.0.0.1 4567 |grep "^CLIENT_LIST," >$tmp_statsfile
+
+local sessionid
+
+if [ -f $tmp_statsfile ]; then
+	sed -i "s/  */ /g" $tmp_statsfile
+
+  while read line
+  do
+	client_user_name=`echo $line | cut -d "," -f 9`
+	sessionid=`echo $line | cut -d "," -f 10`
+	client_pub_ip=`echo $line | cut -d "," -f 3 | cut -d ":" -f 1`
+	client_vir_ip=`echo $line | cut -d "," -f 4`
+	recived=`echo $line | cut -d "," -f 5`
+	sent=`echo $line | cut -d "," -f 6`
+	connect_time=`echo $line | cut -d "," -f 8`
+	current_time=`date +'%s'`
+	duration=`expr $current_time - $connect_time`
+	echo "$sessionid;$client_user_name;$client_pub_ip;$client_vir_ip;$recived;$sent;$tx_packets;$rx_packets;$duration" >>$statsfile
+  done <$tmp_statsfile
+  rm -f $tmp_statsfile
+fi
+

@@ -1,0 +1,89 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2009-2012 OpenWrt.org
+
+START=99
+NGINX_BIN=/usr/sbin/nginx
+UPLOAD=/var/upload
+NOTIFYD=/usr/bin/notifyd
+UWSGI=/usr/bin/uwsgi-launcher
+
+DEFAULT_CERT="Default"
+
+start() {
+	mkdir -p /var/log/nginx
+	mkdir -p /var/lib/nginx
+	mkdir -p $UPLOAD
+	mkdir -p /var/download
+	mkdir -p /var/download/certificate
+	mkdir -p /var/download/log
+	mkdir -p /var/download/configuration
+	mkdir -p /var/download/template
+	mkdir -p /var/www
+	
+	chown www-data:www-data /var/www
+	chown www-data:www-data /var/download
+	chown www-data:www-data /var/upload
+	chown www-data:www-data /var/firmware
+    chown www-data:www-data /var/3g-4g-driver
+    chown www-data:www-data /var/in_certs
+	chown www-data:www-data /var/signature
+	chown www-data:www-data /var/language-pack
+	chown www-data:www-data /var/configuration
+
+	[ -L /www/download ] || ln -sf /var/download/ /www/download
+	[ -d /www/portal ] || mkdir -p /www/portal
+	mkdir -p /var/nginx/conf.d
+
+	yes n | cp -ri /etc/nginx/conf.d /tmp/nginx >/dev/null 2>&1
+	
+	#/usr/bin/updateCertUsage add $DEFAULT_CERT WebServer
+    cert_web=`/usr/bin/confd_cmd -c "mget /firewall/remote-web-management/cert"`
+    [ -n "$cert_web" ] || cert_web=$DEFAULT_CERT
+     /usr/bin/updateCertUsage add $cert_web WebServer
+
+    cert_rest=`/usr/bin/confd_cmd -c "mget /ciscosb-restconf/transport/https/cert"`
+    [ -n "$cert_rest" ] || cert_rest=$DEFAULT_CERT 
+     /usr/bin/updateCertUsage add $cert_rest RESTCONF
+
+    cert_netconf=`/usr/bin/confd_cmd -c "mget /ciscosb-netconf/transport/ssh/cert"`
+    [ -n "$cert_netconf" ] || cert_netconf=$DEFAULT_CERT   
+     /usr/bin/updateCertUsage add $cert_netconf NETCONF
+	 
+	/usr/bin/webrep
+	$NGINX_BIN
+	$NOTIFYD -i 127.0.0.1 &
+
+	$UWSGI start
+}
+
+stop() {
+	#/usr/bin/updateCertUsage del $DEFAULT_CERT WebServer
+	$NGINX_BIN -s stop
+	$UWSGI stop
+	killall -9 notifyd
+}
+
+nginx_reload() {
+        sleep 2
+        [ -f /tmp/nginx_reload ] && {
+                logger -t nginx "Reloading nginx ..."
+                $NGINX_BIN -s reload
+                rm /tmp/nginx_reload
+        }
+}
+
+reload() {
+        logger -t nginx "Trigger reloading nginx ..."
+        [ ! -f /tmp/nginx_reload ] && {
+                touch /tmp/nginx_reload
+                nginx_reload & 
+        } || {
+                touch /tmp/nginx_reload
+        }
+}
+
+shutdown() {
+	#/usr/bin/updateCertUsage del $DEFAULT_CERT WebServer
+	$NGINX_BIN -s quit
+}
+

@@ -1,0 +1,14 @@
+#!/bin/sh /etc/rc.common
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+START=11
+boot() {
+	boardutil
+	board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+        if [ "$board" = "RV340" -o "$board" = "RV340W" ]; then
+		logger -t system "Started boot pattern. Progress percentage: 0-25%"
+		rtkssdk bootled -i 0
+	fi
+}

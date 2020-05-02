@@ -1,0 +1,23 @@
+#!/bin/sh
+
+case "$INTERFACE" in *vlan*) exit 0 ;; esac
+
+. /usr/lib/ddns/dynamic_dns_functions.sh
+
+if [[ "$ACTION" = "ifup" || "$ACTION" = "ifupdate" ]]; then
+	start_daemon_for_all_ddns_sections "$INTERFACE"
+	certs='ChangeIP.pem
+	DynDNS.pem
+	No-ip.pem'
+	for CERTFILE in $certs
+	do
+		if [ ! -f "/etc/ssl/certs/$CERTFILE" ];then
+			local ddns_pid=`pgrep -f -o ddns-cert-check.sh`
+			[ "$ddns_pid" == "" ] && {
+				ddns-cert-check.sh &
+			}
+			break
+		fi
+	done
+fi
+

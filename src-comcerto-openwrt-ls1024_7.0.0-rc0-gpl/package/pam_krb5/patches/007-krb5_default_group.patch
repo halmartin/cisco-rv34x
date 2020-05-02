@@ -1,0 +1,35 @@
+--- a/public.c	2017-11-09 15:00:43.370632141 +0530
++++ b/public.c	2017-11-09 15:01:00.422632025 +0530
+@@ -203,8 +203,30 @@ int pam_ldap_search (pam_handle_t *pamh)
+      }
+ 
+      if (group == NULL)
+-         (void) pam_set_data (pamh, "groupattr0",(void *) strdup ("default"),
+-                                                         free_data);
++     {
++        char cmd[48]={'\0'};
++        char default_group[32]={'\0'};
++        FILE *fp=NULL;
++        char *temp_group=NULL;
++
++        sprintf(cmd,"uci get aaa.aaa_0.default_group");
++        fp=popen(cmd,"r");
++        if(fgets(default_group, sizeof(default_group), fp) == NULL)
++        {
++            printf("fgets failed\n");
++            pclose(fp);
++        }
++        else
++        {
++        default_group[strlen(default_group)-1]='\0';
++        pclose(fp);
++
++        temp_group=strdup(default_group);
++
++        (void) pam_set_data (pamh, "groupattr0",temp_group,
++                free_data);
++        }
++     }
+ 
+      ldap_msgfree(res);
+      ldap_unbind(ldap);

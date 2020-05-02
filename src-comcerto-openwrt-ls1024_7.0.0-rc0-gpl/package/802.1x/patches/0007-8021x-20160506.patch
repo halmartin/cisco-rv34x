@@ -1,0 +1,155 @@
+diff -rauN a/src/header/rtdot1x.h b/src/header/rtdot1x.h
+--- a/src/header/rtdot1x.h	2016-05-06 18:35:11.508000000 +0530
++++ b/src/header/rtdot1x.h	2016-05-06 18:36:35.908000000 +0530
+@@ -30,6 +30,7 @@
+ 
+ #define RT_DEBUG_OFF		0
+ #define RT_DEBUG_ERROR		1
++#define RT_DEBUG_SUCCESS	1
+ #define RT_DEBUG_WARN		2
+ #define RT_DEBUG_TRACE		3
+ #define RT_DEBUG_INFO		4
+diff -rauN a/src/source/eapol_sm.c b/src/source/eapol_sm.c
+--- a/src/source/eapol_sm.c	2016-05-06 18:28:43.244000000 +0530
++++ b/src/source/eapol_sm.c	2016-05-06 18:29:36.692000000 +0530
+@@ -11,6 +11,11 @@
+ #include "eapol_sm.h"
+ #include "eloop.h"
+ 
++
++extern int get_physical_portno(uint16_t nas_port);
++
++
++
+ /* TODO:
+  * implement state machines: Controlled Directions and Key Receive
+  */
+@@ -138,6 +143,7 @@
+ 		txCannedFail(sm->currentId);
+ 		sm->currentId++;
+ 	}
++	DBGPRINT(RT_DEBUG_ERROR,"Authentication Failed on port#%d. Diconnecting...\n", get_physical_portno(sm->sta->aid));
+ }
+ 
+ 
+@@ -230,6 +236,7 @@
+ 	setPortAuthorized();
+ 	sm->auth_pae.reAuthCount = 0;
+ 	sm->currentId++;
++	DBGPRINT(RT_DEBUG_SUCCESS,"Authentication Success on port#%d. Opening port ...\n",get_physical_portno(sm->sta->aid));
+ }
+ 
+ 
+@@ -239,7 +246,6 @@
+ 	    sm->auth_pae.rxInitialRsp)
+ 		sm->auth_pae.authEntersAuthenticating++;
+ 
+-	DBGPRINT(RT_DEBUG_INFO,"AUTHENTICATING STATE:: STAID %d\n",sm->sta->aid);
+ 	SM_ENTRY(AUTH_PAE, AUTHENTICATING, auth_pae);
+ 	SM_STATS_ENTRY(auth_pae);
+ 
+diff -rauN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-05-06 18:28:30.436000000 +0530
++++ b/src/source/ieee802_1x.c	2016-05-06 17:57:18.732000000 +0530
+@@ -38,27 +38,18 @@
+ 
+ #define SIZE 256
+ 
+-int get_NAS_port(uint16_t *nas_port)
++int get_physical_portno(uint16_t nas_port)
+ {
+ 
+-int status = 0;
+-  
+ #ifdef RV340
+ 
+-        switch(*nas_port)
++        switch(nas_port)
+         {
+-         case 1 :  *nas_port = 4;
+-                  break;
+-         case 2 : *nas_port = 3;
+-                  break;
+-         case 3 : *nas_port = 2;
+-                  break;
+-         case 4 : *nas_port = 1;
+-                  break;
+-         default :
+-                  DBGPRINT(RT_DEBUG_ERROR,"Invalid NAS-Port\n");
+-                  status = -1;
+-                  break;
++         case 1 :  return 4;
++                   
++         case 2 : return 3;
++         case 3 : return 2;
++         case 4 : return 1;
+         }
+ 
+ #endif
+@@ -66,8 +57,8 @@
+ #ifdef RV345
+ /** TODO - Add code for other router ports **/
+ #endif
++   return -1;
+ 
+-  return status;
+ }
+ 
+ int get_NAS_ip_address(struct in_addr *server, unsigned long *nasIP, char *dev, char *mac)
+@@ -117,6 +108,7 @@
+     DBGPRINT(RT_DEBUG_ERROR, "Failed to get nasIP Address\n");
+ 
+   DBGPRINT(RT_DEBUG_INFO,"RADIUS NAS IP Address = %04x\n", ntohl(*nasIP));
++  printf("RADIUS OWN IP Address = %04x\n", ntohl(*nasIP));
+ 
+ /** Get the interface name and RADIUS called-station-id **/
+ 
+@@ -203,24 +195,18 @@
+ #ifdef CONFIG_RV34X_8021X 
+ 	char str[MAX_LINE_SIZE];
+ 	FILE *fp = NULL;
+-        uint16_t port = sta->aid;
+ 	//rv340x_802_1x_SetPortStatus(sta->aid, authorized);
+ 	sprintf(str, "rtkssdk dot1x -p %d -a %d\n",sta->aid,authorized);
+ 	fp = popen(str, "r"); //system(str);
+ 	if(fp == NULL)
+ 	{
+-		DBGPRINT(RT_DEBUG_TRACE,"FAILED to set 802.1x auth state to port %d on switch\n", sta->aid);
++		DBGPRINT(RT_DEBUG_TRACE,"FAILED to set 802.1x auth state to port %d on switch\n", get_physical_portno(sta->aid));
+ 		return;
+ 	}
+ 	else
+ 		fclose(fp);
+ 
+-            
+-        if( (get_NAS_port(&port)) != 0)
+-        {
+-		DBGPRINT(RT_DEBUG_ERROR,"Could not add NAS-PORT\n");
+-        }
+-	DBGPRINT(RT_DEBUG_TRACE,"IEEE802_1X_Set_Sta_Authorized: Port %d = %d \n", sta->aid, authorized);
++	DBGPRINT(RT_DEBUG_TRACE,"IEEE802_1X_Set_Sta_Authorized: Port %d = %d \n", get_physical_portno(sta->aid), authorized);
+ #else
+ 	switch(authorized)
+ 	{
+@@ -558,7 +544,6 @@
+ 	unsigned long own_ip;
+ 	char device[SIZE];
+ 	char mac[SIZE];
+-        uint16_t nas_port = sta->aid;
+ 	int	res;
+ 
+ 	sta->radius_identifier = Radius_client_get_id(rtapd);
+@@ -603,12 +588,8 @@
+ 		goto fail;
+ 	}
+ 
+-        if( (get_NAS_port(&nas_port)) != 0)
+-        {
+-		DBGPRINT(RT_DEBUG_ERROR,"Could not add NAS-PORT\n");
+-        }
+ //      if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT, sta->aid))
+-        if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT, nas_port))
++        if (!Radius_msg_add_attr_int32(msg, RADIUS_ATTR_NAS_PORT, get_physical_portno(sta->aid)))
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Could not add NAS-Port\n");
+ 		goto fail;

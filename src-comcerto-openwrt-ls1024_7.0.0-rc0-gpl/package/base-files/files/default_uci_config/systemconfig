@@ -1,0 +1,4 @@
+
+config system 'system'
+	option hostname 'router665455'
+

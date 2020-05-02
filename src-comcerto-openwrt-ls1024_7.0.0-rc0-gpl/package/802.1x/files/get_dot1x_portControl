@@ -1,0 +1,68 @@
+#!/bin/sh /etc/rc.common
+
+board=`uci get systeminfo.sysinfo.pid | cut -d'-' -f1`
+start() {
+        	dot1x_port=$1
+	if [ "$board" = "RV160" -o "$board" = "RV160W" -o "$board" = "RV260" -o "$board" = "RV260W" -o "$board" = "RV260P" ]; then
+                status=$(uci get switch.dot1x_status.global_status)
+	elif [ "$board" = "RV340" -o "$board" = "RV340W" -o "$board" = "RV345" -o "$board" = "RV345P" ]; then
+		status=$(uci get switch.dot1x_status.state)
+	fi
+	config_load switch
+	config_foreach port_control portauth
+}
+
+stop() {
+	return 0;                
+}
+
+port_control() {
+
+	local cfg=$1  
+	config_get name "$cfg" name
+	config_get state "$cfg" state
+	config_get swport "$cfg" swport
+
+	tmp=$(echo ${name:0:3})
+	
+	if [ $tmp = "lan" ]
+	then
+	if [ "$board" = "RV160" -o "$board" = "RV160W" -o "$board" = "RV260" -o "$board" = "RV260W" -o "$board" = "RV260P" ]; then
+		port=$swport
+        elif [ "$board" = "RV340" -o "$board" = "RV340W" -o "$board" = "RV345" -o "$board" = "RV345P" ]; then
+		port=$(echo ${name:3:2})
+        fi
+
+	[ "$port" = "$dot1x_port" ] && {	
+		if [ "$state" = "ForceAuth" ] 
+		then
+		echo "1"
+		elif [ "$state" = "Auto" ]
+		then
+		echo "2"	
+		fi
+		exit
+	}
+	elif [ $tmp = "lag" ]
+	then
+	if [ "$board" = "RV160" -o "$board" = "RV160W" -o "$board" = "RV260" -o "$board" = "RV260W" -o "$board" = "RV260P" ]; then
+		l=$swport
+        elif [ "$board" = "RV340" -o "$board" = "RV340W" -o "$board" = "RV345" -o "$board" = "RV345P" ]; then
+		l=$(echo ${name:3:2})
+        fi
+
+	port=$(uci get switch.lag$l.ports)
+	for p in $port;do
+	[ "$p" = "$dot1x_port" ] && {
+		if [ "$state" = "ForceAuth" ] 
+		then
+		echo "1"
+		elif [ "$state" = "Auto" ]
+		then
+		echo "2"
+		fi
+		exit
+	}	
+	done
+	fi	
+}

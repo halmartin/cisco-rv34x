@@ -1,0 +1,63 @@
+diff -aurN a/src/interfaces.c b/src/interfaces.c
+--- a/src/interfaces.c	2016-05-31 18:17:31.614764999 +0530
++++ b/src/interfaces.c	2016-05-31 16:11:06.146476813 +0530
+@@ -15,6 +15,7 @@
+  */
+ 
+ #define INCLUDE_LINUX_IF_H
++#define PORT_ID_SUBTYPE_IF_NAME 
+ #include "lldpd.h"
+ 
+ #include <stdio.h>
+@@ -512,6 +513,8 @@
+ 		LLOG_WARNX("path truncated");
+ 	memset(buffer, 0, sizeof(buffer));
+ 	if (((f = priv_open(path)) < 0) || (read(f, buffer, sizeof(buffer)-1) < 1)) {
++
++#ifdef PORT_ID_SUBTYPE_MAC 
+ 		/* Case 2: MAC address and port name */
+ 		close(f);
+ 		port->p_id_subtype = LLDP_PORTID_SUBTYPE_LLADDR;
+@@ -523,9 +526,12 @@
+ 		port->p_id_len = sizeof(hardware->h_lladdr);
+ 		port->p_descr = strdup(hardware->h_ifname);
+ 		return;
++#endif
+ 	}
+ 	/* Case 1: port name and port description */
+ 	close(f);
++
++#ifdef PORT_ID_SUBTYPE_IF_NAME 
+ 	port->p_id_subtype = LLDP_PORTID_SUBTYPE_IFNAME;
+ 	port->p_id_len = strlen(hardware->h_ifname);
+ 	if ((port->p_id =
+@@ -534,7 +540,9 @@
+ 	memcpy(port->p_id, hardware->h_ifname, port->p_id_len);
+ 	if (buffer[strlen(buffer) - 1] == '\n')
+ 		buffer[strlen(buffer) - 1] = '\0';
+-	port->p_descr = strdup(buffer);
++	port->p_descr = strdup(hardware->h_ifname);
++	return;
++#endif
+ }
+ 
+ /* Fill up MAC/PHY for a given hardware port */
+diff -aurN a/src/lldp.c b/src/lldp.c
+--- a/src/lldp.c	2016-05-31 18:17:23.938928997 +0530
++++ b/src/lldp.c	2016-05-31 16:11:06.146476813 +0530
+@@ -1127,11 +1127,14 @@
+ 		memcpy(chassis->c_descr, NOTRECEIVED, strlen(NOTRECEIVED));
+ 	}
+ 	if (port->p_descr == NULL) {
+-		if ((port->p_descr = (char *)calloc(1, strlen(NOTRECEIVED) + 1)) == NULL) {
++		if ((port->p_descr = (char *)calloc(1, strlen(NOTRECEIVED) + strlen(PORT_DETAILS) + 1)) == NULL) {
+ 			LLOG_WARNX("unable to allocate null port description");
+ 			goto malformed;
+ 		}
+ 		memcpy(port->p_descr, NOTRECEIVED, strlen(NOTRECEIVED));
++	    snprintf (PORT_DETAILS, sizeof (PORT_DETAILS)," port=%d",portno);	    
++	    strcat (port->p_descr, PORT_DETAILS);
++            LLOG_INFO("port description %s",port->p_descr);
+ 	}
+ 	*newchassis = chassis;
+ 	*newport = port;

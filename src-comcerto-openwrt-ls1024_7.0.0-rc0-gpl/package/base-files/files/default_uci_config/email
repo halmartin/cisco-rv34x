@@ -1,0 +1,6 @@
+
+config email_profile 'email_settings'
+	option smtp_port '25'
+	option smtp_encryption '0'
+	option smtp_auth '0'
+

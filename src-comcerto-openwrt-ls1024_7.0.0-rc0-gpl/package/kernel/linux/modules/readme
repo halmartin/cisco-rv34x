@@ -1,0 +1,30 @@
+CHANGES:
+1. netsupport.mk
+	- xfrm_algo module does not copy if kernel version is 3.2.
+2. other.mk
+    - Reduced CONFIG_SERIAL_8250_NR_UARTS value for CONFIG_TARGET_ls1012a
+    -The following options were added for Bluetooth in LS1012A.
+                CONFIG_BT_HCIUART=y 
+                CONFIG_BT_HCIUART_H4=y 
+                CONFIG_BT_RFCOMM_TTY=n
+                CONFIG_BT_BNEP_MC_FILTER=n
+                CONFIG_BT_BNEP_MC_FILTER=n 
+                CONFIG_BT_BNEP_PROTO_FILTER=n 
+                CONFIG_BT_HCIBTSDIO=n
+                CONFIG_BT_HCIUART_H4=n 
+                CONFIG_BT_HCIUART_BCSP=n
+                CONFIG_BT_HCIUART_ATH3K=n
+                CONFIG_BT_HCIUART_LL=n
+                CONFIG_BT_HCIUART_3WIRE=n 
+                CONFIG_BT_HCIBCM203X=n
+                CONFIG_BT_HCIBPA10X=n 
+                CONFIG_BT_HCIBFUSB=n 
+                CONFIG_BT_HCIVHCI=n
+                CONFIG_BT_MRVL=n
+                CONFIG_BT_ATH3K=n
+                CONFIG_HID_LOGITECH_DJ=n 
+3. crypto.mk
+    - updated crypto ocf kernel package enabled kernel modules list. These 
+	changes brought from ls1024 3.2 kernel sdk.
+4. snd-hwdep.ko
+    - disabled for LS1012A to support ALSA based sound libraries and utils

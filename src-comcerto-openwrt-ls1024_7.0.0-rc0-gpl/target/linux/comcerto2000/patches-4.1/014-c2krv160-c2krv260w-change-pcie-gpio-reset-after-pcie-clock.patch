@@ -1,0 +1,69 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Change pcie gpio reset after pcie clock.
+--- linux-4.1.8/arch/arm/mach-comcerto/reset.c.org	2017-01-18 10:30:32.365253563 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/reset.c	2017-01-18 10:41:53.628378275 +0800
+@@ -466,26 +466,32 @@
+ 
+ 		case COMPONENT_PCIE0:
+ 			if (state){
+-				writel(readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) & ~GPIO_PIN_48, COMCERTO_GPIO_63_32_PIN_OUTPUT);
+-				writel( readl(COMCERTO_GPIO_63_32_PIN_OUTPUT_EN) | GPIO_PIN_48, COMCERTO_GPIO_63_32_PIN_OUTPUT_EN);
+-				writel(readl(COMCERTO_GPIO_63_32_PIN_SELECT) & ~GPIO_PIN_48, COMCERTO_GPIO_63_32_PIN_SELECT);
+-			}else{
+-				writel(readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) & ~GPIO_PIN_48, COMCERTO_GPIO_63_32_PIN_OUTPUT);
+-				writel( readl(COMCERTO_GPIO_63_32_PIN_OUTPUT_EN) & ~GPIO_PIN_48, COMCERTO_GPIO_63_32_PIN_OUTPUT_EN);
+-				writel(readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) | GPIO_PIN_48, COMCERTO_GPIO_63_32_PIN_OUTPUT);
+-				writel(readl(COMCERTO_GPIO_63_32_PIN_SELECT) | GPIO_PIN_48, COMCERTO_GPIO_63_32_PIN_SELECT);
++				gpio_set_value(12, GPIO_SET_0);
++
++				gpio_direction_input(12);
++			}else{
++				gpio_set_value(12, GPIO_SET_0);
++
++				mdelay(100);
++
++				gpio_direction_output(12, GPIO_SET_0);
++
++				gpio_set_value(12, GPIO_SET_1);
+ 			}
+ 			break;
+ 		case COMPONENT_PCIE1:
+ 			if (state){
+-				writel(readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) & ~GPIO_PIN_47, COMCERTO_GPIO_63_32_PIN_OUTPUT);
+-				writel( readl(COMCERTO_GPIO_63_32_PIN_OUTPUT_EN) | GPIO_PIN_47, COMCERTO_GPIO_63_32_PIN_OUTPUT_EN);
+-				writel(readl(COMCERTO_GPIO_63_32_PIN_SELECT) & ~GPIO_PIN_47, COMCERTO_GPIO_63_32_PIN_SELECT);
+-			}else{
+-				writel(readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) & ~GPIO_PIN_47, COMCERTO_GPIO_63_32_PIN_OUTPUT);
+-				writel( readl(COMCERTO_GPIO_63_32_PIN_OUTPUT_EN) & ~GPIO_PIN_47, COMCERTO_GPIO_63_32_PIN_OUTPUT_EN);
+-				writel(readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) | GPIO_PIN_47, COMCERTO_GPIO_63_32_PIN_OUTPUT);
+-				writel(readl(COMCERTO_GPIO_63_32_PIN_SELECT) | GPIO_PIN_47, COMCERTO_GPIO_63_32_PIN_SELECT);
++				gpio_set_value(11, GPIO_SET_0);
++
++				gpio_direction_input(11);
++			}else{
++				gpio_set_value(11, GPIO_SET_0);
++
++				mdelay(100);
++
++				gpio_direction_output(11, GPIO_SET_0);
++
++				gpio_set_value(11, GPIO_SET_1);
+ 			}
+ 			break;
+ 		case COMPONENT_USB_HUB:
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-01-18 10:30:23.428378271 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-01-18 10:41:53.628378275 +0800
+@@ -133,10 +133,10 @@
+ 	writel(readl(COMCERTO_GPIO_63_32_PIN_OUTPUT) | USB_EN_GPIO_PIN , COMCERTO_GPIO_63_32_PIN_OUTPUT);
+ 	c2k_gpio_pin_stat.c2k_gpio_pins_32_63 |= USB_EN_GPIO_PIN;
+ 
+-	/* POE & PCIE RESET */
+-	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~(POE_RESET_GPIO_PIN | PCIE_1RST_GPIO_PIN | PCIE_2RST_GPIO_PIN), COMCERTO_GPIO_OUTPUT_REG);
++	/* POE RESET */
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) & ~(POE_RESET_GPIO_PIN), COMCERTO_GPIO_OUTPUT_REG);
+ 	mdelay(1000);
+-	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | (POE_RESET_GPIO_PIN | PCIE_1RST_GPIO_PIN | PCIE_2RST_GPIO_PIN), COMCERTO_GPIO_OUTPUT_REG);
++	writel(readl(COMCERTO_GPIO_OUTPUT_REG) | (POE_RESET_GPIO_PIN), COMCERTO_GPIO_OUTPUT_REG);
+ }
+ 
+ /* --------------------------------------------------------------------

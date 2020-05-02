@@ -1,0 +1,18 @@
+server {
+	server_name  localhost;
+
+	include /var/nginx/conf.d/rest.port.conf;
+	include /var/nginx/conf.d/rest.url.conf;	
+	include /var/nginx/conf.d/rest.cert.conf;
+	
+	include /var/nginx/conf.d/sec.ssl.conf;
+	include /var/nginx/conf.d/misc.conf; 
+
+	include /var/nginx/conf.d/sec.overflow.conf;
+	include /var/nginx/conf.d/sec.browser.conf;
+	include /var/nginx/conf.d/sec.misc.conf;
+
+	include /var/nginx/conf.d/perf.timeout.conf;
+	#include /var/nginx/conf.d/perf.gzip.conf;
+	include /var/nginx/conf.d/perf.cache.conf;
+}

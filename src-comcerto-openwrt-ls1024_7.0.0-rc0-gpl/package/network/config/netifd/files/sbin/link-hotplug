@@ -1,0 +1,45 @@
+#!/bin/sh
+. /lib/functions.sh
+
+#$1 will have the physical interface and $2 will have the status.
+#logger -t link-hotplug "Called link-hotplug script with the details $1 and $2"
+board=$(uci get systeminfo.sysinfo.pid | awk -F '-' '{print $1}')
+case $board in
+	RV160*|RV260*)
+		isVlan=$(echo $1 | grep -e eth2.*)
+	;;
+	RV340*|RV345*)
+		isVlan=$(echo $1 | grep -e eth3.*)
+	;;
+esac
+
+[ -n "$isVlan" ] && exit 0
+
+isBridge=$(echo $1 | grep br-wan)
+[ -n "$isBridge" ] && exit 0
+
+#[ "$2" = "DOWN" ] && exit 0
+
+#Do we need WAN port workaround?
+isexe=$(echo $1 | grep -e "eth0$")
+[ -n "$isexe" ] && {
+	/sbin/wan-port-workaround
+}
+
+allWANrealNames=$(uci show network | grep -e "ifname=$1""$" | cut -d '.' -f 2 | sort)
+for realName in $allWANrealNames ; do
+	#logger -t link-hotplug "Inside loop with realName:$realName"
+	local wanproto=$(uci get network.$realName.proto)
+	[ "$wanproto" != "pppoe" ] && {
+		#logger -t link-hotplug "continuing, iface:$realName proto is not static"
+		continue
+	}
+
+	#local isboot=$(uci_get_state system.core.booted)
+	#[ "$2" = "UP" ] && {
+		#isIFUP=$(ifconfig $1 | grep "inet addr:")
+		#[ -n "$isIFUP" ] && { logger -t link-hotplug "Interface UP received and it has a valid IP beforehand. ARGS:$1,$2"; continue; }
+		check-pppoe-status $realName &
+	#}
+done
+exit 0

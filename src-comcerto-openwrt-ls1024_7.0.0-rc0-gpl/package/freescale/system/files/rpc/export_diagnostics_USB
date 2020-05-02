@@ -1,0 +1,27 @@
+#!/bin/sh
+
+USB_MOUNT="/media/USB"
+USB_PORT="USB1"
+LOG_LOCATION="/tmp/log"
+# input the TechReport file which was generated using exportReport.sh, since file name is 
+# appended with current time (hh+mm+ss) so better to input file name. 
+TECH_REPORT_FILE="$1"
+
+# copy to usb
+	# Check if the destination USB directory exists or not
+	if [ ! -d "$USB_MOUNT/$USB_PORT" ];then
+		errcode=1
+		errstring="USB device is not mounted."
+		logger -t system -p local0.info "Failed to copy technical report files to USB"
+	else
+		cp -f "$LOG_LOCATION/$TECH_REPORT_FILE" "$USB_MOUNT/$USB_PORT/"
+		rm -f "$LOG_LOCATION/$TECH_REPORT_FILE"
+		errcode=0
+		errstring="Tech reports are saved to $USB_PORT"
+		logger -t system -p local0.info "Technical report files are copied to USB"
+	fi
+
+if [ "$errcode" -ne 0 ];then
+        echo "error-message \"$errstring\""
+fi
+

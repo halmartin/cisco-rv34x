@@ -1,0 +1,18 @@
+diff -rauN a/src/source/eapol_sm.c b/src/source/eapol_sm.c
+--- a/src/source/eapol_sm.c	2016-06-13 17:26:00.086658889 +0530
++++ b/src/source/eapol_sm.c	2016-06-13 17:31:02.706658853 +0530
+@@ -139,10 +139,14 @@
+ 	 * state machines end back to INITIALIZE and then back here to send
+ 	 * canned failure, and so on.. Avoid this by not sending failure packet
+ 	 * when DISCONNECTED state is entered from INITIALIZE state. */
++
++/* After EAP Logoff avoid sending EAP FAIL to WinXP Supplicant for next EAP REQUEST */
++#if 0
+  	if (!from_initialize) {
+ 		txCannedFail(sm->currentId);
+ 		sm->currentId++;
+ 	}
++#endif
+ 	DBGPRINT(RT_DEBUG_ERROR,"Authentication Failed on port#%d. Diconnecting...\n", get_physical_portno(sm->sta->aid));
+ }
+ 

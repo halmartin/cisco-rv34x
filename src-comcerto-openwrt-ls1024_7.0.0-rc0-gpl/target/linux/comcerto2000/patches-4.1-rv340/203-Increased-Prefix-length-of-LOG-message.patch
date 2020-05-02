@@ -1,0 +1,54 @@
+From 8d0076f39a3661d7a3020f31a6c1630ed9481ff5 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Thu, 31 May 2018 10:50:36 +0530
+Subject: [PATCH 2/2] Increased Prefix length of LOG messagex Signed-off-by:
+ nageshkoneti <b47094@freescale.com>
+
+---
+ ip6t_LOG.h |    2 +-
+ ipt_LOG.h  |    2 +-
+ xt_LOG.h   |    2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/include/uapi/linux/netfilter_ipv6/ip6t_LOG.h b/include/uapi/linux/netfilter_ipv6/ip6t_LOG.h
+index 3dd0bc4..b687dd4 100644
+--- a/include/uapi/linux/netfilter_ipv6/ip6t_LOG.h
++++ b/include/uapi/linux/netfilter_ipv6/ip6t_LOG.h
+@@ -15,7 +15,7 @@
+ struct ip6t_log_info {
+ 	unsigned char level;
+ 	unsigned char logflags;
+-	char prefix[30];
++	char prefix[80];
+ };
+ 
+ #endif /*_IPT_LOG_H*/
+diff --git a/include/uapi/linux/netfilter_ipv4/ipt_LOG.h b/include/uapi/linux/netfilter_ipv4/ipt_LOG.h
+index 5d81520..e69c442 100644
+--- a/include/uapi/linux/netfilter_ipv4/ipt_LOG.h
++++ b/include/uapi/linux/netfilter_ipv4/ipt_LOG.h
+@@ -15,7 +15,7 @@
+ struct ipt_log_info {
+ 	unsigned char level;
+ 	unsigned char logflags;
+-	char prefix[30];
++	char prefix[80];
+ };
+ 
+ #endif /*_IPT_LOG_H*/
+diff --git a/include/uapi/linux/netfilter/xt_LOG.h b/include/uapi/linux/netfilter/xt_LOG.h
+index cac0790..f42238a 100644
+--- a/include/uapi/linux/netfilter/xt_LOG.h
++++ b/include/uapi/linux/netfilter/xt_LOG.h
+@@ -13,7 +13,7 @@
+ struct xt_log_info {
+ 	unsigned char level;
+ 	unsigned char logflags;
+-	char prefix[30];
++	char prefix[80];
+ };
+ 
+ #endif /* _XT_LOG_H */
+-- 
+1.7.9.5
+

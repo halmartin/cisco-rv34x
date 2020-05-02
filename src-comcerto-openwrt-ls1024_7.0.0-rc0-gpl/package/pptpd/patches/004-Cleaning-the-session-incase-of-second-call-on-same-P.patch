@@ -1,0 +1,33 @@
+From f170659747112f5f68004b218bb347262923dde2 Mon Sep 17 00:00:00 2001
+From: Kumar <b38525@nxp.com>
+Date: Sat, 7 Oct 2017 15:13:07 +0530
+Subject: [PATCH] Cleaning the session incase of second call on same PPTPD
+ control session
+
+Signed-off-by: Kumar <b38525@nxp.com>
+---
+ pptpctrl.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/pptpctrl.c b/pptpctrl.c
+index 2cad5d1..940a9ca 100644
+--- a/pptpctrl.c
++++ b/pptpctrl.c
+@@ -364,6 +364,14 @@ static void pptp_handle_ctrl_connection(char **pppaddrs, struct in_addr *inetadd
+                                       ntohs(((struct pptp_out_call_rply *) (rply_packet))->call_id));
+ 				/* start the call, by launching pppd */
+ 				syslog(LOG_INFO, "CTRL: Starting call (launching pppd, opening GRE)");
++				if (pppfork > 0)        {
++					syslog(LOG_INFO,
++					"CTRL: new OUT CALL REQUEST recvd and already a call present on the control connection, silently dropping the pkt...");
++					send_packet = FALSE;
++                                        echo_wait = FALSE;
++                                        break;
++				}
++
+ 				startCall(pppaddrs, inetaddrs);
+ 				close(pptp_sock);
+ 				pptp_sock=-1;
+-- 
+2.1.4
+

@@ -1,0 +1,149 @@
+diff -aur a/src/header/rtdot1x.h b/src/header/rtdot1x.h
+--- a/src/header/rtdot1x.h	2016-09-20 02:22:57.106927406 +0530
++++ b/src/header/rtdot1x.h	2016-09-20 02:23:28.474927579 +0530
+@@ -147,6 +147,7 @@
+ struct ieee8023_hdr {
+ 	u8 dAddr[6];
+ 	u8 sAddr[6];
++	u8 tx_cpu_tag[8];
+ 	u16 eth_type;
+ } __attribute__ ((packed));
+ 
+diff -aur a/src/source/eapol_sm.c b/src/source/eapol_sm.c
+--- a/src/source/eapol_sm.c	2016-09-19 06:26:09.050532386 +0530
++++ b/src/source/eapol_sm.c	2016-09-19 06:41:44.182537530 +0530
+@@ -147,7 +147,7 @@
+ 		sm->currentId++;
+ 	}
+ #endif
+-	DBGPRINT(RT_DEBUG_ERROR,"Authentication Failed on port#%d. Diconnecting...\n", get_physical_portno(sm->sta->aid));
++	DBGPRINT(RT_DEBUG_ERROR,"Authentication Failed on port(LAN%d). Diconnecting...\n", get_physical_portno(sm->sta->aid));
+ }
+ 
+ 
+@@ -239,7 +239,7 @@
+ 	setPortAuthorized();
+ 	sm->auth_pae.reAuthCount = 0;
+ 	sm->currentId++;
+-	DBGPRINT(RT_DEBUG_SUCCESS,"Authentication Success on port#%d. Opening port ...\n",get_physical_portno(sm->sta->aid));
++	DBGPRINT(RT_DEBUG_SUCCESS,"Authentication Success on port(LAN%d). Opening port ...\n",get_physical_portno(sm->sta->aid));
+ }
+ 
+ 
+diff -aur a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-09-19 06:26:09.050532386 +0530
++++ b/src/source/ieee802_1x.c	2016-09-22 07:48:27.959985430 +0530
+@@ -156,6 +156,22 @@
+   return 0;
+ }
+ 
++static void ieee802_1x_rv340_insertCPUTag(u8 *pkt, u8 port_id)
++{
++	u16 cpuTagId = 0x8899;
++
++	pkt[0] = ((cpuTagId >> 8) & 0xFF); 
++	pkt[1] = (cpuTagId & 0xFF);
++	pkt[2] = 0x04; /* Protocol */
++	pkt[3] = 0x0; /* BP_FLTR2 */
++	pkt[4] = 0x0; /* AS_DPM */
++	pkt[5] = 0x0;
++	pkt[6] = 0x0;
++	pkt[7] = 0x0;
++
++	pkt[7] = 0x1 << port_id;
++	return;
++}
+ 
+ static void ieee802_1x_insertCPUTag(u8 *pkt, u8 port_id)
+ {
+@@ -256,6 +272,9 @@
+ 	memcpy(hdr3->dAddr, sta->addr, ETH_ALEN);
+ 	memcpy(hdr3->sAddr, rtapd->own_addr[0], ETH_ALEN);
+ //	memcpy(hdr3->sAddr, rtapd->own_addr[sta->ApIdx], ETH_ALEN);
++
++	ieee802_1x_rv340_insertCPUTag(hdr3->tx_cpu_tag, sta->aid);
++
+ 	if (sta->ethertype == ETH_P_PRE_AUTH)
+ 		(hdr3->eth_type) = htons(ETH_P_PRE_AUTH);
+ 	else
+@@ -320,13 +339,13 @@
+ 	fp = popen(str, "r"); //system(str);
+ 	if(fp == NULL)
+ 	{
+-		DBGPRINT(RT_DEBUG_TRACE,"FAILED to set 802.1x auth state to port %d on switch\n", get_physical_portno(sta->aid));
++		DBGPRINT(RT_DEBUG_TRACE,"FAILED to set 802.1x auth state to port(LAN%d) on switch\n", get_physical_portno(sta->aid));
+ 		return;
+ 	}
+ 	else
+ 		fclose(fp);
+ 
+-	DBGPRINT(RT_DEBUG_TRACE,"IEEE802_1X_Set_Sta_Authorized: Port %d = %d \n", get_physical_portno(sta->aid), authorized);
++	DBGPRINT(RT_DEBUG_TRACE,"IEEE802_1X_Set_Sta_Authorized: Port(LAN%d) = %d \n", get_physical_portno(sta->aid), authorized);
+ #else
+ 	switch(authorized)
+ 	{
+diff -aur a/src/source/rtdot1x.c b/src/source/rtdot1x.c
+--- a/src/source/rtdot1x.c	2016-09-19 06:26:09.050532386 +0530
++++ b/src/source/rtdot1x.c	2016-09-22 08:14:47.611994120 +0530
+@@ -349,11 +349,11 @@
+ 
+ 		if (ethertype == ETH_P_PRE_AUTH)
+ 		{
+-			DBGPRINT(RT_DEBUG_TRACE, "Receive WPA2 pre-auth packet for %s%d\n", rtapd->prefix_wlan_name, apidx);
++			DBGPRINT(RT_DEBUG_TRACE, "Receive WPA2 pre-auth packet for port(%d)\n", apidx);
+ 		}
+ 		else
+ 		{
+-			DBGPRINT(RT_DEBUG_TRACE, "Receive EAP packet for %s%d\n", rtapd->prefix_wlan_name, apidx);
++			DBGPRINT(RT_DEBUG_TRACE, "Receive EAP packet for port(%d)\n", apidx);
+ 		}
+     }
+ 	else
+@@ -434,7 +434,8 @@
+ 	}
+ 
+ 	DBGPRINT(RT_DEBUG_TRACE,"Handle_Link_Monitor_Events: port_id = %d, port_event = %d\n",buf[0], buf[1]);
+-	if ((buf[0] >= total_ports_g) || (buf[1] > 1))
++	if (((rv_prod_type_g  == PROD_TYPE_RV_340) && (buf[0] > total_ports_g)) ||
++	    ((rv_prod_type_g  == PROD_TYPE_RV_345) && (buf[0] >= total_ports_g)) || (buf[1] > 1))
+ 	{
+ 		DBGPRINT(RT_DEBUG_ERROR,"Handle_Link_Monitor_Events: Invalid port_id = %d, port_event = %d\n",buf[0], buf[1]);
+ 		return;
+@@ -868,7 +869,7 @@
+ 
+ static void Handle_usr2(int sig, void *eloop_ctx, void *signal_ctx)
+ {
+-	u16 portid;
++	u16 portid = 0, max_ports = 0;
+ 	uint16_t portControl;	
+         struct sta_info *s;
+ 	rtapd *apd;
+@@ -881,7 +882,18 @@
+ 		return;
+ 	}
+ 
+-	for(portid = 0; portid < total_ports_g; portid++)
++	if (rv_prod_type_g  == PROD_TYPE_RV_340)
++	{
++		portid = 1;
++		max_ports = total_ports_g + 1;
++	}
++	else if (rv_prod_type_g  == PROD_TYPE_RV_345)
++	{
++		portid = 0;
++		max_ports = total_ports_g;
++	}
++
++	for(; portid < max_ports; portid++)
+ 	{
+ 		portControl = rv_get_portControl(portid);
+ 		if((portControl >= 0 ) && (portControl <= 2))
+@@ -1013,7 +1025,7 @@
+ 	char buf[80];
+ 	char str[200];
+ 	int num_lan, i;
+-	FILE *fp = NULL;	
++	FILE *fp = NULL;
+ 	if (!apd)
+ 		return;
+ 

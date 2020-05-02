@@ -1,0 +1,253 @@
+From 9ab8d82d3fac0d4e907a4a844e3d4d57c81198bc Mon Sep 17 00:00:00 2001
+From: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+Date: Thu, 30 Mar 2017 06:32:10 -0500
+Subject: [PATCH] Passing connection name in Xauth PAM conversation function
+
+Signed-off-by: Sridhar Pothuganti <sridhar.pothuganti@nxp.com>
+---
+ conf/plugins/xauth-pam.conf                        |  4 +-
+ .../plugins/xauth_generic/xauth_generic.c          |  6 ++-
+ src/libcharon/plugins/xauth_pam/xauth_pam.c        | 47 ++++++++++++++++++----
+ src/libcharon/sa/ikev1/tasks/xauth.c               | 12 +++++-
+ src/libcharon/sa/xauth/xauth_method.h              |  7 +++-
+ 5 files changed, 62 insertions(+), 14 deletions(-)
+
+diff --git a/conf/plugins/xauth-pam.conf b/conf/plugins/xauth-pam.conf
+index aeba191..7a286aa 100644
+--- a/conf/plugins/xauth-pam.conf
++++ b/conf/plugins/xauth-pam.conf
+@@ -2,10 +2,10 @@ xauth-pam {
+ 
+     # Whether to load the plugin. Can also be an integer to increase the
+     # priority of this plugin.
+-    load = yes
++    load = 10
+ 
+     # PAM service to be used for authentication.
+-    # pam_service = login
++    pam_service = s2s-vpn
+ 
+     # Open/close a PAM session for each active IKE_SA.
+     # session = no
+diff --git a/src/libcharon/plugins/xauth_generic/xauth_generic.c b/src/libcharon/plugins/xauth_generic/xauth_generic.c
+index e65d1a1..cd5ae63 100644
+--- a/src/libcharon/plugins/xauth_generic/xauth_generic.c
++++ b/src/libcharon/plugins/xauth_generic/xauth_generic.c
+@@ -11,6 +11,10 @@
+  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+  * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  * for more details.
++ *
++ * 30/03/2017	Sridhar Pothuganti<sridhar.pothuganti@nxp.com>
++ * Passing connection name for Xauth PAM
++ *
+  */
+ 
+ #include "xauth_generic.h"
+@@ -49,7 +53,7 @@ METHOD(xauth_method_t, initiate_peer, status_t,
+ }
+ 
+ METHOD(xauth_method_t, process_peer, status_t,
+-	private_xauth_generic_t *this, cp_payload_t *in, cp_payload_t **out)
++	private_xauth_generic_t *this, cp_payload_t *in, cp_payload_t **out, char *connName)
+ {
+ 	configuration_attribute_t *attr;
+ 	enumerator_t *enumerator;
+diff --git a/src/libcharon/plugins/xauth_pam/xauth_pam.c b/src/libcharon/plugins/xauth_pam/xauth_pam.c
+index 3414d2e..2bb936c 100644
+--- a/src/libcharon/plugins/xauth_pam/xauth_pam.c
++++ b/src/libcharon/plugins/xauth_pam/xauth_pam.c
+@@ -11,6 +11,10 @@
+  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+  * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  * for more details.
++ *
++ * 30/03/2017	Sridhar Pothuganti<sridhar.pothuganti@nxp.com>
++ * Passing connection name for Xauth PAM
++ *
+  */
+ 
+ #include "xauth_pam.h"
+@@ -20,6 +24,8 @@
+ 
+ #include <security/pam_appl.h>
+ 
++#define PAM_CONN_NAME_ATTRIBUTE 0x2000
++
+ typedef struct private_xauth_pam_t private_xauth_pam_t;
+ 
+ /**
+@@ -38,6 +44,18 @@ struct private_xauth_pam_t {
+ 	identification_t *peer;
+ };
+ 
++struct conversation_data {
++	/**
++	 * Password
++	 */
++	 char *password;
++
++	/**
++	 * Connection name
++	 */
++	 char *connName;
++};
++
+ METHOD(xauth_method_t, initiate, status_t,
+ 	private_xauth_pam_t *this, cp_payload_t **out)
+ {
+@@ -56,7 +74,7 @@ METHOD(xauth_method_t, initiate, status_t,
+  * PAM conv callback function
+  */
+ static int auth_conv(int num_msg, const struct pam_message **msg,
+-					 struct pam_response **resp, char *password)
++					 struct pam_response **resp, struct conversation_data *data)
+ {
+ 	struct pam_response *response;
+ 
+@@ -65,23 +83,35 @@ static int auth_conv(int num_msg, const struct pam_message **msg,
+ 		return PAM_CONV_ERR;
+ 	}
+ 	response = malloc(sizeof(struct pam_response));
+-	response->resp = strdup(password);
+-	response->resp_retcode = 0;
+-	*resp = response;
++	if (msg[0]->msg_style == PAM_CONN_NAME_ATTRIBUTE)
++	{
++		response->resp = strdup(data->connName);
++		response->resp_retcode = 0;
++		*resp = response;
++	}
++	else
++	{
++		response->resp = strdup(data->password);
++		response->resp_retcode = 0;
++		*resp = response;
++	}
+ 	return PAM_SUCCESS;
+ }
+ 
+ /**
+  * Authenticate a username/password using PAM
+  */
+-static bool authenticate(char *service, char *user, char *password)
++static bool authenticate(char *service, char *user, char *password, char *connName)
+ {
+ 	pam_handle_t *pamh = NULL;
+ 	static struct pam_conv conv;
+ 	int ret;
++	struct conversation_data data;
+ 
++	data.password = password;
++	data.connName = connName;
+ 	conv.conv = (void*)auth_conv;
+-	conv.appdata_ptr = password;
++	conv.appdata_ptr = (void *)&data;
+ 
+ 	ret = pam_start(service, user, &conv, &pamh);
+ 	if (ret != PAM_SUCCESS)
+@@ -125,7 +155,7 @@ static void attr2string(char *buf, size_t len, chunk_t chunk)
+ }
+ 
+ METHOD(xauth_method_t, process, status_t,
+-	private_xauth_pam_t *this, cp_payload_t *in, cp_payload_t **out)
++	private_xauth_pam_t *this, cp_payload_t *in, cp_payload_t **out, char *connName)
+ {
+ 	char *service, user[128] = "", pass[128] = "", *pos;
+ 	configuration_attribute_t *attr;
+@@ -183,7 +213,8 @@ METHOD(xauth_method_t, process, status_t,
+ 						"%s.plugins.eap-gtc.pam_service", "login", lib->ns),
+ 				lib->ns);
+ 
+-	if (authenticate(service, user, pass))
++	DBG1(DBG_IKE, "PAM authentication has received the connection name '%s'", connName);
++	if (authenticate(service, user, pass, connName))
+ 	{
+ 		DBG1(DBG_IKE, "PAM authentication of '%s' successful", user);
+ 		return SUCCESS;
+diff --git a/src/libcharon/sa/ikev1/tasks/xauth.c b/src/libcharon/sa/ikev1/tasks/xauth.c
+index 968b438..d6f4774 100644
+--- a/src/libcharon/sa/ikev1/tasks/xauth.c
++++ b/src/libcharon/sa/ikev1/tasks/xauth.c
+@@ -11,6 +11,10 @@
+  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+  * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  * for more details.
++ *
++ * 30/03/2017	Sridhar Pothuganti<sridhar.pothuganti@nxp.com>
++ * Passing connection name for Xauth PAM in conversation function
++ *
+  */
+ 
+ #include "xauth.h"
+@@ -390,6 +394,8 @@ METHOD(task_t, process_r, status_t,
+ 	private_xauth_t *this, message_t *message)
+ {
+ 	cp_payload_t *cp;
++	char *connName;
++	connName = this->ike_sa->get_name(this->ike_sa);
+ 
+ 	if (!this->xauth)
+ 	{
+@@ -407,7 +413,7 @@ METHOD(task_t, process_r, status_t,
+ 	}
+ 	if (cp->get_type(cp) == CFG_REQUEST)
+ 	{
+-		switch (this->xauth->process(this->xauth, cp, &this->cp))
++		switch (this->xauth->process(this->xauth, cp, &this->cp, connName))
+ 		{
+ 			case NEED_MORE:
+ 				return NEED_MORE;
+@@ -467,6 +473,8 @@ METHOD(task_t, process_i, status_t,
+ {
+ 	identification_t *id;
+ 	cp_payload_t *cp;
++	char *connName;
++	connName = this->ike_sa->get_name(this->ike_sa);
+ 
+ 	cp = (cp_payload_t*)message->get_payload(message, PLV1_CONFIGURATION);
+ 	if (!cp)
+@@ -474,7 +482,7 @@ METHOD(task_t, process_i, status_t,
+ 		DBG1(DBG_IKE, "configuration payload missing in XAuth response");
+ 		return FAILED;
+ 	}
+-	switch (this->xauth->process(this->xauth, cp, &this->cp))
++	switch (this->xauth->process(this->xauth, cp, &this->cp, connName))
+ 	{
+ 		case NEED_MORE:
+ 			return NEED_MORE;
+diff --git a/src/libcharon/sa/xauth/xauth_method.h b/src/libcharon/sa/xauth/xauth_method.h
+index 701b4dc..c267e78 100644
+--- a/src/libcharon/sa/xauth/xauth_method.h
++++ b/src/libcharon/sa/xauth/xauth_method.h
+@@ -11,6 +11,10 @@
+  * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+  * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+  * for more details.
++ *
++ * 30/03/2017	Sridhar Pothuganti<sridhar.pothuganti@nxp.com>
++ * Passing connection name for Xauth PAM
++ *
+  */
+ 
+ /**
+@@ -71,6 +75,7 @@ struct xauth_method_t {
+ 	 * A cp_payload is created in "out" if result is NEED_MORE.
+ 	 *
+ 	 * @param in		cp_payload response received
++	 * @param connName	connection name which is mainly used by PAM module
+ 	 * @param out		created cp_payload to send
+ 	 * @return
+ 	 * 					- NEED_MORE, if an other exchange is required
+@@ -78,7 +83,7 @@ struct xauth_method_t {
+ 	 * 					- SUCCESS, if XAuth method succeeded
+ 	 */
+ 	status_t (*process) (xauth_method_t *this, cp_payload_t *in,
+-						 cp_payload_t **out);
++						 cp_payload_t **out, char *connName);
+ 
+ 	/**
+ 	 * Get the XAuth username received as XAuth initiator.
+-- 
+1.9.1
+

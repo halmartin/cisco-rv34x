@@ -1,0 +1,15 @@
+diff -Naur -x '*.o' -x ifconfig -x '*.so' -x '*.*a' net-tools-1.60/lib/interface.c net-tools-1.60_mod1/lib/interface.c
+--- net-tools-1.60/lib/interface.c	2001-02-11 01:01:15.000000000 +0530
++++ net-tools-1.60_mod1/lib/interface.c	2016-05-25 16:24:51.091720000 +0530
+@@ -670,7 +670,10 @@
+     if (hw == NULL)
+ 	hw = get_hwntype(-1);
+ 
+-    printf(_("%-9.9s Link encap:%s  "), ptr->name, hw->title);
++    if (strlen(ptr->name) < 9)
++      printf(_("%-9.9s Link encap:%s  "), ptr->name, hw->title);
++    else
++      printf(_("%s Link encap:%s  "), ptr->name, hw->title);
+     /* For some hardware types (eg Ash, ATM) we don't print the 
+        hardware address if it's null.  */
+     if (hw->print != NULL && (! (hw_null_address(hw, ptr->hwaddr) &&

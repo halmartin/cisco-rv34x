@@ -1,0 +1,12 @@
+diff -Naur ./drivers/rtc/rtc-c2k.c ../linux-4.1.8-new/drivers/rtc/rtc-c2k.c
+--- ./drivers/rtc/rtc-c2k.c	2017-07-28 17:19:50.801379640 +0530
++++ ../linux-4.1.8-new/drivers/rtc/rtc-c2k.c	2017-07-28 17:20:25.833380298 +0530
+@@ -463,7 +463,7 @@
+ 	platform_set_drvdata(pdev, rtc);
+ 
+ 	ret = request_irq(rtc_alarmno, c2k_rtc_alarmirq,
+-			IRQF_DISABLED,  "rtc-alarm", rtc);
++			0,  "rtc-alarm", rtc);
+ 	if (ret) {
+ 		dev_err(&pdev->dev, "IRQ%d error %d\n", rtc_alarmno, ret);
+ 		goto err_alarm_irq;

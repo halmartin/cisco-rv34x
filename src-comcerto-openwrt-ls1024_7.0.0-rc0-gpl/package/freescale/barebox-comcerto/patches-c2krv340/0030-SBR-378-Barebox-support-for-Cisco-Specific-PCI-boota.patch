@@ -1,0 +1,44 @@
+From d61dede586d4541ba117b98f741e5687d4c9c5b0 Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Wed, 23 Dec 2015 21:27:15 +0530
+Subject: [PATCH 30/60] SBR-378 Barebox support for Cisco Specific PCI bootargs
+ appends
+
+This fix support Cisco RV34xx additional bootargs parameters for
+PCI configs
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ arch/arm/boards/comcerto-rv340/env/bin/boot | 4 ++++
+ arch/arm/boards/comcerto-rv340/env/config   | 2 ++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/arch/arm/boards/comcerto-rv340/env/bin/boot b/arch/arm/boards/comcerto-rv340/env/bin/boot
+index 861a80a..ec4005a 100755
+--- a/arch/arm/boards/comcerto-rv340/env/bin/boot
++++ b/arch/arm/boards/comcerto-rv340/env/bin/boot
+@@ -228,6 +228,10 @@ if [ -n $usb3_internal_clk ]; then
+   bootargs="$bootargs usb3_internal_clk=$usb3_internal_clk"
+ fi
+ 
++if [ -n $pci_data ]; then
++  bootargs="$bootargs $pci_data"
++fi
++
+ echo "booting kernel of type $kernelimage_type from $kdev"
+ 
+ if [ x$kernelimage_type = xuimage ]; then
+diff --git a/arch/arm/boards/comcerto-rv340/env/config b/arch/arm/boards/comcerto-rv340/env/config
+index d34fd8a..f95805b 100644
+--- a/arch/arm/boards/comcerto-rv340/env/config
++++ b/arch/arm/boards/comcerto-rv340/env/config
+@@ -52,4 +52,6 @@ usb3_internal_clk="yes"
+ 
+ loglevel=4
+ 
++pci_data="pcie0_gen1_only=yes pcie1_gen1_only=no  pcie_external_clk=yes"
++
+ bootargs="console=ttyS0,115200n8, loglevel=$loglevel, init=/etc/preinit"
+-- 
+2.7.4
+

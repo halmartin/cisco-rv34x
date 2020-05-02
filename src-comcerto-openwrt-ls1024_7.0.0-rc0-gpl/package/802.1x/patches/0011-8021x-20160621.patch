@@ -1,0 +1,25 @@
+diff -rauN a/src/source/ieee802_1x.c b/src/source/ieee802_1x.c
+--- a/src/source/ieee802_1x.c	2016-06-21 15:50:00.798577097 +0530
++++ b/src/source/ieee802_1x.c	2016-06-21 15:54:48.794577062 +0530
+@@ -1145,10 +1145,17 @@
+     
+     Radius_msg_get_attr(msg, RADIUS_ATTR_CLASS, groupname,sizeof(groupname));
+ 
+-   if(strcmp(groupname,"") == 0)
+-    	group_authorize = 1;
+-   else 
+-    	group_authorize = authorize(groupname);
++   	if(strcmp(groupname,"") == 0)
++	{
++		if(msg->hdr->code == RADIUS_CODE_ACCESS_ACCEPT)
++		{
++			DBGPRINT(RT_DEBUG_ERROR,"Incoming RADIUS packet did not have class-25 attribute\n");
++        		return RADIUS_RX_UNKNOWN;
++		}
++    		group_authorize = 1;
++	}
++   	else 
++    		group_authorize = authorize(groupname);
+ 
+     if(group_authorize == 0)
+         return RADIUS_RX_UNKNOWN;

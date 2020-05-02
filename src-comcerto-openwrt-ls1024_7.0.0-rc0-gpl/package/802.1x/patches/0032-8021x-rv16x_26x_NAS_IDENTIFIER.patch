@@ -1,0 +1,14 @@
+diff -ruaN c/src/source/config.c d/src/source/config.c
+--- c/src/source/config.c	2017-10-06 12:26:40.555386339 +0530
++++ d/src/source/config.c	2017-10-06 15:04:35.683385208 +0530
+@@ -1048,6 +1048,10 @@
+ 			conf->nasId[i][nasId_len++] = '0' + i;
+ 			conf->nasId_len[i] = nasId_len;
+ 		}
++		else
++		{
++			conf->nasId_len[i] = nasId_len;
++		}
+   	}
+   
+ 	// initial default EAP IF name and Pre-Auth IF name	as "eth0"

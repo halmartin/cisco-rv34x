@@ -1,0 +1,27 @@
+#!/bin/sh
+
+. /lib/functions.sh
+
+local isboot=$(uci_get_state system.core.booted)
+[ "$isboot" != "1" ] && { 
+	#When system is in boot phase, don't execute workaround.
+	exit 0;
+}
+
+#If the workaround is executed recently, don't execute it.
+local isRecentExec=$(cat /var/log/messages | grep "Workaround for WAN port issue is executed.")
+
+[ `ethtool -d eth0 | sed -n 4p | xargs | awk -F ' ' '{print $6}'` != "02" ] && {
+	wanport_status=$(uci get wanport.wan1.status)
+	wanrunning=$(ifconfig eth0 | grep -w RUNNING)
+	[ "$wanport_status" == "1" ] && [ -n "$wanrunning" ] && {
+		if [ -n "$isRecentExec" ]
+		then
+			logger -t system -p local0.notice "Differing WAN port workaround."
+		else
+			logger -t system -p local0.notice "Workaround for WAN port issue is executed."
+			/etc/init.d/wanport toggle_wanport wan2
+		fi
+	}
+}
+

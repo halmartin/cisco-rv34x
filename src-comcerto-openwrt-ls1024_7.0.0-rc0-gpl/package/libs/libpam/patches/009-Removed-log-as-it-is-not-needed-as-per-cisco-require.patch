@@ -1,0 +1,31 @@
+From 288f75f7245dce5545902e8e18d1674170560704 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Wed, 30 May 2018 15:04:39 +0530
+Subject: [PATCH 2/2] Removed log as it is not needed (as per cisco
+ requirement) Signed-off-by: nageshkoneti
+ <b47094@freescale.com>
+
+---
+ pam_handlers.c |    5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/libpam/pam_handlers.c b/libpam/pam_handlers.c
+index ab9b2d5..dcff6bd 100644
+--- a/libpam/pam_handlers.c
++++ b/libpam/pam_handlers.c
+@@ -478,9 +478,10 @@ int _pam_init_handlers(pam_handle_t *pamh)
+ 		    }
+ 		} else {
+ 		    D(("unable to open %s", PAM_DEFAULT_SERVICE_FILE));
+-		    pam_syslog(pamh, LOG_ERR,
++		    /*Commenting this log as this log is not required
++             * pam_syslog(pamh, LOG_ERR,
+ 				    "_pam_init_handlers: no default config %s",
+-				    PAM_DEFAULT_SERVICE_FILE);
++				    PAM_DEFAULT_SERVICE_FILE);*/
+ 		}
+ 		if (!read_something) {          /* nothing read successfully */
+ 		    retval = PAM_ABORT;
+-- 
+1.7.9.5
+

@@ -1,0 +1,99 @@
+domain		53/tcp
+bootps		67/tcp
+bootpc		68/tcp
+ldap		389/tcp
+https		443/tcp
+isakmp		500/tcp
+rip             520/udp
+ripng           521/udp
+syslog		514/udp
+dhcpv6-client	546/tcp
+dhcpv6-server	547/tcp
+ldaps		636/tcp
+openvpn         1194/tcp
+l2f		1701/tcp	l2tp
+pptpd           1723/tcp
+radius		1812/tcp
+radius-acct	1813/tcp	radacct
+upnp            1900/udp
+nfs		2049/tcp
+NAT-T           4500/tcp
+mdns		5353/tcp
+postgresql	5432/tcp	postgres
+echo		7/tcp
+discard		9/tcp
+daytime		13/tcp
+netstat		15/tcp
+chargen		19/tcp
+ftp-data	20/tcp
+ftp		21/tcp
+ssh		22/tcp
+telnet		23/tcp
+smtp		25/tcp
+time		37/tcp
+whois		43/tcp
+tftp		69/udp
+finger		79/tcp
+www		80/tcp		http
+kerberos	88/tcp		kerberos5 krb5 kerberos-sec
+pop3		110/tcp
+sunrpc		111/tcp
+auth		113/tcp		ident
+sftp		115/tcp
+nntp		119/tcp
+ntp		123/tcp
+netbios-ns	137/tcp
+netbios-dgm	138/tcp
+netbios-ssn	139/tcp
+imap2		143/tcp		imap
+snmp		161/tcp
+snmp-trap	162/tcp		snmptrap
+xdmcp		177/tcp
+bgp		179/tcp
+imap3		220/tcp
+microsoft-ds	445/tcp
+rtsp		554/tcp
+ipp		631/tcp
+printer		515/tcp		spooler
+afpovertcp	548/tcp
+nntps		563/tcp		snntp
+tinc		655/tcp
+rsync		873/tcp
+rsync		873/udp
+ftps-data	989/tcp
+ftps		990/tcp
+imaps		993/tcp
+ircs		994/tcp
+pop3s		995/tcp
+socks		1080/tcp
+dict		2628/tcp
+gpsd		2947/tcp
+icpv2		3130/tcp	icp
+mysql		3306/tcp
+nut		3493/tcp
+distcc		3632/tcp
+daap		3689/tcp
+svn		3690/tcp	subversion
+epmd		4369/tcp
+iax		4569/tcp
+mtn		4691/tcp
+munin		4949/tcp
+sip		5060/tcp
+sip-tls		5061/tcp
+xmpp-client	5222/tcp	jabber-client
+xmpp-server	5269/tcp	jabber-server
+x11		6000/tcp
+mysql-proxy	6446/tcp
+bacula-dir	9101/tcp
+bacula-fd	9102/tcp
+bacula-sd	9103/tcp
+nbd		10809/tcp
+zabbix-agent	10050/tcp
+zabbix-trapper	10051/tcp
+hkp		11371/tcp
+ssmtp		465/tcp		smtps
+spamd		783/tcp
+sane-port	6566/tcp	sane saned
+ircd		6667/tcp
+git		9418/tcp
+

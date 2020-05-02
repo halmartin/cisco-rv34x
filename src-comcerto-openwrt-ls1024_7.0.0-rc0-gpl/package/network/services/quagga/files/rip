@@ -1,0 +1,17 @@
+config rip 'global'
+	option ipv4 1
+	option ipv6 1
+
+config rip 'wan1'
+	option ifname eth0
+	option v1_passive 1
+	option v2_passive 1
+	option v6_passive 1
+	option auth 1
+	option interface 1
+	option auth_mode md5
+	option auth_string  ***
+	option v1_active 1
+	option v2_active 1
+	option v6_active 1
+

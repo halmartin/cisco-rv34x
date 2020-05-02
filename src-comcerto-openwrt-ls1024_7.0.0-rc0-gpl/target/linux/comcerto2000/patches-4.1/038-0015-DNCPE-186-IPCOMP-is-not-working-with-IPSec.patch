@@ -1,0 +1,38 @@
+From 5d6a50e5e6acf6ea39ab8d25d0a3361d37497ee4 Mon Sep 17 00:00:00 2001
+From: Abhinav <abhinav.podduturi@nxp.com>
+Date: Wed, 4 May 2016 11:01:19 +0530
+Subject: [PATCH 15/19] DNCPE-186 : IPCOMP is not working with IPSec.
+
+Made changes to send IPsec flow events to CMM even if any of the SA's used
+by the flow is not offloaded to PFE.
+---
+ net/xfrm/xfrm_policy.c |    6 ------
+ 1 files changed, 0 insertions(+), 6 deletions(-)
+
+diff --git a/net/xfrm/xfrm_policy.c b/net/xfrm/xfrm_policy.c
+index c5b59f5..0e8ec35 100644
+--- a/net/xfrm/xfrm_policy.c
++++ b/net/xfrm/xfrm_policy.c
+@@ -1968,8 +1968,6 @@ no_transform:
+ 		num_xfrms = 0;
+ 		memset(xfrm_handle, 0, XFRM_POLICY_TYPE_MAX*sizeof(u16));
+ 		while((x = dst1->xfrm) != NULL) {
+-			if (!x->offloaded)
+-				goto ok;
+ 			xfrm_handle[num_xfrms++] = x->handle;
+ 			dst1 = dst1->child;
+ 			if (dst1 == NULL) {
+@@ -2261,10 +2259,6 @@ int __xfrm_policy_check(struct sock *sk, int dir, struct sk_buff *skb,
+ 			for (i=sp->len-1; i>=0; i--) 
+ 			{
+ 				x = sp->xvec[i];
+-
+-				if (!x->offloaded)
+-					goto std_path;
+-
+ 				xfrm_handle[xfrm_nr++] = x->handle;
+ 			}
+ 			// sent flow notification to cmm with sa_handle
+-- 
+1.7.7.4
+

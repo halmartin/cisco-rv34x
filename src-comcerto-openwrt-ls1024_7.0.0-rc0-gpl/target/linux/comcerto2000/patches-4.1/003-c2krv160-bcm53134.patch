@@ -1,0 +1,466 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Add bcm53134 support for switch spi interface.
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-01-17 14:48:00.097129619 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-01-17 14:50:44.976502764 +0800
+@@ -273,6 +273,17 @@
+                 .controller_data = &spi_ctrl_data,
+ 	},
+ 	{
++		/* FIXME: for chipselect-0 */
++		.modalias = "bcm53134_switch",
++		.chip_select = 0,
++		.max_speed_hz = 4*1000*1000,
++		.bus_num = 1,
++		.irq = -1,
++		.mode = SPI_MODE_3,
++		.platform_data = &spi_pdata,
++		.controller_data = &spi_ctrl_data,
++	},
++	{
+ 		/* FIXME: for chipselect-1 */
+ 		.modalias = "proslic",
+ 		.max_speed_hz = 4*1000*1000,
+--- linux-4.1.8/drivers/net/ethernet/broadcom/Makefile.org	2017-01-17 14:48:44.525523545 +0800
++++ linux-4.1.8/drivers/net/ethernet/broadcom/Makefile	2017-01-17 14:50:34.546502718 +0800
+@@ -12,3 +12,4 @@
+ obj-$(CONFIG_TIGON3) += tg3.o
+ obj-$(CONFIG_BGMAC) += bgmac.o
+ obj-$(CONFIG_SYSTEMPORT) += bcmsysport.o
++obj-$(CONFIG_BCM53134) += bcm53134.o
+--- linux-4.1.8/drivers/net/ethernet/broadcom/Kconfig.org	2017-01-17 14:48:18.945253387 +0800
++++ linux-4.1.8/drivers/net/ethernet/broadcom/Kconfig	2017-01-17 14:50:44.976502764 +0800
+@@ -161,4 +161,10 @@
+ 	  Broadcom BCM7xxx Set Top Box family chipset using an internal
+ 	  Ethernet switch.
+ 
++config BCM53134
++   tristate "Broadcom BCM53134 support"
++   ---help---
++     This is a network (Ethernet) device which attaches to your parallel, say Y
++     and read the Ethernet-HOWTO.
++
+ endif # NET_VENDOR_BROADCOM
+--- linux-4.1.8/drivers/net/ethernet/broadcom/bcm53134.c.org	1970-01-01 07:00:00.000000000 +0700
++++ linux-4.1.8/drivers/net/ethernet/broadcom/bcm53134.c	2017-01-17 14:50:44.976502764 +0800
+@@ -0,0 +1,421 @@
++/*dataflash.c
++ *
++ * This code is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++ */
++
++#include <linux/fs.h>
++#include <linux/mm.h>
++#include <linux/backing-dev.h>
++#include <linux/compat.h>
++#include <linux/mount.h>
++#include <linux/blkpg.h>
++#include <asm/uaccess.h>
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/errno.h>
++#include <linux/init.h>
++#include <linux/types.h>
++#include <linux/list.h>
++#include <linux/rbtree.h>
++#include <linux/sched.h>
++#include <linux/wait.h>
++#include <linux/mutex.h>
++#include <linux/rwsem.h>
++#include <linux/spinlock.h>
++#include <linux/fs.h>
++#include <linux/cdev.h>
++#include <linux/device.h>
++#include <linux/slab.h>
++#include <linux/string.h>
++#include <linux/vmalloc.h>
++#include <linux/notifier.h>
++#include <linux/mtd/mtd.h>
++#include <linux/mtd/ubi.h>
++#include <asm/pgtable.h>
++
++#include <linux/spi/spi.h>
++
++#define BCM53134_MAJOR       240
++#define BCM53134_MINOR       3
++
++#define SPI_READ_OP                 0x60
++#define SPI_WRITE_OP                0x61
++
++#define DMA_ALIGN	64
++
++/****************************************************************************/
++
++struct bcm53134 {
++	struct spi_device	*spi;
++	struct mutex		lock;
++	struct mtd_info		mtd;
++	u16			page_size;
++	u16			addr_width;
++	u8			erase_opcode;
++	u8			*command __attribute__((aligned(64)));
++	u8			*value __attribute__((aligned(64)));
++	u8			*data __attribute__((aligned(64)));
++};
++
++struct bcm53134 *bcm_info;
++static int spi_mode = 3;
++
++static void _robo_spi_read(struct spi_device *spi, struct bcm53134 *bcm_info, u8 command, u16 address,
++                             const void *buf, size_t len)
++{
++	struct spi_transfer t[3];
++	struct spi_message m;
++	u8 *value_tmp, *value_tmp2;
++	u8 value_buf[2];
++	u16 *read;
++	int ret;
++	u_char  *cmd_local_buf __attribute__((aligned(64)));
++	u_char  *rw_local_buf __attribute__((aligned(64)));
++	u_char  *rd_local_buf __attribute__((aligned(64)));
++
++	spi_message_init(&m);
++	m.is_dma_mapped = 1;
++	memset(t, 0, sizeof(t));
++
++	cmd_local_buf = bcm_info->command;
++	rw_local_buf = bcm_info->data;
++	rd_local_buf = bcm_info->value;
++
++	t[0].tx_buf = cmd_local_buf;
++	t[0].len = 1;
++
++	memcpy(cmd_local_buf, &command, 1);
++	spi_message_add_tail(&t[0], &m);
++
++	t[1].tx_buf = rw_local_buf;
++	t[1].len = 1;
++	memcpy(value_buf, &address, 1);
++	memcpy(rw_local_buf, value_buf, 1);
++	value_tmp = (u8 *)(&address);
++	value_tmp2 = (u8 *)value_buf;
++	spi_message_add_tail(&t[1], &m);
++
++	t[2].rx_buf = rd_local_buf;
++	t[2].len = len;
++	spi_message_add_tail(&t[2], &m);
++
++	ret = spi_sync(spi, &m);
++	if (ret)
++		printk("spi transfer failed: ret = %d\n", ret);
++
++	memcpy(value_buf, rd_local_buf, len);
++	memcpy(buf, value_buf, len);
++	if(len == 2)
++		printk("_robo_spi_read, value=0x%x\n", *(u16 *)buf);
++	else
++		printk("_robo_spi_read, value=0x%x\n", *(u8 *)buf);
++}
++
++static void _robo_spi_write(struct spi_device *spi, struct bcm53134 *bcm_info, u8 command, u16 address,
++                             const void *buf, size_t len)
++{
++	struct spi_transfer t[3];
++	struct spi_message m;
++	u8 address_tmp;
++	u8 *value_tmp, *value_tmp2; 
++	u8 value_buf[1];
++	u_char  *cmd_local_buf __attribute__((aligned(64)));
++	u_char  *rw1_local_buf __attribute__((aligned(64)));
++	u_char  *rw2_local_buf __attribute__((aligned(64)));
++	int ret;
++
++	spi_message_init(&m);
++	m.is_dma_mapped = 1;
++	memset(t, 0, sizeof(t));
++
++	cmd_local_buf = bcm_info->command;
++	rw1_local_buf = bcm_info->data;
++	rw2_local_buf = bcm_info->value;
++
++	t[0].tx_buf = cmd_local_buf;
++	t[0].len = 1;
++	memcpy(cmd_local_buf, &command, 1);
++	spi_message_add_tail(&t[0], &m);
++
++	t[1].tx_buf = rw1_local_buf;
++	t[1].len = 1;
++	memcpy(value_buf, &address, 1);
++	memcpy(rw1_local_buf, value_buf, 1);
++	value_tmp = (u8 *)(&address);
++	value_tmp2 = (u8 *)value_buf;
++	spi_message_add_tail(&t[1], &m);
++
++	t[2].tx_buf = rw2_local_buf;
++	t[2].len = len;
++	memcpy(value_buf, buf, len);
++	memcpy(rw2_local_buf, value_buf, len);
++	value_tmp = (u8 *)buf;
++	value_tmp2 = (u8 *)value_buf;
++	spi_message_add_tail(&t[2], &m);
++
++	ret = spi_sync(spi, &m);
++	if (ret)
++		printk("spi transfer failed: ret = %d\n", ret);
++}
++
++int robo_spi_read(void *cookie, uint16_t reg, uint8_t *buf, int len)
++{
++	uint i, timeout;
++	u8 tmp_buf[1];
++
++	*buf = 0x0;
++	for (i = 0, timeout = 50; timeout;)
++	{
++		_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xFE, buf, 1);
++		if ((buf[0] & (1 << 7)) == 0)
++			break;
++		else
++			timeout--;
++	}
++
++	if (timeout == 0)
++		goto timeout;
++
++	if ((buf[0] & (1 << 7)) == 0)
++	{
++		tmp_buf[0] = reg >> 8;
++		_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
++
++		_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, reg, buf, 1);
++
++		for (i = 0, timeout = 50; timeout;)
++		{
++			_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xFE, buf, 1);
++			if ((buf[0] & (1 << 5)) == (1 << 5))
++			{
++				_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xF0, buf, 2);
++				break;
++			}
++			else
++				timeout--;
++		}
++	}
++
++	if (timeout == 0)
++		goto timeout;
++
++	return 0;
++
++timeout:
++	tmp_buf[0] = reg >> 8;
++	_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
++
++	return 0;
++}
++
++int robo_spi_write(void *cookie, uint16_t reg, uint8_t *buf, int len)
++{
++	uint i, timeout;
++	u8 tmp_buf[1];
++
++	tmp_buf[0] = 0xFF;
++	for (i = 0, timeout = 50; timeout;)
++	{
++		_robo_spi_read(bcm_info->spi, bcm_info, SPI_READ_OP, 0xFE, tmp_buf, 1);
++		if ((tmp_buf[0] & (1 << 7)) == 0)
++			break;
++		else
++			timeout--;
++	}
++
++	if (timeout == 0)
++		goto timeout;
++
++	if ((tmp_buf[0] & (1 << 7)) == 0)
++	{
++		tmp_buf[0] = reg >> 8;
++		_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
++
++		_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, reg, buf, 2);
++	}
++
++	return 0;
++
++timeout:
++	tmp_buf[0] = reg >> 8;
++	_robo_spi_write(bcm_info->spi, bcm_info, SPI_WRITE_OP, 0xFF, tmp_buf, 1);
++
++	return 0;
++}
++
++EXPORT_SYMBOL(robo_spi_read);
++EXPORT_SYMBOL(robo_spi_write);
++
++static const struct spi_device_id bcm53134_ids[] = {
++	/* Atmel -- some are (confusingly) marketed as "DataFlash" */
++	{ "bcm53134_switch", 0 },
++	{ },
++};
++MODULE_DEVICE_TABLE(spi, bcm53134_ids);
++
++static int bcm53134_switch_open(struct inode *inode, struct file *file)
++{
++	return 0;
++}
++
++static int bcm53134_switch_read(struct file *file, char __user *buf,
++                size_t count, loff_t *ppos)
++{
++	return count;
++}
++
++static int bcm53134_switch_write(struct file *file, const char __user *buf,
++                size_t count, loff_t *ppos)
++{
++	char *flags;
++	char args[60];
++	unsigned char cmd;
++	unsigned short int addr;
++	unsigned short int value;
++
++	memset(args, '\0', 60);
++
++	copy_from_user(args, buf, count);
++	if(!strncmp(args, "get_mode", 8)){
++		printk("Get current spi_mode %d\n", spi_mode);
++	} else if(!strncmp(args, "set_mode", 8)){
++		flags = strchr(args, '=');
++		if(flags != NULL){
++			spi_mode = simple_strtoul(flags + 1, 0, 0);
++			printk("Set spi_mode %d\n", spi_mode);
++		}
++	} else {
++		flags = strchr(args, '=');
++		addr = (unsigned int) simple_strtoul(args, 0, 0);
++
++		if (flags == NULL){
++			printk(" read bcm53134 register address: 0x%x ", addr);
++			if(spi_mode == 3){
++				robo_spi_read(NULL, addr, &value, 2);
++			}
++			printk("value: 0x%x\n", value);
++		} else {
++			printk(" write bcm53134 register address: 0x%x ", addr);
++			value = simple_strtoul(flags + 1, 0, 0);
++			if(spi_mode == 3){
++				robo_spi_write(NULL, addr, &value, 2);
++			}
++			printk("value: 0x%x\n", value);
++		}
++	}
++
++	return count;
++}
++
++static int bcm53134_switch_release(struct inode *inode, struct file *file)
++{
++	return 0;
++}
++
++static int bcm53134_switch_ioctl(struct inode *inode, struct file *file,
++                unsigned int cmd, unsigned long arg)
++{
++	return 0;
++}
++
++static struct file_operations bcm53134_switch_fops = {
++        .owner          = THIS_MODULE,
++        .unlocked_ioctl = bcm53134_switch_ioctl,
++        .open           = bcm53134_switch_open,
++        .read           = bcm53134_switch_read,
++        .write          = bcm53134_switch_write,
++        .release        = bcm53134_switch_release,
++};
++
++static struct cdev bcm53134_switch_cdev = {
++        .kobj           = {.name = "bcm53134_switch", },
++        .owner          = THIS_MODULE,
++};
++
++static int bcm53134_probe(struct spi_device *spi)
++{
++	int err = 0;
++	unsigned char rd = 5;
++	unsigned short int cmd, wd;
++	dev_t devno = MKDEV(BCM53134_MAJOR, 0);
++
++	printk("DNI bcm53134_switch probe...\n");
++
++	bcm_info = kzalloc(sizeof *bcm_info, GFP_KERNEL);
++	if (!bcm_info)
++	{
++		err = -ENOMEM;
++		return err;
++	}
++
++	bcm_info->command = COMCERTO_FASTSPI_IRAM_VADDR;
++	bcm_info->value = bcm_info->command + DMA_ALIGN;
++	bcm_info->data = bcm_info->command + 2*DMA_ALIGN;
++
++	if (register_chrdev_region(devno, 1, "bcm53134_switch"))
++		goto error;
++
++	cdev_init(&bcm53134_switch_cdev, &bcm53134_switch_fops);
++	if (cdev_add(&bcm53134_switch_cdev, devno, 1)) {
++ 		unregister_chrdev_region(devno, BCM53134_MINOR);
++		goto error;
++ 	}
++
++	bcm_info->spi = spi;
++	mutex_init(&bcm_info->lock);
++
++	return err;
++error:
++	kfree(bcm_info);
++	printk("Error register bcm53134_switch device\n");
++	return 1;
++}
++
++
++static int bcm53134_remove(struct spi_device *spi)
++{
++	cdev_del(&bcm53134_switch_cdev);
++	unregister_chrdev_region(MKDEV(BCM53134_MAJOR, 0), 1);
++	return 0;
++}
++
++
++static struct spi_driver bcm53134_driver = {
++	.driver = {
++		.name	= "bcm53134_switch",
++		.bus	= &spi_bus_type,
++		.owner	= THIS_MODULE,
++	},
++	.id_table	= bcm53134_ids,
++	.probe	    = bcm53134_probe,
++	.remove	    = bcm53134_remove,
++
++	/* REVISIT: many of these chips have deep power-down modes, which
++	 * should clearly be entered on suspend() to minimize power use.
++	 * And also when they're otherwise idle...
++	 */
++};
++
++
++static int __init bcm53134_init(void)
++{
++	return spi_register_driver(&bcm53134_driver);
++}
++
++
++static void __exit bcm53134_exit(void)
++{
++	spi_unregister_driver(&bcm53134_driver);
++}
++
++
++module_init(bcm53134_init);
++module_exit(bcm53134_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Mike Lavender");
++MODULE_DESCRIPTION("MTD SPI driver for bcm53134 switch chips");

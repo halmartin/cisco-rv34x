@@ -1,0 +1,8 @@
+CHANGES:
+1. Config.in: modified to source linux target Config.in.
+2. config directory readme file contains all the config directory changes.
+3. Packages changes are updated in the readme file in each package.
+4. Target directory changes are updated in the readme file in the target directory.
+5. Tools directory changes are updated in the readme file in the tools directory.
+6. Include directory changes are updated in the readme file in the include directory.
+7. Scripts directory changes are updated in the readme file in the scripts directory.

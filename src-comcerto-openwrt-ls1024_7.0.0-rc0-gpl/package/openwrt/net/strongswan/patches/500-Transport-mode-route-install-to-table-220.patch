@@ -1,0 +1,34 @@
+From 40e35f85b8a0ce17faa0797975cbdfc01bc53291 Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Wed, 23 May 2018 17:37:09 +0530
+Subject: [PATCH] Transport mode route install to table 220
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ src/libcharon/plugins/kernel_netlink/kernel_netlink_ipsec.c | 9 +++++----
+ 1 file changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/src/libcharon/plugins/kernel_netlink/kernel_netlink_ipsec.c b/src/libcharon/plugins/kernel_netlink/kernel_netlink_ipsec.c
+index aa5f58f..8655bc0 100644
+--- a/src/libcharon/plugins/kernel_netlink/kernel_netlink_ipsec.c
++++ b/src/libcharon/plugins/kernel_netlink/kernel_netlink_ipsec.c
+@@ -2408,11 +2408,12 @@ static status_t add_policy_internal(private_kernel_netlink_ipsec_t *this,
+ 	 * - the selector is not for a specific protocol/port
+ 	 * - we are in tunnel/BEET mode or install a bypass policy
+ 	 */
+-	if (policy->direction == POLICY_OUT && this->install_routes &&
+-		!policy->sel.proto && !policy->sel.dport && !policy->sel.sport)
++	if (policy->direction == POLICY_OUT && this->install_routes /*&&
++		!policy->sel.proto && !policy->sel.dport && !policy->sel.sport*/)
+ 	{
+-		if (mapping->type == POLICY_PASS ||
+-		   (mapping->type == POLICY_IPSEC && ipsec->cfg.mode != MODE_TRANSPORT))
++		/*if (mapping->type == POLICY_PASS ||
++		   (mapping->type == POLICY_IPSEC && ipsec->cfg.mode != MODE_TRANSPORT))*/
++		if (mapping->type != POLICY_IPSEC || ipsec->cfg.mode != MODE_TRANSPORT)
+ 		{
+ 			install_route(this, policy, mapping, ipsec);
+ 		}
+-- 
+1.9.1
+

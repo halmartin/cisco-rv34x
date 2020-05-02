@@ -1,0 +1,169 @@
+From a67392c43a0f2ade01536b4f2f5d5081b4391766 Mon Sep 17 00:00:00 2001
+From: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+Date: Fri, 31 Jul 2015 12:56:04 +0530
+Subject: [PATCH 12/60] SBR-19 boardinfo command enhancements
+
+Updated file to include customer comments and local review inputs
+
+Signed-off-by: Vinaykumar Masane <vinaykumar.masane@freescale.com>
+---
+ commands/boardinfo.c | 48 ++++++++++++++++++++++++------------------------
+ 1 file changed, 24 insertions(+), 24 deletions(-)
+
+diff --git a/commands/boardinfo.c b/commands/boardinfo.c
+index 508ac1e..044928b 100644
+--- a/commands/boardinfo.c
++++ b/commands/boardinfo.c
+@@ -36,17 +36,17 @@
+ #include <errno.h>
+ #include <environment.h>
+ 
+-#define sizePID 11  /* Max 11 Character Product ID */
+-#define sizeVID  3  /* Max  3 Character H/W Version */
+-#define sizeS_N 11  /* Max 11 Character Board Serial Number */
++#define SIZE_PID 11  /* Max 11 Character Product ID */
++#define SIZE_VID  3  /* Max  3 Character H/W Version */
++#define SIZE_S_N 11  /* Max 11 Character Board Serial Number */
+ 
+-#define countMAC        3 /* 3 MAC-IDs one each for LAN, WAN-1, WAN-2 */
+-#define totalMAC_OCTET  6 /* No. of MAC Octets in MAC ID */
++#define COUNT_MAC        3 /* 3 MAC-IDs one each for LAN, WAN-1, WAN-2 */
++#define TOTAL_MAC_OCTET  6 /* No. of MAC Octets in MAC ID */
+ 
+-#define keyCR 0x0D  /* Enter Key Press */
++#define KEY_CR 0x0D  /* Enter Key Press */
+ 
+-#define offsetALPHA 0x37
+-#define offsetDIGIT 0x30
++#define OFFSET_ALPHA 0x37
++#define OFFSET_DIGIT 0x30
+ 
+ typedef struct c2krv340_board_info {
+   char pid[12];             /* Product ID */
+@@ -77,10 +77,10 @@ static int command_boardinfo_update(int argc, char *argv[])
+   memset(&board_data, 0x00, sizeof(board_data));
+ 
+   printf("\nEnter PID : ");
+-  while (len < sizePID)
++  while (len < SIZE_PID)
+   {
+     c = getc();
+-    if ( isalnum(c) || c == keyCR || c == '-' )
++    if ( isalnum(c) || c == KEY_CR || c == '-' )
+     {
+       c = toupper(c);
+       putchar(c);
+@@ -90,7 +90,7 @@ static int command_boardinfo_update(int argc, char *argv[])
+       printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
+       return COMMAND_ERROR;
+     }
+-    if ( c == keyCR )
++    if ( c == KEY_CR )
+     {
+       break;
+     }
+@@ -99,10 +99,10 @@ static int command_boardinfo_update(int argc, char *argv[])
+ 
+   len = 0;
+   printf("\nEnter VID : ");
+-  while (len < sizeVID)
++  while (len < SIZE_VID)
+   {
+     c = getc();
+-    if ( isalnum(c) || c == keyCR )
++    if ( isalnum(c) || c == KEY_CR )
+     {
+       c = toupper(c);
+       putchar(c);
+@@ -112,7 +112,7 @@ static int command_boardinfo_update(int argc, char *argv[])
+       printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
+       return COMMAND_ERROR;
+     }
+-    if ( c == keyCR )
++    if ( c == KEY_CR )
+     {
+       break;
+     }
+@@ -121,10 +121,10 @@ static int command_boardinfo_update(int argc, char *argv[])
+ 
+   len = 0;
+   printf("\nEnter S/N : ");
+-  while (len < sizeS_N)
++  while (len < SIZE_S_N)
+   {
+     c = getc();
+-    if ( isalnum(c) || c == keyCR )
++    if ( isalnum(c) || c == KEY_CR )
+     {
+       c = toupper(c);
+       putchar(c);
+@@ -134,26 +134,26 @@ static int command_boardinfo_update(int argc, char *argv[])
+       printf("\n c = %c : 0x%X Input Error! %s", c, c, help_string);
+       return COMMAND_ERROR;
+     }
+-    if ( c == keyCR )
++    if ( c == KEY_CR )
+     {
+       break;
+     }
+     board_data.s_n[len++] = c;
+   }
+ 
+-  for (i = 0; i < countMAC; i++)
++  for (i = 0; i < COUNT_MAC; i++)
+   {
+     isOctetFull = empty;
+     n_mac_octet = 0;
+     printf("\nEnter %-5s MAC : ",  i == 0 ? "LAN" : (i == 1 ? "WAN-1" : "WAN-2"));
+-    while (n_mac_octet < totalMAC_OCTET)
++    while (n_mac_octet < TOTAL_MAC_OCTET)
+     {
+       c = toupper(getc());
+       putchar(c);
+       if ((isxdigit(c)) && ( isOctetFull < full ))
+       {
+         unsigned char offset = 0;
+-        offset = isupper(c) ? offsetALPHA : isdigit(c) ? offsetDIGIT : 0;
++        offset = isupper(c) ? OFFSET_ALPHA : isdigit(c) ? OFFSET_DIGIT : 0;
+         if ( isOctetFull == empty )
+         {
+           board_data.mac[i][n_mac_octet] = ((unsigned int)c - offset) << 4;
+@@ -238,7 +238,7 @@ static int command_boardinfo_show(int argc, char *argv[])
+   flush(stdout);
+ 
+   printf("\nPID  : ");
+-  for(i = 0; i < sizePID; i++)
++  for(i = 0; i < SIZE_PID; i++)
+   {
+     if (isprint(*((char *)board_data->pid + i)))
+       putchar(*((char *)board_data->pid + i));
+@@ -247,7 +247,7 @@ static int command_boardinfo_show(int argc, char *argv[])
+   }
+ 
+   printf("\nVID  : ");
+-  for(i = 0; i < sizeVID; i++)
++  for(i = 0; i < SIZE_VID; i++)
+   {
+     if (isprint(*((char *)board_data->vid + i)))
+       putchar(*((char *)board_data->vid + i));
+@@ -256,7 +256,7 @@ static int command_boardinfo_show(int argc, char *argv[])
+   }
+ 
+   printf("\nS/N  : ");
+-  for(i = 0; i < sizeS_N; i++)
++  for(i = 0; i < SIZE_S_N; i++)
+   {
+     if (isprint(*((char *)board_data->s_n + i)))
+       putchar(*((char *)board_data->s_n + i));
+@@ -265,7 +265,7 @@ static int command_boardinfo_show(int argc, char *argv[])
+   }
+   flush(stdout);
+ 
+-  for (i = 0; i < countMAC; i++)
++  for (i = 0; i < COUNT_MAC; i++)
+   {
+     memset(out_str, 0x00, sizeof(out_str));
+     sprintf(out_str,"%02X:%02X:%02X:%02X:%02X:%02X",\
+-- 
+2.7.4
+

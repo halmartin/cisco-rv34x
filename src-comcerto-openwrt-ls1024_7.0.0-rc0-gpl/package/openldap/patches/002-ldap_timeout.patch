@@ -1,0 +1,11 @@
+diff -aurN a/libraries/libldap/sbind.c b/libraries/libldap/sbind.c
+--- a/libraries/libldap/sbind.c	2016-05-17 12:38:37.423953412 +0530
++++ b/libraries/libldap/sbind.c	2016-05-17 12:43:16.507948630 +0530
+@@ -78,6 +78,7 @@
+ 		cred.bv_len = 0;
+ 	}
+ 
++	ld->ld_options.ldo_tm_net.tv_sec=1;
+ 	rc = ldap_sasl_bind( ld, dn, LDAP_SASL_SIMPLE, &cred,
+ 		NULL, NULL, &msgid );
+ 

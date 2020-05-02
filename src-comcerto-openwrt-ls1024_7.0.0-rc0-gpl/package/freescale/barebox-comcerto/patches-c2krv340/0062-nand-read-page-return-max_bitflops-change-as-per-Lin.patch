@@ -1,0 +1,50 @@
+From f4c4307a7d58d8cb31bb9bd2dc6632f1822bf9d0 Mon Sep 17 00:00:00 2001
+From: Ganesh Reddy <ganesh.reddy@nxp.com>
+Date: Wed, 21 Nov 2018 00:14:51 +0530
+Subject: [PATCH] nand read page return max_bitflops change as per Linux fix,
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+See the corresponding reference commit in Linux as below:
+=====
+commit 3f91e94f7f511de74c0d2abe08672ccdbdd1961c
+Author: Mike Dunn <mikedunn@newsguy.com>
+Date:   Wed Apr 25 12:06:09 2012 -0700
+
+    mtd: nand: read_page() returns max_bitflips
+
+    The ecc.read_page() method for nand drivers is changed to return the maximum
+    number of bitflips that were corrected on any one region covering an ecc step,
+    This patch doesn't change what the nand code returns to mtd.
+
+    This v2 includes the change to the fsl_ifc_nand driver requested by ScottÂ¹.
+
+    Â¹ http://lists.infradead.org/pipermail/linux-mtd/2012-April/040883.html
+
+    Signed-off-by: Mike Dunn <mikedunn@newsguy.com>
+    Acked-by (freescale changes): Scott Wood <scottwood@freescale.com>
+    Signed-off-by: Artem Bityutskiy <artem.bityutskiy@linux.intel.com>
+    Signed-off-by: David Woodhouse <David.Woodhouse@intel.com
+
+Signed-off-by: Ganesh Reddy <ganesh.reddy@nxp.com>
+---
+ drivers/mtd/nand/nand_base.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/mtd/nand/nand_base.c b/drivers/mtd/nand/nand_base.c
+index 79e5678..c5bf6df 100644
+--- a/drivers/mtd/nand/nand_base.c
++++ b/drivers/mtd/nand/nand_base.c
+@@ -814,7 +814,7 @@ static int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
+ 	if (oob)
+ 		ops->oobretlen = ops->ooblen - oobreadlen;
+ 
+-	if (ret)
++	if (ret < 0)
+ 		return ret;
+ 
+ 	if (mtd->ecc_stats.failed - stats.failed)
+-- 
+2.7.4
+

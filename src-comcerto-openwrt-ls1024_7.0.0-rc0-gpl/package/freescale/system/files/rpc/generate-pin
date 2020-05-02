@@ -1,0 +1,56 @@
+#!/bin/sh
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	"ssid" )
+		shift 1
+		ssid=$1
+	;;
+	"pin-timeout" )
+		shift 1
+		pin_timeout=$1
+	;;
+	"radio" )
+		shift 1
+		radio=$1
+	;;
+	* )
+		shift 1
+	;;
+	esac
+done
+
+[ -z "$pin_timeout" ] && pin_timeout=2100
+
+RADIO=""
+
+board="$(/usr/bin/board_check.sh)"
+
+if [ "$board" = "RV160W" ];then
+	[ "$radio" = "WLAN0" ] && RADIO="wl1"
+	[ "$radio" = "WLAN1" ] && RADIO="wl0"
+	[ "$radio" = "BOTH" ] && RADIO="both"
+elif [ "$board" = "RV340W" ];then
+    [ "$radio" = "WLAN1" ] && RADIO="wl0"
+    [ "$radio" = "WLAN2" ] && RADIO="wl1"
+else
+	[ "$radio" = "WLAN0" ] && RADIO="wl0"
+	[ "$radio" = "WLAN1" ] && RADIO="wl1"
+	[ "$radio" = "BOTH" ] && RADIO="both"
+fi
+
+wps_cmd="$(which wps_cli)"
+
+[ -n "$ssid" ] && {
+	wps_pingen >/dev/null
+	gen_pin="$(nvram get wps_device_pin)"
+
+	$wps_cmd wps_ap_pin $gen_pin
+	$wps_cmd wps_ap_pin_to $pin_timeout
+
+	nvram commit
+
+	wps_ap_pin "$ssid" $RADIO
+
+	echo "pin $gen_pin"
+}

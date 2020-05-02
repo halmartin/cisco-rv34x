@@ -1,0 +1,272 @@
+From b7c191652053d25c292175f54e99995bdf043dfc Mon Sep 17 00:00:00 2001
+From: Manish Tiwari <manish.tiwari@nxp.com>
+Date: Thu, 7 Jun 2018 11:12:55 +0530
+Subject: [PATCH] SBR-4545: Automatic DHCP-PD assignment to LAN clients
+
+- added code to support new option ifaceid
+- ifaceid option supports eui64,random and fixed
+
+Signed-off-by: Manish Tiwari <manish.tiwari@nxp.com>
+---
+ interface-ip.c |   73 ++++++++++++++++++++++++++++++++++++++++++++++++++++----
+ interface-ip.h |    5 ++++
+ interface.c    |   39 ++++++++++++++++++++++++++++++
+ interface.h    |   13 ++++++++++
+ 4 files changed, 126 insertions(+), 4 deletions(-)
+
+diff --git a/interface-ip.c b/interface-ip.c
+index ffb7e0d..970a347 100644
+--- a/interface-ip.c
++++ b/interface-ip.c
+@@ -1,3 +1,7 @@
++/* 07/06/2018   Manish <manish.tiwari@nxp.com>
++   Automatic DHCP-PD assignment to lan clients support
++*/
++
+ /*
+  * netifd - network interface daemon
+  * Copyright (C) 2012 Felix Fietkau <nbd@openwrt.org>
+@@ -658,6 +662,56 @@ interface_update_host_route(struct vlist_tree *tree,
+ 	}
+ }
+ 
++static void
++random_ifaceid(struct in6_addr *addr)
++{
++	static bool initialized = false;
++	struct timeval t;
++
++	if (!initialized) {
++		long int seed = 0;
++		gettimeofday(&t, NULL);
++		seed = t.tv_sec ^ t.tv_usec ^ getpid();
++		srand48(seed);
++		initialized = true;
++	}
++	addr->s6_addr32[2] = (uint32_t)mrand48();
++	addr->s6_addr32[3] = (uint32_t)mrand48();
++}
++
++static void
++eui64_ifaceid(struct interface *iface, struct in6_addr *addr)
++{
++	/* get mac address */
++	uint8_t *macaddr = iface->l3_dev.dev->settings.macaddr;
++	uint8_t *ifaceid = addr->s6_addr + 8;
++	memcpy(ifaceid,macaddr,3);
++	memcpy(ifaceid + 5,macaddr + 3, 3);
++	ifaceid[3] = 0xff;
++	ifaceid[4] = 0xfe;
++	ifaceid[0] ^= 0x02;
++}
++
++static void
++generate_ifaceid(struct interface *iface, struct in6_addr *addr)
++{
++	/* generate new iface id */
++	switch (iface->assignment_iface_id_selection) {
++	case IFID_FIXED:
++		/* fixed */
++		/* copy host part from assignment_fixed_iface_id */
++		memcpy(addr->s6_addr + 8, iface->assignment_fixed_iface_id.s6_addr + 8, 8);
++		break;
++	case IFID_RANDOM:
++		/* randomize last 64 bits */
++		random_ifaceid(addr);
++		break;
++	case IFID_EUI64:
++		/* eui64 */
++		eui64_ifaceid(iface, addr);
++		break;
++	}
++}
+ 
+ static void
+ interface_set_prefix_address(struct device_prefix_assignment *assignment,
+@@ -671,9 +725,18 @@ interface_set_prefix_address(struct device_prefix_assignment *assignment,
+ 
+ 	struct device_addr addr;
+ 	memset(&addr, 0, sizeof(addr));
+-	addr.addr.in6 = prefix->addr;
+-	addr.addr.in6.s6_addr32[1] |= htonl(assignment->assigned);
+-	addr.addr.in6.s6_addr[15] += 1;
++
++	if (IN6_IS_ADDR_UNSPECIFIED(&assignment->addr)) {
++			addr.addr.in6 = prefix->addr;
++			addr.addr.in6.s6_addr32[1] |= htonl(assignment->assigned);
++			generate_ifaceid(iface, &addr.addr.in6);
++			assignment->addr = addr.addr.in6;
++	}
++	else
++	{
++		addr.addr.in6 = assignment->addr;		
++	}
++
+ 	addr.mask = assignment->length;
+ 	addr.flags = DEVADDR_INET6;
+ 	addr.preferred_until = prefix->preferred_until;
+@@ -788,6 +851,7 @@ static void interface_update_prefix_assignments(struct device_prefix *prefix, bo
+ 	c->assigned = 1 << (64 - prefix->length);
+ 	c->length = 64;
+ 	c->name[0] = 0;
++	c->addr = in6addr_any;
+ 	list_add(&c->head, &prefix->assignments);
+ 
+ 	// Excluded prefix
+@@ -798,6 +862,7 @@ static void interface_update_prefix_assignments(struct device_prefix *prefix, bo
+ 			c->assigned = ntohl(prefix->excl_addr.s6_addr32[1]) &
+ 					((1 << (64 - prefix->length)) - 1);
+ 			c->length = prefix->excl_length;
++			c->addr = in6addr_any;
+ 			memcpy(c->name, name, sizeof(name));
+ 			list_add(&c->head, &prefix->assignments);
+ 		}
+@@ -833,7 +898,7 @@ static void interface_update_prefix_assignments(struct device_prefix *prefix, bo
+ 
+ 		c->length = iface->assignment_length;
+ 		c->assigned = iface->assignment_hint;
+-		//c->addr = in6addr_any; from latest netifd
++		c->addr = in6addr_any; //from latest netifd
+ 		c->enabled = false;
+ 		memcpy(c->name, iface->name, namelen);
+ 
+diff --git a/interface-ip.h b/interface-ip.h
+index a5612e5..d68e367 100644
+--- a/interface-ip.h
++++ b/interface-ip.h
+@@ -1,3 +1,7 @@
++/* 07/06/2018   Manish <manish.tiwari@nxp.com>
++   Automatic DHCP-PD assignment to lan clients support
++*/
++
+ /*
+  * netifd - network interface daemon
+  * Copyright (C) 2012 Felix Fietkau <nbd@openwrt.org>
+@@ -59,6 +63,7 @@ struct device_prefix_assignment {
+ 	struct list_head head;
+ 	int32_t assigned;
+ 	uint8_t length;
++	struct in6_addr addr;
+ 	bool enabled;
+ 	char name[];
+ };
+diff --git a/interface.c b/interface.c
+index 2cde9e2..37ac52e 100644
+--- a/interface.c
++++ b/interface.c
+@@ -1,3 +1,7 @@
++/* 07/06/2018   Manish <manish.tiwari@nxp.com>
++   Automatic DHCP-PD assignment to lan clients support
++*/
++
+ /*
+  * netifd - network interface daemon
+  * Copyright (C) 2012 Felix Fietkau <nbd@openwrt.org>
+@@ -43,6 +47,7 @@ enum {
+ 	IFACE_ATTR_IP6TABLE,
+ 	IFACE_ATTR_IP6CLASS,
+ 	IFACE_ATTR_DELEGATE,
++	IFACE_ATTR_IP6IFACEID,
+ 	IFACE_ATTR_FORCE_LINK,
+ 	IFACE_ATTR_MAX
+ };
+@@ -63,6 +68,7 @@ static const struct blobmsg_policy iface_attrs[IFACE_ATTR_MAX] = {
+ 	[IFACE_ATTR_IP6TABLE] = { .name = "ip6table", .type = BLOBMSG_TYPE_STRING },
+ 	[IFACE_ATTR_IP6CLASS] = { .name = "ip6class", .type = BLOBMSG_TYPE_ARRAY },
+ 	[IFACE_ATTR_DELEGATE] = { .name = "delegate", .type = BLOBMSG_TYPE_BOOL },
++	[IFACE_ATTR_IP6IFACEID] = { .name = "ip6ifaceid", .type = BLOBMSG_TYPE_STRING },
+ 	[IFACE_ATTR_FORCE_LINK] = { .name = "force_link", .type = BLOBMSG_TYPE_BOOL },
+ };
+ 
+@@ -425,6 +431,10 @@ interface_merge_assignment_data(struct interface *old, struct interface *new)
+ {
+ 	bool changed = (old->assignment_hint != new->assignment_hint ||
+ 			old->assignment_length != new->assignment_length ||
++			old->assignment_iface_id_selection != new->assignment_iface_id_selection ||
++			(old->assignment_iface_id_selection == IFID_FIXED &&
++			 memcmp(&old->assignment_fixed_iface_id, &new->assignment_fixed_iface_id,
++				sizeof(old->assignment_fixed_iface_id))) ||
+ 			list_empty(&old->assignment_classes) != list_empty(&new->assignment_classes));
+ 
+ 	struct interface_assignment_class *c;
+@@ -457,6 +467,8 @@ interface_merge_assignment_data(struct interface *old, struct interface *new)
+ 	if (changed) {
+ 		old->assignment_hint = new->assignment_hint;
+ 		old->assignment_length = new->assignment_length;
++		old->assignment_iface_id_selection = new->assignment_iface_id_selection;
++		old->assignment_fixed_iface_id = new->assignment_fixed_iface_id;
+ 		interface_refresh_assignments(true);
+ 	}
+ }
+@@ -708,6 +720,33 @@ interface_alloc(const char *name, struct blob_attr *config)
+ 	if ((cur = tb[IFACE_ATTR_IP6ASSIGN]))
+ 		iface->assignment_length = blobmsg_get_u32(cur);
+ 
++	/* defaults */
++	iface->assignment_iface_id_selection = IFID_FIXED;
++	iface->assignment_fixed_iface_id = in6addr_any;
++	iface->assignment_fixed_iface_id.s6_addr[15] = 1;
++
++	if ((cur = tb[IFACE_ATTR_IP6IFACEID])) {
++	    const char *ifaceid = blobmsg_data(cur);
++		if (!strcmp(ifaceid, "random")) {
++	     iface->assignment_iface_id_selection = IFID_RANDOM;
++		}
++		else if (!strcmp(ifaceid, "eui64")) {
++	      iface->assignment_iface_id_selection = IFID_EUI64;
++		}
++		else {
++	      	/* we expect an IPv6 address with network id zero here -> fixed iface id
++			   if we cannot parse -> revert to iface id 1 */
++			if (inet_pton(AF_INET6,ifaceid,&iface->assignment_fixed_iface_id) != 1 ||
++					iface->assignment_fixed_iface_id.s6_addr32[0] != 0 ||
++					iface->assignment_fixed_iface_id.s6_addr32[1] != 0) {
++				iface->assignment_fixed_iface_id = in6addr_any;
++				iface->assignment_fixed_iface_id.s6_addr[15] = 1;
++				netifd_log_message(L_WARNING, "Failed to parse ip6ifaceid for interface '%s', \
++							falling back to iface id 1.\n", iface->name);
++			}
++		}
++	}
++
+ 	iface->assignment_hint = -1;
+ 	if ((cur = tb[IFACE_ATTR_IP6HINT]))
+ 		iface->assignment_hint = strtol(blobmsg_get_string(cur), NULL, 16) &
+diff --git a/interface.h b/interface.h
+index 90087fc..514abb6 100644
+--- a/interface.h
++++ b/interface.h
+@@ -1,3 +1,7 @@
++/* 07/06/2018   Manish <manish.tiwari@nxp.com>
++   Automatic DHCP-PD assignment to lan clients support
++*/
++
+ /*
+  * netifd - network interface daemon
+  * Copyright (C) 2012 Felix Fietkau <nbd@openwrt.org>
+@@ -20,6 +24,13 @@
+ struct interface;
+ struct interface_proto_state;
+ 
++enum interface_id_selection_type {
++       IFID_FIXED,
++       IFID_RANDOM,
++       IFID_EUI64
++};
++
++
+ enum interface_event {
+ 	IFEV_DOWN,
+ 	IFEV_UP,
+@@ -139,6 +150,8 @@ struct interface {
+ 	unsigned int ip6table;
+ 
+ 	/* IPv6 assignment parameters */
++    enum interface_id_selection_type assignment_iface_id_selection;
++    struct in6_addr assignment_fixed_iface_id;
+ 	uint8_t assignment_length;
+ 	int32_t assignment_hint;
+ 	struct list_head assignment_classes;
+-- 
+1.7.9.5
+

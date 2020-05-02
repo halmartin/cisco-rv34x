@@ -1,0 +1,20 @@
+# 2017-04-03: Siva Prasad Meduri <siva.meduri@nxp.com>
+# Hotplug script for mcproxy package
+#!/bin/sh
+#logger -t button-hotplug Device: $DEVICE / Action: $ACTION
+#logger -t button-hotplug-igmpproxy Device: $DEVICE   $INTERFACE/ Action: $ACTION
+[ "$DEVICE" == "lo" ] && exit 0
+
+isvlan=$(echo $INTERFACE | grep vlan)
+[ -n "$isvlan" ] && exit 0
+
+
+case "$ACTION" in
+        ifup)
+         `/etc/init.d/mcproxy restart` 
+        ;;
+        ifdown)
+         `/etc/init.d/mcproxy restart`        
+        ;;
+esac
+                                                                

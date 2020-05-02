@@ -1,0 +1,218 @@
+#!/bin/sh
+
+# We are maintaining statistics of all clients in /tmp/stats/clienttosite_stats_client "final_group_name;ip;vip;tx_bytes;rx_bytes;tx_packets;rx_packets;connect_time"
+# We are maintaining statistics of server  in /tmp/stats/clienttosite_stats "final_group_name;connections;auth;local_group;wan_interface;ike_auth_type;mode"
+
+. /lib/functions.sh
+. /lib/functions/network.sh
+
+rm -f /tmp/stats/clienttosite_stats
+touch /tmp/stats/clienttosite_stats
+
+rm -f /tmp/stats/clienttosite_stats_client
+touch /tmp/stats/clienttosite_stats_client
+
+statusall_log_file=/tmp/statusall_client.log
+
+client2site(){
+	connections=0;
+	local cfg=$1
+	local group_name profile auth wan_interface mode ike_auth_type local_group
+	config_get group_name "$cfg" group_name wan_proto
+	local final_group_name=`echo $group_name | cut -d '_' -f 2-`
+
+	config_get client_type "$cfg" client_type
+
+	if [ "$client_type" = 'ezvpn' ]
+	then
+		auth="-"
+		config_get mode "$cfg" mode 
+
+		config_get_bool split_tunnel "$cfg"  split_tunnel 0
+		if [ "$split_tunnel" -eq 0 ]
+		then
+			local_group="0.0.0.0/0"
+		else
+			config_get local_group "$cfg" split_tunnel_network
+		fi
+	else
+		config_get profile "$cfg" profile
+		config_get auth "$profile" p2_prop
+		mode="-"
+
+		local local_sec_group local_sec_ip range local_finalsubnet split_tunnel split_tunnel_network
+		config_get local_subnet "$cfg" local_subnet
+		config_get local_subnetmask "$cfg" local_subnetmask
+		config_get local_sec_group "$cfg" local_sec_group
+		config_get local_sec_ip "$cfg" local_sec_ip
+		config_get_bool split_tunnel "$cfg"  split_tunnel 0
+		if [ "$split_tunnel" -eq 0 ]
+		then
+			if [ "$local_sec_group" = 'ip' ]
+			then
+				local_group=$local_sec_ip
+			elif [ "$local_sec_group" = 'any' ]
+			then
+				local_group="0.0.0.0/0"
+			else
+				local_finalsubnet="$local_subnet/$local_subnetmask"
+				local_group=$local_finalsubnet
+			fi
+		else
+			config_get split_tunnel_network "$cfg" split_tunnel_network
+			if [ "$local_sec_group" = 'ip' ]
+			then
+				local_finalsubnet=$local_sec_ip
+			elif [ "$local_sec_group" = 'subnet' ]
+			then
+				local_finalsubnet="$local_subnet/$local_subnetmask"
+			fi
+			if [ -n "$local_finalsubnet" ]
+			then
+				local_group="$local_finalsubnet $split_tunnel_network"
+			else
+				local_group="$split_tunnel_network"
+			fi
+		 fi
+	fi
+
+	config_get wan_interface "$cfg" wan_interface
+	network_get_mwanproto_cached wan_proto "$wan_interface"
+	config_get ike_auth_type "$cfg" ike_auth_type
+
+	config_get enable "$cfg" enable
+
+	if [ $enable == "0" ]
+	then
+		wan_interface="$(echo $wan_interface|tr '[a-z]' '[A-Z]')"
+		echo "$final_group_name;$connections;$auth;$local_group;$wan_interface;$ike_auth_type;$mode" >> /tmp/stats/clienttosite_stats
+		return 0;
+	fi
+
+	tun_up=`(ipsec status $group_name) | grep $group_name`
+
+	if [ -n "$tun_up" ]
+	then
+		ipsec statusall $group_name | grep -e "$group_name.*:" | grep -A10 "ESTABLISHED" > $statusall_log_file
+		linenum=1; 
+#		ip=0.0.0.0
+#		vip=0.0.0.0
+#		tx_packets=0
+#		tx_bytes=0
+#		rx_packets=0
+#		rx_bytes=0
+#		connect_time=0
+		line_number_connect_time=0;line_number_spi=0;line_number_ipsec_sa=0;line_number_virtual_ip=0;
+
+		while read line
+		do
+			connect_time_var=$(echo $line | grep "ESTABLISHED")
+			ipsec_sa_time_var=$(echo $line | grep "rekeying in\|rekeying disabled")
+			SPI_var=$(echo $line | grep "ESP.*SPIs:")
+			virtual_ip_var=$(echo $line | grep "===")
+			if [ -n "$connect_time_var" ]
+			then
+				line_connect_time=$linenum
+				line_string_connect_time=$line
+				set $line_string_connect_time
+				if [ "$4" == "months" ]
+				then
+					connect_time=`expr $3 \* 2592000`
+				elif [ "$4" == "days" ]
+				then
+					connect_time=`expr $3 \* 86400`
+				elif [ "$4" == "hours" ]
+				then
+					connect_time=`expr $3 \* 3600`
+				elif [ "$4" == "minutes" ]
+				then
+					 connect_time=`expr $3 \* 60`
+				else
+					connect_time=$3
+				fi
+				ip=`echo $connect_time_var|cut -d ']' -f 3|cut -d '[' -f 1|cut -d '.' -f 4-`
+
+			elif [ -n "$SPI_var" ]
+			then
+				line_number_spi=$linenum
+				line_str_spi=$line
+				is_NATT=$(echo $line_str_spi | grep "ESP in UDP")
+				set $line_str_spi
+				if [ -n "$is_NATT" ]; then
+					in_spi=$(echo "$10" | cut -f 1 -d '_')
+					out_spi=$(echo "$11" | cut -f 1 -d '_')
+				else
+					in_spi=$(echo "$8" | cut -f 1 -d '_')
+					out_spi=$(echo "$9" | cut -f 1 -d '_')
+				fi
+
+				case $wan_proto in
+				l2tp|pptp)
+					rx_packets=`setkey -D | grep -A9 $in_spi | grep "allocated" | xargs | awk -F ' ' '{print $2}'`
+					rx_bytes=`setkey -D | grep -A9 $in_spi | grep "bytes" | xargs | awk -F ' ' '{print $2}' | awk -F'(' '{print $1}'`
+					tx_packets=`setkey -D | grep -A9 $out_spi| grep "allocated" | xargs | awk -F ' ' '{print $2}'`
+					tx_bytes=`setkey -D | grep -A9 $out_spi| grep "bytes" | xargs | awk -F ' ' '{print $2}' | awk -F'(' '{print $1}'`
+				;;
+				*)
+					cmm -c set stat enable ipsec
+					in_spi=$(echo $in_spi | sed 's/^0*//')
+					out_spi=$(echo $out_spi | sed 's/^0*//')
+
+					rx_packets=`cmm -c show stat ipsec query|grep -A4 $in_spi|grep "Packets Processed"|cut -d ":" -f 2 | xargs`
+					rx_bytes=`cmm -c show stat ipsec query|grep -A4 $in_spi|grep "Bytes Processed"|cut -d ":" -f 2 | xargs`
+					tx_packets=`cmm -c show stat ipsec query|grep -A4 $out_spi|grep "Packets Processed"|cut -d ":" -f 2 | xargs`
+					tx_bytes=`cmm -c show stat ipsec query|grep -A4 $out_spi|grep "Bytes Processed"|cut -d ":" -f 2 | xargs`
+				;;
+				esac
+			elif [ -n "$ipsec_sa_time_var" ]
+			then
+				line_number_ipsec_sa=$linenum
+				line_str_ipsec=$line
+			elif [ -n "$virtual_ip_var" ]
+			then
+				line_number_virtual_ip=$linenum
+				line_str_virtual_ip=$line
+				oIFS="$IFS";IFS="="
+				set $line_str_virtual_ip
+				IFS="$oIFS"
+				vip_temp_var=$(echo "$4" | cut -f 1 -d '/' | sed -e 's/^[ \t]*//'  )
+				vip=$vip_temp_var
+			fi
+
+			if [ "$line_number_virtual_ip" -gt  "$line_number_ipsec_sa" ] && { [ "$line_number_ipsec_sa" -gt "$line_number_spi" ] && [ "$line_number_spi" -gt "$line_connect_time" ]; }
+			then
+				connections=$((connections+1));
+				line_number_connect_time=0;line_number_spi=0;line_number_ipsec_sa=0;line_number_virtual_ip=0;
+				connect_time_var=""
+				ipsec_sa_time_var=""
+				SPI_var=""
+				virtual_ip_var=""
+
+				echo "$final_group_name;$ip;$vip;$tx_bytes;$rx_bytes;$tx_packets;$rx_packets;$connect_time" >> /tmp/stats/clienttosite_stats_client
+			fi
+
+			linenum=$((linenum+1));
+
+		done < $statusall_log_file
+		rm -f $statusall_log_file
+	fi
+
+	wan_interface="$(echo $wan_interface|tr '[a-z]' '[A-Z]')"
+	echo "$final_group_name;$connections;$auth;$local_group;$wan_interface;$ike_auth_type;$mode" >> /tmp/stats/clienttosite_stats
+#	if [ $ipsec_sa_var == 0 ]
+#	then
+#		echo "$final_group_name;0.0.0.0;0.0.0.0;0;0;0;0;0" >> /tmp/stats/clienttosite_stats_client
+#	fi
+}
+
+start() {
+
+	config_load strongswan
+
+	args=""
+	config_foreach client2site client2site
+}
+stop() {
+	return 0;
+}
+start

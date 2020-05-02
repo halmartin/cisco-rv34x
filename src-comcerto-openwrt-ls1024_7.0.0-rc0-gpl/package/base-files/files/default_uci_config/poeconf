@@ -1,0 +1,6 @@
+
+config poeglobal 'poeglobal_0'
+	option legacy 'disable'
+	option trap 'disable'
+	option trap_threshold '95'
+

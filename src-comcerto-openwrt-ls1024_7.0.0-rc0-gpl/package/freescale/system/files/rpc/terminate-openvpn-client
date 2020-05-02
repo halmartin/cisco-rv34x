@@ -1,0 +1,20 @@
+#!/bin/sh
+
+#logger -t openvpn Input arguments $0 $@
+STATUS_FILE="/tmp/ovpn-disconnect"
+
+sessionid=`echo $@ | awk '{for (I=1;I<=NF;I=I+2) if ($I == "session-id") {print $(I+1)};}'`
+
+logger -t openvpn Disconnecting client $sessionid
+{ echo "client-kill $sessionid"; sleep 0.5s; } | telnet 127.0.0.1 4567 >$STATUS_FILE
+
+err=`grep -i "error" $STATUS_FILE`
+
+if [ -n "$err" ]
+then
+	err=`cat $STATUS_FILE`
+	logger -t openvpn local0.info "$err"
+	exit 1
+else
+	exit 0
+fi

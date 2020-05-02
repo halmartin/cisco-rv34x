@@ -1,0 +1,26 @@
+From 74317da7eacaddb73988087a933639af232f2d67 Mon Sep 17 00:00:00 2001
+From: nageshkoneti <b47094@freescale.com>
+Date: Wed, 30 May 2018 15:09:42 +0530
+Subject: [PATCH 2/2] Changed LOG level to info Signed-off-by: nageshkoneti
+ <b47094@freescale.com>
+
+---
+ pam_radius_auth.c |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/pam_radius_auth.c b/src/pam_radius_auth.c
+index f022604..de5ae79 100644
+--- a/src/pam_radius_auth.c
++++ b/src/pam_radius_auth.c
+@@ -705,7 +705,7 @@ static int initialize(radius_conf_t *conf, int accounting)
+ 
+ 	/* the first time around, read the configuration file */
+ 	if ((fserver = fopen (conf_file, "r")) == (FILE*)NULL) {
+-		_pam_log(LOG_ERR, "Could not open configuration file %s: %s\n",
++		_pam_log(LOG_INFO, "Could not open configuration file %s: %s\n",
+ 			conf_file, strerror(errno));
+ 		return PAM_ABORT;
+ 	}
+-- 
+1.7.9.5
+

@@ -1,0 +1,132 @@
+# System Exit Error Codes
+
+#"Success"
+ER_SUCCESS=0
+
+#"Invalid Arguments"
+ER_INVALID_ARGS=2
+
+#"Update Failed - Insufficient memory space for download, please reboot the device and try again"
+ER_INSUFFICIENT_MEMORY=10
+
+#"Update Failed - img file not found"
+ER_IMG_FILE_NOT_FOUND=11
+
+#"Update Failed - Invalid image content"
+ER_INVALID_IMAGE_CONTENT=12
+
+#"Update Failed - md5sum check Failed"
+ER_MD5SUM_CHECK_FAILED=13
+
+#"Update Failed - Firmware version is not higher than current firmware version"
+ER_FRM_VER_NOT_HIGHER_THAN_CURRENT=14
+
+#"Update Failed - Image flashing error"
+ER_IMG_FLASH_ERR=15
+
+#"Firmware upgrade is in progress"
+ER_FRM_UPGRD_IN_PROGRESS=16
+
+#"USB driver upgrade is already in progress"
+ER_USB_DRV_UPGRD_IN_PROGRESS=17
+
+#"Signature upgrade is already in progress"
+ER_SINGNATURE_UPGRD_IN_PROGRESS=18
+
+#"Download Failed"
+ER_DOWNLOAD_FAILED=19
+
+#"USB device is not mounted."
+ER_USB_DEVICE_NOT_MOUNTED=20
+
+#"Current firmware version is already latest"
+ER_FRM_VER_CURRENT_IS_LATEST=21
+
+#"Current USB driver version is already latest"
+ER_USBDRV_VER_CURRENT_IS_LATEST=22
+
+#"Current Signature version is already latest"
+ER_SIG_VER_CURRENT_IS_LATEST=23
+
+#"Invalid License, Signature download failed"
+ER_INVALID_LICENSE_SIG_DOWNLOAD_FAIL=24
+
+
+geterrorstr()
+{
+    local errorcode=$1
+    local errstr=""
+
+    case $errorcode in
+        $ER_SUCCESS)
+	    errstr="Success"
+        ;;                                
+        $ER_INVALID_ARGS)
+	    errstr="Invalid Arguments"
+        ;;                                
+        $ER_INSUFFICIENT_MEMORY)
+	    errstr="Update Failed - Insufficient memory space for download, please reboot the device and try again"
+        ;;                                
+        $ER_IMG_FILE_NOT_FOUND)
+            errstr="Update Failed - img file not found"
+        ;;
+        $ER_INVALID_IMAGE_CONTENT)
+            errstr="Update Failed - Invalid image content"
+        ;;
+        $ER_MD5SUM_CHECK_FAILED)
+            errstr="Update Failed - md5sum check Failed"
+        ;;
+        $ER_FRM_VER_NOT_HIGHER_THAN_CURRENT)
+            errstr="Update Failed - Firmware version is not higher than current firmware version"
+        ;;
+        $ER_IMG_FLASH_ERR)
+            errstr="Update Failed - Image flashing error"
+        ;;
+        $ER_FRM_UPGRD_IN_PROGRESS)
+            errstr="Firmware upgrade is already in progress"
+        ;;
+        $ER_USB_DRV_UPGRD_IN_PROGRESS)
+            errstr="USB driver upgrade is already in progress"
+        ;;
+        $ER_SINGNATURE_UPGRD_IN_PROGRESS)
+            errstr="Signature upgrade is already in progress"
+        ;;
+        $ER_DOWNLOAD_FAILED)
+            errstr="Download Failed"
+        ;;
+        $ER_USB_DEVICE_NOT_MOUNTED)
+            errstr="USB device is not mounted."
+        ;;
+        $ER_FRM_VER_CURRENT_IS_LATEST)
+            errstr="Current firmware version is already latest"
+        ;;
+        $ER_USBDRV_VER_CURRENT_IS_LATEST)
+            errstr="Current USB driver version is already latest"
+        ;;
+        $ER_SIG_VER_CURRENT_IS_LATEST)
+            errstr="Current Signature version is already latest"
+        ;;
+        $ER_INVALID_LICENSE_SIG_DOWNLOAD_FAIL)
+            errstr="Invalid License, Signature download failed"
+        ;;
+        *)
+            #errstr="Update Failed"
+        ;;                                                           
+        esac
+    echo $errstr
+}
+
+printErrorCodes()
+{
+
+    for i in `seq 0 100`
+    do
+       vart=`geterrorstr $i`
+       if [ -n "$vart" ]; then
+         echo "code $i errstr "$vart""
+       fi
+    done
+}
+
+#printErrorCodes
+

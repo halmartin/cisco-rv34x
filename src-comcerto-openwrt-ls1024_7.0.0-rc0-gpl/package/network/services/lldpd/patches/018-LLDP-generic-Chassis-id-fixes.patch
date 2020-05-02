@@ -1,0 +1,75 @@
+diff -ruaN a/src/interfaces.c b/src/interfaces.c
+--- a/src/interfaces.c	2017-11-22 12:32:35.515068252 +0530
++++ b/src/interfaces.c	2017-11-22 12:32:59.103068249 +0530
+@@ -789,8 +789,6 @@
+ 		    (u_int8_t*)((u_int8_t*)ifa->ifa_addr +
+ 			offsetof(struct sockaddr_ll, sll_addr)),
+ 		    sizeof(hardware->h_lladdr));
+-		if(strcmp(ifa->ifa_name,"eth2")==0)
+-			memcpy(gLAN_MAC,hardware->h_lladdr,sizeof(hardware->h_lladdr));
+ 
+ 		/* Fill information about port */
+ 		iface_port_name_desc(hardware);
+diff -ruaN a/src/lldp.c b/src/lldp.c
+--- a/src/lldp.c	2017-11-22 12:50:58.131068120 +0530
++++ b/src/lldp.c	2017-11-22 12:52:10.943068112 +0530
+@@ -696,14 +696,14 @@
+ 		pclose(fp);
+ 		if(strcmp(var,"1") !=0)
+ 		{
+-                  LLOG_WARNX("LLDP disabled on port %d\n", (portno+1));
++                  //LLOG_WARNX("LLDP disabled on port %d\n", (portno+1));
+ 		  goto malformed;
+         	}
+ 	
+ 	}
+ 	if(strcmp(hardware->h_ifname, "eth0")==0)
+ 	{
+-		LLOG_INFO("LLDP packet received on Wan port %s \n", hardware->h_ifname);
++		//LLOG_INFO("LLDP packet received on Wan port %s \n", hardware->h_ifname);
+      	}
+ 	
+ 	length = s;
+diff -ruaN a/src/lldpd.c b/src/lldpd.c
+--- a/src/lldpd.c	2017-11-22 12:26:17.979068297 +0530
++++ b/src/lldpd.c	2017-11-22 12:31:56.223068257 +0530
+@@ -123,6 +123,29 @@
+ 	exit(1);
+ }
+ 
++/** Function to get the Chassis ID **/
++int get_Chassis_id(const char *ifname)
++{
++    struct ifreq ifr;
++    int fd;
++    int rv;                     
++
++    	/* determine the local MAC address */
++    	strcpy(ifr.ifr_name, ifname);
++    	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
++    	if (fd < 0)
++	{
++        	rv = fd;
++	}
++    	else 
++	{
++        	rv = ioctl(fd, SIOCGIFHWADDR, &ifr);
++        	if (rv >= 0)            
++            	memcpy(gLAN_MAC, ifr.ifr_hwaddr.sa_data, IFHWADDRLEN);
++    	}
++    return rv;
++}
++
+ /** Function to get the Product ID **/
+ int get_PID_RV34X(char* PID)
+ {
+@@ -1110,7 +1133,8 @@
+ 	/** Fetch the Product ID **/
+         get_PID_RV34X(PID_RV34X);
+         LLOG_INFO("PID of board is %s \n",PID_RV34X);
+-
++	
++	get_Chassis_id("eth2");
+ 	saved_argv = argv;
+ 
+ 	/*

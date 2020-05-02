@@ -1,0 +1,44 @@
+#!/bin/sh
+
+. /lib/functions.sh
+. /lib/netifd/netifd-proto.sh
+
+#logger -t testing "Called pppoe-script $0 with args:$@"
+
+#assuming interface name is arg 1
+#Eg: proto_init_update ppoe-wan16p 1 1
+proto_init_update $1 1 1
+
+#a valid IPv6 address is for arg 2. and prefix for arg 3
+#Eg: proto_add_ipv6_address 6667::386c:56f4:af5:c3fb 64
+proto_add_ipv6_address $2 $3
+
+dns_data=$(rdisc6 -1 $1 | grep "Recursive DNS server" | sed  s/\ //g | cut -d: -f 2-)
+
+section=`echo $1 | awk -F '-' '{printf $2}'`
+ip6_enable=`uci get network.$section.ipv6`
+if [ "$ip6_enable" = "1" ];then 
+	#section=`echo "$section" | tr '[p]' '6'`
+	network_get_wanip ipaddr $section
+	proto_add_ipv4_address "$ipaddr" 32
+	network_get_gateway gateway $section
+	proto_add_ipv4_route 0.0.0.0 0 "$gateway"
+	#proto_add_ipv4_address "192.168.90.10" "32"
+fi                   
+
+[ -n $dns_data ] && {
+	logger -t network "Adding RDNS server:$dns_data to interface:$1"
+	network_get_dnsserver dnsserver $section
+	for i in $dnsserver
+	do
+		[ "$i" != "$dns_data" ] && {
+			proto_add_dns_server $i
+		}
+	done
+	proto_add_dns_server $dns_data
+}
+
+#now send_update function should be called with interface section.
+proto_send_update $section
+
+exit 0

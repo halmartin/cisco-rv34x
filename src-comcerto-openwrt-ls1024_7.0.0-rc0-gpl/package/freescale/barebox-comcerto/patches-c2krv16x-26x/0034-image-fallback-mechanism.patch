@@ -1,0 +1,393 @@
+# 2018-01-04: Subramanyam <reddi.m@nxp.com>
+# Changes are for Image fall-back mechanism, if UBIFS errors occured.
+diff -rauN a/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot b/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot
+--- a/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot	2017-12-26 15:02:15.920213988 +0530
++++ b/arch/arm/boards/comcerto-rv16x-26x/env/bin/boot	2018-01-04 16:40:11.581717250 +0530
+@@ -1,5 +1,9 @@
+ #!/bin/sh
+ 
++# modified by reddi.m@nxp.com for image fall-back mechanism
++# introduced new variable boot_fail_check_max and boot_check command will update this variable 
++# when UBIFS error occured
++
+ . /env/config
+ 
+ gpio_set_value $GPIO_LED_DIAG $OFF 
+@@ -56,6 +60,9 @@
+ echo "done"
+ echo "active = $active inactive = $inactive"
+ 
++# calling boot_check with default value of boot_fail_check_max=5
++boot_check -c $boot_fail_check_max
++
+ if [ x$1 = xactive ]; then
+   echo "Booting active $active ..."
+   if [ x$active = ximage1 ]; then
+@@ -246,6 +253,8 @@
+   bootargs="$bootargs bareboxver_rv16x_26x="$bootver_rv16x_26x""
+ fi
+ 
++bootargs="$bootargs boot_fail_flag="$boot_fail_value""
++
+ #POWER_LED ON
+ gpio_direction_output $GPIO_LED_POWER $ON
+ gpio_set_value $GPIO_LED_POWER $ON
+@@ -253,7 +262,59 @@
+ echo "booting kernel of type $kernelimage_type from $kdev"
+ 
+ if [ x$kernelimage_type = xuimage ]; then
+-	bootm $kdev
++
++#UBIFS PATCH CHANGES FROM BB2
++	if [ x$boot_fail_value = x1 ]; then
++		echo "active image is corrupted. Switching to inactive image"
++		if [ x$kernel = xkernel1 ]; then
++      			kernel=kernel2
++      			rootfs=$ROOTFS_PART2
++    		elif [ x$kernel = xkernel2 ]; then
++      			kernel=kernel1
++      			rootfs=$ROOTFS_PART1
++    		fi
++    		kdev="/dev/nand0.${kernel}.bb"
++    		echo "Checking $kdev ..."
++		imageenv -c $kdev
++    		if [ $? = 0 ]; then
++      			imageenv -s "$rootfs"
++      			echo "Booting kernel $kdev with Rootfs part : $rootfs"
++      			bootm $kdev
++    		else
++      			echo "bootm Failed to boot $kdev Too!"
++      			echo "Please execute Recovery Procedure!"
++      			erase /dev/nand0.env
++			timeout -ps 5
++			      if [ $? != 0 ]; then
++				timeout -1s 5
++				if [ $? != 0 ]; then
++					timeout -2s 5
++					if [ $? != 0 ]; then
++						timeout -3s 5
++						if [ $? != 0 ]; then
++						        timeout -4s 5
++						        if [ $? != 0 ]; then
++						                timeout -5s 5
++						                if [ $? != 0 ]; then
++						                        timeout -6s 5
++						                        if [ $? != 0 ]; then
++						                                gpio_direction_output $GPIO_LED_DIAG $ON
++						                                gpio_set_value $GPIO_LED_DIAG $ON
++						                                login
++						                                . /env/bin/_update_help
++						                                exit 0
++						                        fi
++						                fi
++						        fi
++						fi
++					fi
++				fi
++			      fi
++		fi
++		exit 1
++	fi
++
++  bootm $kdev
+   if [ $? != 0 ]; then
+     echo "bootm Failed to boot $kdev "
+     if [ x$kernel = xkernel1 ]; then
+diff -rauN a/arch/arm/boards/comcerto-rv16x-26x/env/config b/arch/arm/boards/comcerto-rv16x-26x/env/config
+--- a/arch/arm/boards/comcerto-rv16x-26x/env/config	2017-12-26 15:01:19.623509118 +0530
++++ b/arch/arm/boards/comcerto-rv16x-26x/env/config	2018-01-04 16:42:56.756425162 +0530
+@@ -1,5 +1,8 @@
+ #!/bin/sh
+ 
++# modified by reddi.m@nxp.com for image fall-back mechanism
++# introduced new variable boot_fail_check_max and new spi particion boot_check
++
+ # use 'dhcp' to do dhcp in barebox and in kernel
+ # use 'none' if you want to skip kernel ip autoconfiguration
+ ip=none
+@@ -43,6 +46,9 @@
+ active=image1
+ inactive=image2
+ 
++# Boot fail count Maximum value
++boot_fail_check_max=5
++
+ # Rootfs Partition Identifiers
+ ROOTFS_PART1=4
+ ROOTFS_PART2=7
+@@ -54,7 +60,7 @@
+ OFF=0
+ 
+ fast_spi_device="spi1.0"
+-fast_spi_parts="128k(uloader)ro,512k(barebox)ro,128k(env),128k(boardinfo)ro,64k(md5sum1),64k(md5sum2),64k(nvram)"
++fast_spi_parts="128k(uloader)ro,512k(barebox)ro,128k(env),128k(boardinfo)ro,64k(md5sum1),64k(md5sum2),64k(nvram),64k(boot_check)"
+ 
+ nand_device="comcertonand"
+ nand_parts="1M(barebox),1M(bareboxfact)ro,1M(env),8M(kernel1),140M(rootfs1),1M(reserved_1),8M(kernel2),140M(rootfs2),1M(reserved_2),20M(configcert),12M(config_bkup),48M(webrootdb),8M(license),50M(packages),48M(findIT),24M(reserved)"
+diff -rauN a/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig b/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig
+--- a/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	2017-12-26 15:14:46.441610962 +0530
++++ b/arch/arm/configs/comcerto-2k_rv16x-26x_defconfig	2017-12-26 15:19:31.533180480 +0530
+@@ -201,6 +201,7 @@
+ CONFIG_CMD_COPY=y
+ CONFIG_CMD_BOARDINFO=y
+ CONFIG_CMD_IMAGEENV=y
++CONFIG_CMD_BOOTCHECK=y
+ 
+ #
+ # console
+diff -rauN a/arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig b/arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig
+--- a/arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig	2017-12-26 15:31:34.258229426 +0530
++++ b/arch/arm/configs/comcerto-2k_rv16x-26x_uloader_defconfig	2017-12-26 15:19:31.533180480 +0530
+@@ -190,6 +190,7 @@
+ # CONFIG_CMD_COPY is not set
+ # CONFIG_CMD_BOARDINFO is not set
+ # CONFIG_CMD_IMAGEENV is not set
++# CONFIG_CMD_BOOTCHECK is not set
+ 
+ #
+ # console
+diff -rauN a/commands/boot_check.c b/commands/boot_check.c
+--- a/commands/boot_check.c	1970-01-01 05:30:00.000000000 +0530
++++ b/commands/boot_check.c	2017-12-26 15:32:54.815238050 +0530
+@@ -0,0 +1,192 @@
++/*
++ * Copyright (c) 
++ * Freescale Semicondunctors Pvt. Ltd.
++ *
++ * See file CREDITS for list of people who contributed to this
++ * project.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2
++ * as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
++ */
++
++#include <image.h>
++#include <common.h>
++#include <command.h>
++#include <fs.h>
++#include <fcntl.h>
++#include <linux/ctype.h>
++#include <linux/stat.h>
++#include <getopt.h>
++#include <errno.h>
++#include <xfuncs.h>
++#include <malloc.h>
++#include <environment.h>
++
++char *file_boot_check = "/dev/spi1.boot_check";
++const char boot_fail_string_1[] = "1";
++const char boot_fail_string_0[] = "0";
++
++static int command_boot_check(int argc, char *argv[])
++{
++	int ret,n_written;
++	int fd;
++	unsigned char boot_count,boot_count_fail_max;
++	char *buf_boorargs;
++	unsigned long start = 0, size = ~0;
++	struct stat s;
++
++  	if (stat(file_boot_check, &s)) {
++  		printf("stat %s: %s\n", file_boot_check, errno_str());
++		return COMMAND_ERROR;
++        }
++        size = s.st_size;
++
++	if (argc < 3){
++		printf("Insufficient argument/s!\n");
++		return COMMAND_ERROR_USAGE;
++        }
++
++	fd = open(file_boot_check, O_RDONLY);
++	if (fd < 0) {
++		printf("could not open the file %s\n",file_boot_check);
++		return COMMAND_ERROR;
++	}
++
++	boot_count_fail_max=simple_strtoul(argv[2], NULL, 0);
++	if(boot_count_fail_max < 3)
++		boot_count_fail_max = 3;
++	if(boot_count_fail_max > 254)
++		boot_count_fail_max = 254;
++
++	ret = read(fd, &boot_count, 1);
++	if(ret < 0)
++	{
++		printf("Reading from the file %s failed\n",file_boot_check);
++		close(fd);
++		return COMMAND_ERROR;
++	}
++
++	close(fd);
++
++	if(boot_count==0 || boot_count==0xFF)
++	{
++		boot_count=1;
++		setenv("boot_fail_value",boot_fail_string_0);
++	}
++	else if((boot_count > 0) && (boot_count < boot_count_fail_max))
++	{
++		boot_count++;
++		setenv("boot_fail_value",boot_fail_string_0);
++
++	}
++	else
++	{
++		boot_count=1;
++		setenv("boot_fail_value",boot_fail_string_1);
++	}
++	
++	fd = open(file_boot_check, O_WRONLY);
++	if (fd < 0) {
++		printf("could not open the file %s\n",file_boot_check);
++		return COMMAND_ERROR;
++	}
++
++	if (erase(fd, size, start)) {
++		printf("erase of file %s failed\n",file_boot_check);
++		close(fd);
++		return COMMAND_ERROR;
++	}
++
++	if ( (n_written = write(fd, &boot_count, 1)) < 0 )
++	{
++		printf("write of file %s failed\n",file_boot_check);
++		close(fd);
++		return COMMAND_ERROR;
++	}
++
++	close(fd);
++	return COMMAND_SUCCESS;
++}
++
++static int command_boot_check_set(int argc, char *argv[])
++{
++	int ret, n_written;
++	int fd;
++	unsigned char boot_count;
++	unsigned long start = 0, size = ~0;
++	struct stat s;
++
++	if (argc < 3){
++		printf("Insufficient argument/s!\n");
++		return COMMAND_ERROR_USAGE;
++	}
++
++        if (stat(file_boot_check, &s)) {
++                printf("stat %s: %s\n", file_boot_check, errno_str());
++                return COMMAND_ERROR;
++        }
++        size = s.st_size;
++
++	fd = open(file_boot_check, O_WRONLY);
++	if (fd < 0) {
++		printf("could not open the file %s\n",file_boot_check);
++		return COMMAND_ERROR;
++	}
++
++	boot_count=simple_strtoul(argv[2], NULL, 0);
++	if(boot_count < 1)
++		boot_count = 1;
++	if(boot_count > 255)
++		boot_count = 255;
++
++	if (erase(fd, size, start)) {
++		printf("erase of file %s failed\n",file_boot_check);
++		close(fd);
++		return COMMAND_ERROR;
++	}
++
++	if ( (n_written = write(fd, &boot_count, 1)) < 0 )
++	{
++		printf("write of file %s failed\n",file_boot_check);
++		close(fd);
++		return COMMAND_ERROR;
++	}
++
++	close(fd);
++	return COMMAND_SUCCESS;
++}
++
++
++static const __maybe_unused char cmd_boot_check_help[] =
++"Usage: boot_check [OPTIONS]\n"
++"\n"
++"options:\n"
++" -c  <value>  (range 3 to 255)  Check and Update boot count value\n"
++" -s  <value>  (range 1 to 255)  Set boot count value\n"
++;
++
++static int do_boot_check(struct command *cmdtp, int argc, char *argv[])
++{
++	if (strcmp(argv[1], "-c") == 0)
++		return command_boot_check(argc, argv);
++  	else if (strcmp(argv[1], "-s") == 0)
++		return command_boot_check_set(argc, argv);
++	else
++		return COMMAND_ERROR_USAGE;
++}
++
++BAREBOX_CMD_START(boot_check)
++	.cmd	= do_boot_check,
++	.usage	= "Check and update / Set boot count value",
++	BAREBOX_CMD_HELP(cmd_boot_check_help)
++BAREBOX_CMD_END
+diff -rauN a/commands/Kconfig b/commands/Kconfig
+--- a/commands/Kconfig	2017-12-26 15:27:54.583478966 +0530
++++ b/commands/Kconfig	2018-01-04 17:51:05.150187028 +0530
+@@ -189,6 +189,14 @@
+ 	help
+ 	  This command reads and sets active<>inactive ID for board boot-up.
+ 
++config CMD_BOOTCHECK
++        bool
++        depends on MACH_COMCERTO_C2K_RV16X_26X
++        prompt "RV16X_26X boot fail count check"
++        default n
++        help
++          This command is used to check boot fail count and update.
++
+ endmenu
+ 
+ menu "console                       "
+diff -rauN a/commands/Makefile b/commands/Makefile
+--- a/commands/Makefile	2017-12-26 15:29:15.420491095 +0530
++++ b/commands/Makefile	2017-12-26 15:30:14.553231472 +0530
+@@ -71,5 +71,6 @@
+ obj-$(CONFIG_CMD_AR8328)	+= atheros.o
+ obj-$(CONFIG_CMD_COPY)		+= copy.o
+ obj-$(CONFIG_CMD_SATA)		+= sata.o
+-obj-$(CONFIG_CMD_BOARDINFO)  += boardinfo.o
+-obj-$(CONFIG_CMD_IMAGEENV)  += imageenv.o
++obj-$(CONFIG_CMD_BOARDINFO)  	+= boardinfo.o
++obj-$(CONFIG_CMD_IMAGEENV)  	+= imageenv.o
++obj-$(CONFIG_CMD_BOOTCHECK)     += boot_check.o
+diff -rauN a/commands/version_rv16x_26x.c b/commands/version_rv16x_26x.c
+--- a/commands/version_rv16x_26x.c	2018-01-04 18:14:41.654546572 +0530
++++ b/commands/version_rv16x_26x.c	2018-01-04 18:13:22.382351626 +0530
+@@ -19,12 +19,14 @@
+  * along with this program; if not, write to the Free Software
+  * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
+  * MA 02111-1307 USA
++ *
++ * Version increased by reddi.m@nxp.com on 1/4/2018 for image fall-back mechanism
+  */
+ 
+ #include <common.h>
+ #include <command.h>
+ 
+-const char version_string_rv16x_26x[] = "1.0.00.00";
++const char version_string_rv16x_26x[] = "1.0.00.01";
+ 
+ static int do_version_rv16x_26x(struct command *cmdtp, int argc, char *argv[])
+ {

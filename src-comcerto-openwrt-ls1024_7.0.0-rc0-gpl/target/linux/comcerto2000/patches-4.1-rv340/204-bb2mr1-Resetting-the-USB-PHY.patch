@@ -1,0 +1,38 @@
+From a5cd6a233ba18fd2431c616928885023e7b80556 Mon Sep 17 00:00:00 2001
+From: skc <chaitanya.sakinam@nxp.com>
+Date: Fri, 29 Jun 2018 11:00:32 +0530
+Subject: [PATCH] SBR-4622 Resetting the USB during reboot
+
+Signed-off-by: skc <chaitanya.sakinam@nxp.com>
+---
+ drivers/usb/dwc_otg/dwc_otg_hcd_linux.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c b/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c
+index f42dae4..c9e9221 100644
+--- a/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c
++++ b/drivers/usb/dwc_otg/dwc_otg_hcd_linux.c
+@@ -56,6 +56,7 @@
+ #else
+ #include <linux/usb/hcd.h>
+ #endif
++#include <mach/reset.h>
+ 
+ #include "dwc_otg_hcd_if.h"
+ #include "dwc_otg_dbg.h"
+@@ -564,6 +565,12 @@ int hcd_start(struct usb_hcd *hcd)
+ 	dwc_otg_hcd_t *dwc_otg_hcd = hcd_to_dwc_otg_hcd(hcd);
+ 	struct usb_bus *bus;
+ 
++	/* APPLYING THE RESET TO USB2 PHY */
++	c2000_block_reset(COMPONENT_USB0_PHY, 1);
++
++	/* Releasing the (POR) Power on Reset to usb2 nano phy block */
++	c2000_block_reset(COMPONENT_USB0_PHY, 0);
++
+ 	DWC_DEBUGPL(DBG_HCD, "DWC OTG HCD START\n");
+ 	bus = hcd_to_bus(hcd);
+ 
+-- 
+1.9.1
+

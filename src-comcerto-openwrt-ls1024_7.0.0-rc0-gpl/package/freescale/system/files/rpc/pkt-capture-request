@@ -1,0 +1,129 @@
+#!/bin/sh
+
+#We keep building the file as we go ahead in executing this file.
+CAPTURE_FILE_NAME="/tmp/download/"
+CAPTURE_TIMEOUT=3600 #In seconds. 60sec*60min 3600
+
+interface_name=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "interface-name") {print $(I+1)};}'`
+job_id=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "job-id") {print $(I+1)};}'`
+action=`echo $@ | awk '{for (I=1;I<=NF;I++) if ($I == "action") {print $(I+1)};}'`
+
+[ -n "$interface_name" ] || {
+	[ "$action" != "clear" ] && {
+		echo "error-code 1 error-message \"interface-name is must\""
+		exit 1
+	}
+}
+
+[ -n "$action" ] || {
+	echo "error-code 2 error-message \"action is must\""
+	exit 2 
+}
+
+pid=`uci get systeminfo.sysinfo.pid`
+current_time=`date +%Y%m%d`
+pid=`echo $pid | cut -f 1 -d -`
+
+case $interface_name in
+	WAN1)
+		ifname=eth2
+	;;
+	WAN2)
+		ifname=eth0
+	;;
+	LAN)
+		ifname=eth3
+	;;
+esac
+
+case $action in 
+	start)
+		CAPTURE_FILE_NAME="$CAPTURE_FILE_NAME""$interface_name"_"$pid"_"$current_time".pcap
+		CAPTURE_COMMAND="tcpdump -c 66666 -G $CAPTURE_TIMEOUT -W 1 -w $CAPTURE_FILE_NAME -ni $ifname"
+
+		ps_job_id=`ps | grep "tcpdump" | grep "$interface_name" | sed s/"^ *"//g | cut -f 1 -d ' '`
+		if [ "$ps_job_id" == "" ]
+		then
+			# Ensure we remove all the capture files on DUT before we start a new capture irrespective of the interface on which we gonna start
+			rm -rf /tmp/download/*.pcap
+			#Prepare Output
+			start-stop-daemon -S -b -x pkt-capture-wrapper -- $CAPTURE_FILE_NAME $ifname
+			#$CAPTURE_COMMAND & >/dev/null 2>&1
+			errcode=$?
+			#child_pid=$!	#PID of the most recent background command.
+			errmsg=""
+			sleep 2
+			child_pid=`ps | grep "tcpdump" | grep "$interface_name" | sed s/"^ *"//g | cut -f 1 -d ' '`
+
+			if [ "$errcode" != "0" ]; then
+				errmsg="could not spawn packet capture process"
+				logger -t system -p local0.info "Packet capture could not start...!"
+			else
+				echo "job-id \"$child_pid\""
+				logger -t system -p local0.info "Packet capture Started on interface $interface_name process id:$child_pid"
+			fi
+		else
+			#There is one process, that is already in progress.
+			errcode=3
+			errmsg="packet capture is in progress with pid:$ps_job_id"
+			logger -t system -p local0.info "Packet capture already started capturing on interface $interface_name with pid:$ps_job_id"
+		fi
+	;;
+	stop)
+		#if [ -n "$job_id" ]
+		#then
+			#1.First find out the tcpdump process that is been in execution
+			ps_job_id=`ps | grep "tcpdump" | grep "$interface_name" | sed s/"^ *"//g | cut -f 1 -d ' '`
+			#if [ "$job_id" == "$ps_job_id" ]
+			#then
+				kill -15 $ps_job_id	#Send proper termination signal
+				if [ "$?" != "0" ]
+				then
+					errcode=4
+					errmsg="Could not stop packet capture, command failed"
+					logger -t system -p local0.info "Packet capture could not be stopped on interface $interface_name with pid:$ps_job_id"
+				else
+					errcode=0
+					#echo "job-id $job_id"
+					logger -t system -p local0.info "Packet capture successfully stopped on interface $interface_name"
+				fi
+			#else
+			#	errcode=5
+			#	errmsg="job_id:$job_id to stop is not found in the process table for the given interface $interface_name"
+			#	logger -t system -p local0.info "job id:$job_id to stop packet capture on interface $interface_name is not found in process table."
+			#fi
+		#else
+		#	errcode=6
+		#	errmsg="job id is must for stop action"
+		#	logger -t system -p local0.info "job id is must to stop packet capture on interface $interface_name."
+		#fi
+	;;
+	clear)
+		ps_job_id=`ps | grep "tcpdump" | grep "WAN1\|WAN2\|LAN" | sed s/"^ *"//g | cut -f 1 -d ' '`
+		if [ "$ps_job_id" == "" ]
+		then
+			#Just remove all the pcap files in /tmp/
+			rm -rf /tmp/download/*.pcap
+			errcode=0
+			logger -t system -p local0.info "Cleared all the pcap files on router."
+		else
+			#Already a packet capture in progress.
+			errcode=8
+			errmsg="Already a packet capture is in progress with pid:$ps_job_id, so can't clear its file."
+			logger -t system -p local0.info "Already a packet capture is in progress with job-id:$ps_job_id, so can't clear the .pcap file."
+		fi
+	;;
+	*)
+		errcode=7
+		errmsg="Invalid action:$action"
+		logger -t system -p local0.info "Invalid action:$action"
+	;;
+esac
+
+
+if [ "$errcode" -ne 0 ];then
+	echo "error-message \"$errmsg\""
+	exit $errcode
+else
+	exit 0
+fi

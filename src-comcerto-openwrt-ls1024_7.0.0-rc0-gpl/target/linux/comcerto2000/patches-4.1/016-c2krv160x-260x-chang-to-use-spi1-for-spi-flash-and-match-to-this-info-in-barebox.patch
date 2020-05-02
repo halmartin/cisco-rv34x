@@ -1,0 +1,52 @@
+# 2017-02-06: harry.lin <harry.lin@deltaww.com>
+# Change to use spi1 for spi flash and match to this info in barebox.
+--- linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c.org	2017-01-18 10:56:54.238377703 +0800
++++ linux-4.1.8/arch/arm/mach-comcerto/board-c2krv16x-26x.c	2017-01-18 11:00:22.568377747 +0800
+@@ -370,7 +370,7 @@
+ 		.modalias = "s25fl256s0",
+ 		.chip_select = 0,
+ 		.max_speed_hz = 4*1000*1000,
+-		.bus_num = 0,
++		.bus_num = 1,
+ 		.irq = -1,
+ 		.mode = SPI_MODE_3,
+ 		.platform_data = &spi_pdata,
+@@ -381,7 +381,7 @@
+ 		.modalias = "bcm53134_switch",
+ 		.chip_select = 0,
+ 		.max_speed_hz = 1*1000*1000,
+-		.bus_num = 1,
++		.bus_num = 0,
+ 		.irq = -1,
+ 		.mode = SPI_MODE_3,
+ 		.platform_data = &spi_pdata,
+@@ -441,10 +441,10 @@
+ #if defined(CONFIG_SPI_MSPD_HIGH_SPEED)
+ struct spi_controller_pdata fast_spi_pdata = {
+ 	.use_dma = 0,
+-	.num_chipselects = 2,
+-	.bus_num = 1,
+-	.max_freq = 60 * 1000 * 1000,
+-	.clk_name = "DUS",
++	.num_chipselects = 4,
++	.bus_num = 0,
++	.max_freq = 20 * 1000 * 1000,
++	.clk_name = "spi_i2c",
+ };
+ #endif
+ 
+@@ -477,10 +477,10 @@
+ #if defined(CONFIG_SPI_MSPD_LOW_SPEED)
+ struct spi_controller_pdata ls_spi_pdata = {
+ 	.use_dma = 0,
+-	.num_chipselects = 4,
+-	.bus_num = 0,
+-	.max_freq = 20 * 1000 * 1000,
+-	.clk_name = "spi_i2c",
++	.num_chipselects = 2,
++	.bus_num = 1,
++	.max_freq = 60 * 1000 * 1000,
++	.clk_name = "DUS",
+ };
+ #endif
+ 

@@ -1,0 +1,115 @@
+Index: nginx-1.12.2/auto/cc/name
+===================================================================
+--- nginx-1.12.2.orig/auto/cc/name	2018-01-18 12:09:05.184921999 +0800
++++ nginx-1.12.2/auto/cc/name	2018-01-18 12:09:05.176921999 +0800
+@@ -7,7 +7,7 @@
+ 
+     ngx_feature="C compiler"
+     ngx_feature_name=
+-    ngx_feature_run=yes
++    ngx_feature_run=
+     ngx_feature_incs=
+     ngx_feature_path=
+     ngx_feature_libs=
+Index: nginx-1.12.2/auto/cc/conf
+===================================================================
+--- nginx-1.12.2.orig/auto/cc/conf	2018-01-18 12:09:05.184921999 +0800
++++ nginx-1.12.2/auto/cc/conf	2018-01-18 12:09:05.180921999 +0800
+@@ -200,7 +200,7 @@
+     else
+         ngx_feature="C99 variadic macros"
+         ngx_feature_name="NGX_HAVE_C99_VARIADIC_MACROS"
+-        ngx_feature_run=yes
++        ngx_feature_run=no
+         ngx_feature_incs="#include <stdio.h>
+ #define var(dummy, ...)  sprintf(__VA_ARGS__)"
+         ngx_feature_path=
+@@ -214,7 +214,7 @@
+ 
+     ngx_feature="gcc variadic macros"
+     ngx_feature_name="NGX_HAVE_GCC_VARIADIC_MACROS"
+-    ngx_feature_run=yes
++    ngx_feature_run=no
+     ngx_feature_incs="#include <stdio.h>
+ #define var(dummy, args...)  sprintf(args)"
+     ngx_feature_path=
+Index: nginx-1.12.2/auto/os/linux
+===================================================================
+--- nginx-1.12.2.orig/auto/os/linux	2018-01-18 12:09:05.184921999 +0800
++++ nginx-1.12.2/auto/os/linux	2018-01-18 12:09:05.180921999 +0800
+@@ -36,7 +36,7 @@
+ 
+ ngx_feature="epoll"
+ ngx_feature_name="NGX_HAVE_EPOLL"
+-ngx_feature_run=yes
++ngx_feature_run=no
+ ngx_feature_incs="#include <sys/epoll.h>"
+ ngx_feature_path=
+ ngx_feature_libs=
+@@ -110,7 +110,7 @@
+ CC_AUX_FLAGS="$cc_aux_flags -D_GNU_SOURCE"
+ ngx_feature="sendfile()"
+ ngx_feature_name="NGX_HAVE_SENDFILE"
+-ngx_feature_run=yes
++ngx_feature_run=no
+ ngx_feature_incs="#include <sys/sendfile.h>
+                   #include <errno.h>"
+ ngx_feature_path=
+@@ -131,7 +131,7 @@
+ CC_AUX_FLAGS="$cc_aux_flags -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64"
+ ngx_feature="sendfile64()"
+ ngx_feature_name="NGX_HAVE_SENDFILE64"
+-ngx_feature_run=yes
++ngx_feature_run=no
+ ngx_feature_incs="#include <sys/sendfile.h>
+                   #include <errno.h>"
+ ngx_feature_path=
+@@ -149,7 +149,7 @@
+ 
+ ngx_feature="prctl(PR_SET_DUMPABLE)"
+ ngx_feature_name="NGX_HAVE_PR_SET_DUMPABLE"
+-ngx_feature_run=yes
++ngx_feature_run=no
+ ngx_feature_incs="#include <sys/prctl.h>"
+ ngx_feature_path=
+ ngx_feature_libs=
+Index: nginx-1.12.2/auto/unix
+===================================================================
+--- nginx-1.12.2.orig/auto/unix	2018-01-18 12:09:05.184921999 +0800
++++ nginx-1.12.2/auto/unix	2018-01-18 12:09:05.180921999 +0800
+@@ -788,7 +788,7 @@
+ 
+ ngx_feature="mmap(MAP_ANON|MAP_SHARED)"
+ ngx_feature_name="NGX_HAVE_MAP_ANON"
+-ngx_feature_run=yes
++ngx_feature_run=no
+ ngx_feature_incs="#include <sys/mman.h>"
+ ngx_feature_path=
+ ngx_feature_libs=
+@@ -801,7 +801,7 @@
+ 
+ ngx_feature='mmap("/dev/zero", MAP_SHARED)'
+ ngx_feature_name="NGX_HAVE_MAP_DEVZERO"
+-ngx_feature_run=yes
++ngx_feature_run=no
+ ngx_feature_incs="#include <sys/mman.h>
+                   #include <sys/stat.h>
+                   #include <fcntl.h>"
+@@ -816,7 +816,7 @@
+ 
+ ngx_feature="System V shared memory"
+ ngx_feature_name="NGX_HAVE_SYSVSHM"
+-ngx_feature_run=yes
++ngx_feature_run=no
+ ngx_feature_incs="#include <sys/ipc.h>
+                   #include <sys/shm.h>"
+ ngx_feature_path=
+@@ -830,7 +830,7 @@
+ 
+ ngx_feature="POSIX semaphores"
+ ngx_feature_name="NGX_HAVE_POSIX_SEM"
+-ngx_feature_run=yes
++ngx_feature_run=no
+ ngx_feature_incs="#include <semaphore.h>"
+ ngx_feature_path=
+ ngx_feature_libs=

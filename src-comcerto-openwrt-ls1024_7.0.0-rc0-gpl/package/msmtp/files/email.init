@@ -1,0 +1,79 @@
+#!/bin/sh /etc/rc.common
+
+#/usr/lib/webif/functions.sh
+#/lib/config/uci.sh
+
+CONFIG_FILE=/tmp/etc/config/email
+MUTT_CONFIG_FILE=/tmp/.muttrc
+
+START=99
+
+start() {
+	`uci commit email`
+	smtp_server=`uci show email | grep smtp_server`
+	if [ -n "$smtp_server" ];then
+		# Email is configured
+		reload
+	else
+		# Email is not configured
+		exit 0
+	fi
+}
+
+reload () {
+	rm -f $MUTT_CONFIG_FILE
+	rm -f /root/.muttrc
+	touch $MUTT_CONFIG_FILE
+	# get all the information
+	smtp_server=`uci get email.email_settings.smtp_server`
+	smtp_port=`uci get email.email_settings.smtp_port`
+	encryption=`uci get email.email_settings.smtp_encryption`
+	auth=`uci get email.email_settings.smtp_auth`
+	username=`uci get email.email_settings.username`
+	password=`uci get email.email_settings.password`
+	to_email_address1=`uci get email.email_settings.to_email_address1`
+	second_email=`uci get email.email_settings.to_email_address2` >/dev/null 2>&1
+	if [ -n "$second_email" ];then
+		to_email_address2="$second_email"
+	fi
+	from_email_address1=`uci get email.email_settings.from_email_address1`
+
+	# update the /etc/msmtprc with above configuration
+	echo "" > /etc/msmtprc
+	echo "account	default">/etc/msmtprc
+	echo "host	$smtp_server">>/etc/msmtprc
+	echo "port	$smtp_port">>/etc/msmtprc
+	echo "timeout	60">>/etc/msmtprc
+	if [ "$encryption" = 0 ]; then
+		echo "tls	off">>/etc/msmtprc
+		echo "tls_starttls	off">>/etc/msmtprc
+		echo "tls_certcheck	off">>/etc/msmtprc
+	else
+		echo "tls	on">>/etc/msmtprc
+		echo "tls_starttls	on">>/etc/msmtprc
+		echo "tls_certcheck	off">>/etc/msmtprc
+	fi
+	if [ "$auth" = 0 ];then
+		echo "auth	off">>/etc/msmtprc
+	elif [ "$auth" = 1 ];then
+		echo "auth	plain">>/etc/msmtprc
+	elif [ "$auth" = 2 ];then
+		echo "auth      cram-md5">>/etc/msmtprc
+	elif [ "$auth" = 3 ];then
+		echo "auth      login">>/etc/msmtprc
+	fi
+	echo "user	$username">>/etc/msmtprc
+	echo "password	$password">>/etc/msmtprc
+	echo "from	$from_email_address1">>/etc/msmtprc
+
+	#update /tmp/.muttrc for mail attachments
+	echo "set sendmail=/usr/bin/msmtp" >>$MUTT_CONFIG_FILE
+	echo "set use_from=yes" >>$MUTT_CONFIG_FILE
+	echo "set realname=$username" >>$MUTT_CONFIG_FILE
+	echo "set from=$from_email_address1" >>$MUTT_CONFIG_FILE
+	echo "set envelope_from=yes" >>$MUTT_CONFIG_FILE
+	echo "set copy=no" >>$MUTT_CONFIG_FILE
+
+	ln -s $MUTT_CONFIG_FILE /root
+
+}

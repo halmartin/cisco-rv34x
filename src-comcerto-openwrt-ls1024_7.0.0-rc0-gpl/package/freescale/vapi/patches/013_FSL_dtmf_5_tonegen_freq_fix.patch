@@ -1,0 +1,33 @@
+diff -Naur vapi-2.18.4_a/VAPI/common/vapi/helper_itf.c vapi-2.18.4_b/VAPI/common/vapi/helper_itf.c
+--- vapi-2.18.4_a/VAPI/common/vapi/helper_itf.c	2014-05-12 10:53:56.000000000 +0100
++++ vapi-2.18.4_b/VAPI/common/vapi/helper_itf.c	2016-04-29 16:40:07.120654104 +0100
+@@ -457,7 +457,7 @@
+ *	eDTMFTONE_2     697, 100, 1336, 100, 80, 80
+ *	eDTMFTONE_3     697, 100, 1477, 100, 80, 80
+ *	eDTMFTONE_4     770, 100, 1209, 100, 80, 80
+-*	eDTMFTONE_5     770, 100, 1306, 100, 80, 80
++*	eDTMFTONE_5     770, 100, 1336, 100, 80, 80
+ *	eDTMFTONE_6     770, 100, 1477, 100, 80, 80
+ *	eDTMFTONE_7     852, 100, 1209, 100, 80, 80
+ *	eDTMFTONE_8     852, 100, 1336, 100, 80, 80
+diff -Naur vapi-2.18.4_a/VAPI/common/vapi/vapi_defaults.c vapi-2.18.4_b/VAPI/common/vapi/vapi_defaults.c
+--- vapi-2.18.4_a/VAPI/common/vapi/vapi_defaults.c	2014-05-12 10:53:56.000000000 +0100
++++ vapi-2.18.4_b/VAPI/common/vapi/vapi_defaults.c	2016-04-29 16:40:41.760655908 +0100
+@@ -23,7 +23,7 @@
+ 	{0, 0, 0, 0, 0, 0, 1, {{697, 100, 1336, 100, 80, 80}}}, /* 2 */
+ 	{0, 0, 0, 0, 0, 0, 1, {{697, 100, 1477, 100, 80, 80}}}, /* 3 */
+ 	{0, 0, 0, 0, 0, 0, 1, {{770, 100, 1209, 100, 80, 80}}}, /* 4 */
+-	{0, 0, 0, 0, 0, 0, 1, {{770, 100, 1306, 100, 80, 80}}}, /* 5 */
++	{0, 0, 0, 0, 0, 0, 1, {{770, 100, 1336, 100, 80, 80}}}, /* 5 */
+ 	{0, 0, 0, 0, 0, 0, 1, {{770, 100, 1477, 100, 80, 80}}}, /* 6 */
+ 	{0, 0, 0, 0, 0, 0, 1, {{852, 100, 1209, 100, 80, 80}}}, /* 7 */
+ 	{0, 0, 0, 0, 0, 0, 1, {{852, 100, 1336, 100, 80, 80}}}, /* 8 */
+@@ -268,7 +268,7 @@
+ 	if (status != SUCCESS)
+ 		goto out;
+ 
+-	status = VAPI_SetTone(eDTMFTONE_5, eDualTone, 0, 6, 770, 100, 1306, 100, 80, 80);
++	status = VAPI_SetTone(eDTMFTONE_5, eDualTone, 0, 6, 770, 100, 1336, 100, 80, 80);
+ 	if (status != SUCCESS)
+ 		goto out;
+ 
